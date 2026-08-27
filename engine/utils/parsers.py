@@ -217,9 +217,10 @@ BUILD_QUEUE_ROW_REGEX = re.compile(
 )
 
 BUILDING_ROW_REGEX = re.compile(
-    r'<tr[^>]*id=["\']main_buildrow_([a-z_]+)["\'][^>]*>(.*?)</tr>',
+    r'(?:<tr|<div)[^>]*id=["\']main_buildrow_([a-z_]+)["\'][^>]*>(.*?)(?:</tr>|<div\s+class=["\']mobileBlock\s+buildingBlock["\']|<div\s+id=["\']main_buildrow_|$)',
     re.DOTALL | re.IGNORECASE,
 )
+
 
 BUILD_COST_REGEX = {
     "wood": re.compile(r'(?:cost_wood|icon header wood)[^>]*>.*?([\d\.]+)', re.IGNORECASE | re.DOTALL),
@@ -273,6 +274,7 @@ def parse_building_levels(html: str, game_data: Optional[Dict[str, Any]] = None)
 def parse_build_queue(html: str) -> List[Dict[str, Any]]:
     """
     Extrai as ordens ativas na fila de construção do Edifício Principal.
+    Suporta tanto a versão Desktop (#buildqueue table) como a versão Mobile (#buildqueue_wrap div.queueItem).
     Retorna uma lista de dicionários com: order_id, building_raw, target_level, timer_str, cancel_url.
     """
     queue: List[Dict[str, Any]] = []
@@ -282,12 +284,52 @@ def parse_build_queue(html: str) -> List[Dict[str, Any]]:
     # Normaliza entidades HTML comuns em URLs
     normalized_html = html.replace("&amp;", "&")
 
-    # Busca a tabela ou seção do buildqueue
+    # 1. Suporte à Versão Mobile: div.queueItem com data-order="(\d+)"
+    mobile_items = list(re.finditer(
+        r'<div[^>]*class=["\'][^"\']*queueItem[^"\']*["\'][^>]*data-order=["\'](\d+)["\'][^>]*>(.*?)'
+        r'(?=<div[^>]*class=["\'][^"\']*queueItem|<div\s+id=["\']building_wrapper|<script|$)',
+        normalized_html,
+        re.DOTALL | re.IGNORECASE,
+    ))
+
+    if mobile_items:
+        for m in mobile_items:
+            order_id = m.group(1)
+            content = m.group(2)
+
+            name_match = re.search(
+                r'([A-Za-zÀ-ÿ\s]+)\s*(?:\(Nível\s+(\d+)\)|\(Level\s+(\d+)\)|\(nível\s+(\d+)\))',
+                content,
+                re.IGNORECASE,
+            )
+            building_raw = name_match.group(1).strip() if name_match else "Desconhecido"
+            target_level = 0
+            if name_match:
+                lvl_val = next((g for g in name_match.groups()[1:] if g is not None), "0")
+                try:
+                    target_level = int(lvl_val)
+                except ValueError:
+                    target_level = 0
+
+            timer_match = re.search(r'<span[^>]*class=["\']timer["\'][^>]*>([\d:]+)</span>', content, re.IGNORECASE)
+            timer_str = timer_match.group(1) if timer_match else None
+
+            queue.append({
+                "order_id": order_id,
+                "building_raw": building_raw,
+                "target_level": target_level,
+                "timer_str": timer_str,
+                "cancel_url": f"/game.php?screen=main&action=cancel_order&id={order_id}",
+            })
+        return queue
+
+    # 2. Suporte à Versão Desktop: Busca a tabela ou seção do buildqueue
     queue_section_match = re.search(
         r'<table[^>]*id=["\']buildqueue["\'][^>]*>(.*?)</table>',
         normalized_html,
         re.DOTALL | re.IGNORECASE,
     )
+
     search_scope = queue_section_match.group(1) if queue_section_match else normalized_html
 
     # Localiza todas as ordens com cancel link
@@ -343,16 +385,55 @@ def parse_build_queue(html: str) -> List[Dict[str, Any]]:
 def parse_building_upgrades(html: str) -> Dict[str, Dict[str, Any]]:
     """
     Extrai os custos de melhoria, requisitos e estado de elegibilidade de cada edifício.
+    Prioriza a extração do JSON nativo 'BuildingMain.buildings' (mobile e desktop).
+    Caso ausente, efetua fallback resiliente via blocos HTML.
     """
     upgrades: Dict[str, Dict[str, Any]] = {}
     if not html:
         return upgrades
 
+    # 1. Prioridade: Extração do JSON nativo 'BuildingMain.buildings = {...};'
+    m_bm = re.search(r'BuildingMain\.buildings\s*=\s*(\{.+?\});', html, re.DOTALL)
+    if m_bm:
+        try:
+            bm_data = json.loads(m_bm.group(1))
+            if isinstance(bm_data, dict):
+                for b_name, b_info in bm_data.items():
+                    if isinstance(b_info, dict):
+                        b_canon = b_name.lower().strip()
+                        current_lvl = int(b_info.get("level", 0))
+                        target_lvl = int(b_info.get("level_next", current_lvl + 1))
+                        wood = int(b_info.get("wood", 0))
+                        stone = int(b_info.get("stone", 0))
+                        iron = int(b_info.get("iron", 0))
+                        pop = int(b_info.get("pop", 0))
+                        can_build = bool(b_info.get("can_build", False))
+                        error_reason = b_info.get("error")
+
+                        upgrades[b_canon] = {
+                            "building": b_canon,
+                            "current_level": current_lvl,
+                            "target_level": target_lvl,
+                            "wood": wood,
+                            "stone": stone,
+                            "iron": iron,
+                            "pop": pop,
+                            "can_build": can_build,
+                            "error_reason": error_reason,
+                            "build_url": None,
+                        }
+                if upgrades:
+                    return upgrades
+        except Exception:
+            pass
+
+    # 2. Fallback via HTML regex
     normalized_html = html.replace("&amp;", "&")
 
     for match in BUILDING_ROW_REGEX.finditer(normalized_html):
         b_name = match.group(1).lower()
         content = match.group(2)
+
 
         # Custos
         def parse_cost(cost_type: str) -> int:
@@ -389,14 +470,15 @@ def parse_building_upgrades(html: str) -> Dict[str, Dict[str, Any]]:
             except ValueError:
                 current_lvl = 0
 
-        # Link de construção
+        # Link ou botão de construção
         build_link_match = re.search(
-            r'<a[^>]*href=["\']([^"\']*[?&]action=build[^"\']*)["\'][^>]*>',
+            r'<a[^>]*href=["\']([^"\']*[?&]action=(?:upgrade_building|build)[^"\']*)["\'][^>]*>|<button[^>]*class=["\'][^"\']*btn-build[^"\']*["\'][^>]*>',
             content,
             re.IGNORECASE,
         )
         can_build = build_link_match is not None
-        build_url = build_link_match.group(1) if build_link_match else None
+        build_url = build_link_match.group(1) if (build_link_match and build_link_match.group(1)) else None
+
 
         # Identificação de motivo de indisponibilidade
         error_reason = None

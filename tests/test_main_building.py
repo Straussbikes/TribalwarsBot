@@ -338,8 +338,9 @@ class TestMainBuildingAsyncActions(unittest.IsolatedAsyncioTestCase):
             screen="main",
             village_id=None,
             extra_params={
-                "action": "build",
+                "action": "upgrade_building",
                 "id": "wood",
+                "type": "main",
                 "force": "1",
                 "h": "csrf_token_abc",
             },
@@ -353,12 +354,14 @@ class TestMainBuildingAsyncActions(unittest.IsolatedAsyncioTestCase):
             screen="main",
             village_id=None,
             extra_params={
-                "action": "cancel",
+                "action": "cancel_order",
                 "id": "54321",
+                "type": "main",
                 "h": "csrf_token_abc",
             },
             apply_jitter=True,
         )
+
 
         # 3. Teste de get_state
         state = await manager.get_state(account)
@@ -369,6 +372,42 @@ class TestMainBuildingAsyncActions(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.queue[0].building, "wood")
         self.assertEqual(state.queue[0].target_level, 9)
 
+    def test_parse_mobile_building_and_queue(self):
+        """Valida que páginas mobile com BuildingMain.buildings e div.queueItem são lidas corretamente."""
+        mobile_html = """
+        <div id="buildqueue_wrap">
+            <div class="queueItem" data-order="146213">
+                <div style="padding-left: 70px">
+                    <div>Bosque (nível 2)</div>
+                    <span class="timer">0:01:05</span>
+                </div>
+            </div>
+        </div>
+        <script>
+            BuildingMain.buildings = {
+                "wood": {"id": "wood", "level": "1", "level_next": 2, "wood": 63, "stone": 77, "iron": 50, "pop": 1, "can_build": true, "error": null},
+                "stone": {"id": "stone", "level": "1", "level_next": 2, "wood": 83, "stone": 63, "iron": 50, "pop": 1, "can_build": true, "error": null}
+            };
+        </script>
+        """
+        from engine.utils.parsers import parse_build_queue, parse_building_upgrades
+        queue = parse_build_queue(mobile_html)
+        self.assertEqual(len(queue), 1)
+        self.assertEqual(queue[0]["order_id"], "146213")
+        self.assertEqual(queue[0]["building_raw"], "Bosque")
+        self.assertEqual(queue[0]["target_level"], 2)
+        self.assertEqual(queue[0]["timer_str"], "0:01:05")
+
+        upgrades = parse_building_upgrades(mobile_html)
+        self.assertIn("wood", upgrades)
+        self.assertEqual(upgrades["wood"]["current_level"], 1)
+        self.assertEqual(upgrades["wood"]["target_level"], 2)
+        self.assertEqual(upgrades["wood"]["wood"], 63)
+        self.assertEqual(upgrades["wood"]["stone"], 77)
+        self.assertEqual(upgrades["wood"]["iron"], 50)
+        self.assertTrue(upgrades["wood"]["can_build"])
+
 
 if __name__ == "__main__":
     unittest.main()
+

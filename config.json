@@ -1,6 +1,6 @@
 {
   "world": "pt117",
-  "sid": "0%3A8002fc4a57351e61d3772826cc13823781724ff02fef9c1bfb65de9d1ec369556ad1ec55d968b0fa27181712b9ccd9201800b56bd9bc9e66d63966e4102d386a",
+  "sid": "0%3A20aa544c8c3d5739c80e695bcb12fe19b27c236cb0545478cad8fcc8bb8c320a6517dbb9c6a58ba6d0096c7a3276ba85e3bfda38f2a4d22d9dd8f3c5f72e3739",
   "building": {
     "_comentario": "Templates disponíveis: 'rush_resources' (recursos), 'balanced' (balanceado), 'military_rush' (tropas/cavalaria) ou 'custom'",
     "template": "rush_resources",

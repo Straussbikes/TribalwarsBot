@@ -427,10 +427,11 @@ class MainBuildingManager:
         )
 
         try:
-            # Envia via GET padrão do link mobile com CSRF token
+            # Envia via upgrade_building padrão mobile/desktop com CSRF token
             extra_params = {
-                "action": "build",
+                "action": "upgrade_building",
                 "id": b_canon,
+                "type": "main",
                 "force": "1" if force else "0",
                 "h": account.csrf_token or "",
             }
@@ -464,8 +465,9 @@ class MainBuildingManager:
         logger.info(f"[{account.world}] A cancelar ordem de construção ID '{order_id}'")
         try:
             extra_params = {
-                "action": "cancel",
+                "action": "cancel_order",
                 "id": order_id,
+                "type": "main",
                 "h": account.csrf_token or "",
             }
             await account.get_screen(
@@ -474,6 +476,7 @@ class MainBuildingManager:
                 extra_params=extra_params,
                 apply_jitter=True,
             )
+
             logger.info(f"[{account.world}] Ordem '{order_id}' cancelada com sucesso.")
             return True
         except Exception as e:
@@ -509,6 +512,7 @@ class MainBuildingManager:
             return None
 
         virt_levels = state.virtual_levels
+        any_unreached = False
 
         for building_entry, target_lvl in plan:
             b = self.normalize_building_id(building_entry)
@@ -516,6 +520,8 @@ class MainBuildingManager:
 
             # Se ainda não atingiu o nível da meta
             if current_virt < target_lvl:
+                any_unreached = True
+
                 # 1. Verifica se os pré-requisitos tecnológicos estão satisfeitos
                 if not self.are_requirements_met(b, virt_levels):
                     continue
@@ -549,8 +555,12 @@ class MainBuildingManager:
                     # Se não temos a linha no HTML (ex.: ainda não desbloqueado)
                     continue
 
-        logger.info(f"Todas as {len(plan)} metas do plano de construção ativo foram alcançadas!")
+        if not any_unreached:
+            logger.info(f"Todas as {len(plan)} metas do plano de construção ativo foram alcançadas!")
+        else:
+            logger.debug("Existem metas pendentes no plano que ainda aguardam pré-requisitos.")
         return None
+
 
     async def run_auto_build_cycle(
         self,
