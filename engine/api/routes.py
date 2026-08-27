@@ -42,8 +42,23 @@ class SwitchProfileRequest(BaseModel):
     profile_id: str
 
 
+class AddFarmTargetRequest(BaseModel):
+    x: int
+    y: int
+
+
 class ProxyTestRequest(BaseModel):
     proxy: str
+
+
+class QuickAttackRequest(BaseModel):
+    target_x: int
+    target_y: int
+    spear: int = 0
+    sword: int = 0
+    axe: int = 0
+    spy: int = 0
+    light: int = 0
 
 
 def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> APIRouter:
@@ -148,6 +163,39 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         """Valida a conectividade de um proxy residencial/dedicado."""
         res = await context.test_proxy(payload.proxy)
         return res
+
+    @router.get("/map/data")
+    async def get_map(
+        x: Optional[int] = None,
+        y: Optional[int] = None,
+        radius: float = 15.0,
+        refresh: bool = False,
+    ):
+        """Retorna dados de aldeias do mapa em torno de (x, y) no raio especificado."""
+        return await context.get_map_data(
+            center_x=x,
+            center_y=y,
+            radius=radius,
+            force_refresh=refresh,
+        )
+
+    @router.post("/map/farm-target")
+    async def add_farm_target(payload: AddFarmTargetRequest):
+        """Adiciona uma coordenada de aldeia aos alvos regulares de farm."""
+        return context.add_custom_farm_target(payload.x, payload.y)
+
+    @router.post("/map/quick-attack")
+    async def send_quick_attack(payload: QuickAttackRequest):
+        """Envia um comando de ataque direto para uma coordenada a partir do mapa."""
+        return await context.send_quick_attack(
+            target_x=payload.target_x,
+            target_y=payload.target_y,
+            spear=payload.spear,
+            sword=payload.sword,
+            axe=payload.axe,
+            spy=payload.spy,
+            light=payload.light,
+        )
 
     return router
 

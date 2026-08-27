@@ -8,12 +8,13 @@ import json
 import logging
 from pathlib import Path
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import WebSocket
 
 from engine.actions.farm import FarmManager
 from engine.actions.main_building import MainBuildingManager
+from engine.actions.map import MapData, MapManager
 from engine.actions.place import PlaceManager
 from engine.actions.recruitment import RecruitmentManager
 from engine.config.settings import BotConfig, load_config
@@ -49,7 +50,11 @@ class EngineContext:
         self.place_manager = PlaceManager()
         self.farm_manager = FarmManager()
         self.recruitment_manager = RecruitmentManager()
+        self.map_manager = MapManager()
         self.profile_manager = ProfileManager()
+
+        # Cache de mapa
+        self._map_cache: Dict[str, Tuple[float, MapData]] = {}
 
 
         # Clientes WebSocket ativos
@@ -459,4 +464,91 @@ class EngineContext:
         """Testa conectividade de um proxy residencial/dedicado."""
         from engine.core.profile_manager import test_proxy_connection
         return await test_proxy_connection(proxy_url)
+
+    async def get_map_data(
+        self,
+        center_x: Optional[int] = None,
+        center_y: Optional[int] = None,
+        radius: float = 15.0,
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        """Obtém dados estruturados do mapa em torno de coordenadas com cache inteligente."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não inicializada.", "villages": []}
+
+        v_id = self.account.current_village_id or 0
+        curr_village = self.account.villages.get(v_id)
+        cx = center_x if center_x is not None else (curr_village.x if curr_village else 500)
+        cy = center_y if center_y is not None else (curr_village.y if curr_village else 500)
+        cache_key = f"{self.account.world}_{cx}_{cy}_{radius}"
+
+        now = time.time()
+        if not force_refresh and cache_key in self._map_cache:
+            ts, cached_data = self._map_cache[cache_key]
+            if now - ts < 60.0:
+                return {"status": "success", "cached": True, **cached_data.to_dict()}
+
+        try:
+            map_data = await self.map_manager.get_map(
+                account=self.account,
+                center_x=cx,
+                center_y=cy,
+                radius=radius,
+                village_id=v_id,
+            )
+            self._map_cache[cache_key] = (now, map_data)
+            return {"status": "success", "cached": False, **map_data.to_dict()}
+        except Exception as e:
+            logger.error(f"Erro ao carregar mapa: {e}")
+            return {"status": "error", "message": str(e), "villages": []}
+
+    def add_custom_farm_target(self, x: int, y: int) -> Dict[str, Any]:
+        """Adiciona uma coordenada [x, y] à lista de alvos de farm e persiste no config.json."""
+        target_pair = (int(x), int(y))
+        if target_pair not in self.config.farm.custom_targets:
+            self.config.farm.custom_targets.append(target_pair)
+            targets_list = [list(t) for t in self.config.farm.custom_targets]
+            self.update_config_and_save({"farm": {"custom_targets": targets_list}})
+            return {
+                "status": "success",
+                "message": f"Alvo ({x}|{y}) adicionado com sucesso aos alvos de farm.",
+                "custom_targets": targets_list,
+            }
+        return {
+            "status": "info",
+            "message": f"Alvo ({x}|{y}) já constava nos alvos de farm.",
+            "custom_targets": [list(t) for t in self.config.farm.custom_targets],
+        }
+
+    async def send_quick_attack(
+        self,
+        target_x: int,
+        target_y: int,
+        spear: int = 0,
+        sword: int = 0,
+        axe: int = 0,
+        spy: int = 0,
+        light: int = 0,
+    ) -> Dict[str, Any]:
+        """Envia um comando de ataque/farm rápido para as coordenadas especificadas."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        try:
+            from engine.actions.place import UnitsCount
+            troops = UnitsCount(spear=spear, sword=sword, axe=axe, spy=spy, light=light)
+            res = await self.place_manager.send_attack(
+                account=self.account,
+                target_x=target_x,
+                target_y=target_y,
+                troops=troops,
+            )
+            return {
+                "status": "success",
+                "message": f"Ataque enviado para ({target_x}|{target_y})!",
+                "command_id": res.command_id,
+                "duration": res.duration,
+            }
+        except Exception as e:
+            logger.error(f"Erro ao enviar ataque rápido para ({target_x}|{target_y}): {e}")
+            return {"status": "error", "message": str(e)}
 

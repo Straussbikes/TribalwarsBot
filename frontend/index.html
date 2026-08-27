@@ -75,6 +75,9 @@
         <button class="nav-tab" data-tab="tab-military" id="tab-btn-military">
           <span class="tab-icon">⚔</span> Farm & Exército
         </button>
+        <button class="nav-tab" data-tab="tab-map" id="tab-btn-map">
+          <span class="tab-icon">🗺️</span> Mapa do Mundo
+        </button>
         <button class="nav-tab" data-tab="tab-terminal" id="tab-btn-terminal">
           <span class="tab-icon">🖥</span> Terminal de Logs
         </button>
@@ -371,10 +374,101 @@
 
             <div style="display: flex; justify-content: flex-end; margin-top: 10px">
               <button type="submit" class="btn btn-primary" id="btn-save-settings" style="padding: 10px 24px">
-                💾 Gravar Configurações
+                 💾 Gravar Configurações
               </button>
             </div>
           </form>
+        </div>
+      </main>
+
+      <!-- Panel 6: Visualizador de Mapa Interativo -->
+      <main class="tab-content" id="tab-map">
+        <div class="map-view-container">
+          
+          <!-- Map Toolbar -->
+          <div class="map-toolbar glass-card">
+            <div class="map-toolbar-left">
+              <button class="btn btn-secondary btn-sm" id="btn-map-recenter" title="Centrar mapa na aldeia ativa">
+                <span>🎯</span> Centrar na Aldeia
+              </button>
+              <div class="map-coord-search">
+                <label>X:</label>
+                <input type="number" id="map-input-x" class="form-control coord-input" placeholder="500" min="0" max="999">
+                <label>Y:</label>
+                <input type="number" id="map-input-y" class="form-control coord-input" placeholder="500" min="0" max="999">
+                <button class="btn btn-primary btn-sm" id="btn-map-go">Ir</button>
+              </div>
+              <div class="map-radius-select">
+                <label>Raio:</label>
+                <select id="map-radius-selector" class="form-control">
+                  <option value="10">10 Campos</option>
+                  <option value="15" selected>15 Campos</option>
+                  <option value="20">20 Campos</option>
+                  <option value="30">30 Campos</option>
+                </select>
+              </div>
+            </div>
+            
+            <div class="map-toolbar-right">
+              <div class="map-stats-badges">
+                <span class="badge badge-barb" id="map-stat-barbs">🌿 0 Bárbaras</span>
+                <span class="badge badge-players" id="map-stat-players">🏰 0 Jogadores</span>
+              </div>
+              <button class="btn btn-secondary btn-sm" id="btn-map-refresh" title="Recarregar mapa do servidor">
+                <span>🔄</span> Sincronizar
+              </button>
+            </div>
+          </div>
+
+          <!-- Map Canvas Area -->
+          <div class="map-canvas-wrapper glass-card">
+            <canvas id="tw-map-canvas"></canvas>
+            
+            <!-- Floating Map Zoom Controls -->
+            <div class="map-zoom-controls">
+              <button class="zoom-btn" id="btn-map-zoom-in" title="Aumentar Zoom">+</button>
+              <button class="zoom-btn" id="btn-map-zoom-reset" title="Resetar Zoom">1:1</button>
+              <button class="zoom-btn" id="btn-map-zoom-out" title="Diminuir Zoom">−</button>
+            </div>
+
+            <!-- Map Legend Overlay -->
+            <div class="map-legend">
+              <span class="legend-item"><span class="dot dot-own"></span> Minha Aldeia</span>
+              <span class="legend-item"><span class="dot dot-barb"></span> Bárbaros (Farm)</span>
+              <span class="legend-item"><span class="dot dot-player"></span> Jogador</span>
+            </div>
+
+            <!-- Selected Village Details Card / Popover -->
+            <div class="village-popover glass-card" id="village-popover" style="display: none;">
+              <div class="popover-header">
+                <h4 id="popover-title">Aldeia Bárbara (502|500)</h4>
+                <button class="popover-close" id="btn-popover-close">✕</button>
+              </div>
+              <div class="popover-body">
+                <div class="popover-row">
+                  <span>Dono:</span> <strong id="popover-player">Bárbaros</strong>
+                </div>
+                <div class="popover-row">
+                  <span>Pontos:</span> <strong id="popover-points">120</strong>
+                </div>
+                <div class="popover-row">
+                  <span>Distância:</span> <strong id="popover-distance">2.83 campos</strong>
+                </div>
+                <div class="popover-row">
+                  <span>Tempo de Marcha (CL):</span> <strong id="popover-time-cl">~28 min</strong>
+                </div>
+              </div>
+              <div class="popover-actions">
+                <button class="btn btn-primary btn-sm" id="btn-popover-quick-attack">
+                  ⚔️ Atacar / Saquear
+                </button>
+                <button class="btn btn-secondary btn-sm" id="btn-popover-add-farm">
+                  📌 Fixar Alvo Farm
+                </button>
+              </div>
+            </div>
+
+          </div>
         </div>
       </main>
 
@@ -404,6 +498,7 @@
 
   <!-- Scripts da Aplicação -->
   <script src="js/api.js"></script>
+  <script src="js/map_viewer.js"></script>
   <script src="js/websocket.js"></script>
   <script src="js/app.js"></script>
 </body>

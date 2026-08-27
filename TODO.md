@@ -63,7 +63,7 @@
   - [x] Etapa 2: Confirmação do comando (`action=command&h=...`) com extração da duração da marcha e tipo de ataque.
 - [x] Suíte de testes unitários para a Praça de Reunião (10 testes dedicados).
 
-### 2.3. Micro-Farming Automatizado
+### 2.3. Micro-Farming Automatizado & Radar de Bárbaras
 - [x] Suporte a Assistente de Farm (`screen=am_farm`):
   - [x] Leitura da tabela de aldeias bárbaras vizinhas (`#plunder_list`).
   - [x] Leitura do estado dos relatórios (verde, amarelo, vermelho) e nível de muralha.
@@ -73,6 +73,10 @@
   - [x] Envio automático de micro-grupos de saque (ex.: 5 lanceiros ou 2 cavalarias leves).
 - [x] Critérios de segurança: paragem imediata do farm caso as tropas sofram baixas (`skip_losses`) ou a muralha inimiga suba (`skip_wall`).
 - [x] Suíte de testes unitários para Micro-Farming (6 testes dedicados).
+- [ ] **Radar de Bárbaras & Saque Recorrente Contínuo:**
+  - [ ] Auto-descoberta de aldeias bárbaras num determinado raio através da leitura do mapa (`screen=map` ou dados de mapa).
+  - [ ] Cálculo e ordenação automática por distância euclidiana/manhattan.
+  - [ ] Agendamento em loop contínuo para manter as micro-tropas sempre a saquear com alocação dinâmica de unidades disponíveis.
 
 ### 2.4. Coleta de Recursos / Scavenging (`screen=place&mode=scavenge`)
 - [ ] Leitura do estado de desbloqueio das 4 categorias de coleta (Lazy, Humble, Clever, Great).
@@ -104,9 +108,22 @@
 - [ ] **Rotina de Auto-Dodge (Desvio de Tropas e Recursos):** Envio para aldeia bárbara 30s antes do impacto e cancelamento pós-impacto.
 - [ ] Notificação sonora e visual de emergência.
 
+### 2.9. Algoritmo de Decisão Inteligente & Perfis de Aldeia (Evolução vs. Tropas)
+- [ ] **Classificação e Especialização de Aldeias:**
+  - [ ] Definição de perfil por aldeia: **Ofensiva** (Ataque / Nuke) vs. **Defensiva** (Defesa / Bunker).
+  - [ ] Templates e modelos de tropas personalizáveis por perfil (ex.: Full Ataque: Machado + CL + Aríete / Full Defesa: Lança + Espada + Pesada/Arco).
+- [ ] **Algoritmo de Priorização Dinâmica (Edifícios vs. Recrutamento):**
+  - [ ] Co-design e definição do algoritmo de arbitragem de recursos: quando gastar em edifícios vs. manter as filas de recrutamento 100% ativas.
+  - [ ] Regras de reserva de recursos (buffer de segurança) para nunca bloquear a evolução de edifícios vitais ou o treino contínuo.
+  - [ ] Adaptação às fases do jogo (Early Game: foco em minas/fazenda/farm vs. Mid/Late Game: foco em exército contínuo e nobres).
+
+### 2.10. Sistema de Missões & Recompensas de Edifícios (`quests`)
+- [ ] Leitura de missões concluídas e recompensas pendentes de edifícios finalizados.
+- [ ] Resgate automático de recompensas com verificação de espaço livre no armazém para evitar desperdício de recursos.
+
 ---
 
-## 📌 Fase 3: Camada Sidecar IPC & Gestão de Sessões (`engine/api/`)
+## 📌 Fase 3: Camada Sidecar IPC & Gestão Concorrente (`engine/api/`)
 
 - [x] **Servidor Local FastAPI & WebSockets**
   - [x] Execução em localhost com porta dinâmica e token efêmero de autenticação local (`.sidecar_auth.json`).
@@ -114,12 +131,18 @@
   - [x] Canal WebSocket bidirecional para streaming em tempo real de logs e status.
   - [x] Disparo de alerta de captcha anti-bot para o frontend (`CAPTCHA_ALERT`).
   - [x] Suíte de testes unitários para a API Sidecar (14 testes dedicados).
-- [x] **Gestor de Contas & Multi-Aldeia**
-  - [x] Persistência segura de perfis de conta com ofuscação/encriptação (`ProfileManager` em `profiles.json`).
-  - [x] Suporte a proxy dedicado ou residencial por conta com diagnóstico ativo (`test_proxy_connection`).
+- [ ] **Gestão Concorrente Multi-Aldeia (Mesmo Mundo)**
   - [x] Extração de todas as aldeias da conta a partir do `game_data` (`extract_all_villages`).
   - [x] Alternância fluida de contexto entre múltiplas aldeias (`account.switch_village` e `POST /api/account/switch-village`).
-  - [x] Seletor de aldeias integrado na interface gráfica (Dropdown no card da aldeia).
+  - [ ] Execução de rotinas e agendamento concorrente/round-robin para múltiplas aldeias na mesma sessão sem conflito de requests.
+  - [ ] Configuração individualizada por aldeia no `config.json` (perfil Ofensivo/Defensivo, templates de tropas e edifícios).
+- [ ] **Gestão Simultânea Multi-Mundo (2+ Mundos Concorrentes)**
+  - [ ] Orquestrador de instâncias para execução simultânea de múltiplos mundos (ex: pt117 e pt118 ao mesmo tempo).
+  - [ ] Isolamento de sessões de rede `TribalAccount`, schedulers e ficheiros de cookies/configuração por mundo.
+  - [ ] Suporte a instâncias em abas ou seletor de mundo em tempo real no Dashboard Frontend.
+- [x] **Gestor de Perfis & Proxies**
+  - [x] Persistência segura de perfis de conta com ofuscação/encriptação (`ProfileManager` em `profiles.json`).
+  - [x] Suporte a proxy dedicado ou residencial por conta com diagnóstico ativo (`test_proxy_connection`).
   - [x] Suíte de testes unitários dedicada (9 testes cobrindo perfis, multi-aldeia e proxies).
 
 ---
@@ -134,6 +157,10 @@
   - [x] Painel de controlo de módulos com botões de ação imediata (Pausar/Retomar, Construir Agora, Farm Agora, Recrutar Agora).
   - [x] Consola de logs ao vivo via streaming WebSocket com busca por texto, filtros de severidade, auto-scroll e limpeza.
   - [x] Painel de configurações visuais com gravação instantânea e recarregamento a quente no `config.json`.
+- [ ] **Visualizador de Mapa Interativo Integrado (Embedded Game Map)**
+  - [ ] Renderização do mapa do mundo/continente com suporte a zoom e arrasto direto no Cockpit.
+  - [ ] Destaque de aldeias próprias, bárbaras no raio de farm e aldeias de jogadores vizinhos.
+  - [ ] Ações rápidas de clique no mapa para envio de saque ou marcação de alvos.
 - [x] **Shell Desktop Nativa Edge WebView2**
   - [x] Execução como aplicação desktop nativa via Edge WebView2 (`engine/desktop_launcher.py` ou `python -m engine.main --gui`).
   - [x] Servidor Sidecar serve a interface web diretamente em `http://127.0.0.1:8000/` (`python -m engine.main --api`).

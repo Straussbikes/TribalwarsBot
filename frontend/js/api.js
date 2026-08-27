@@ -142,6 +142,36 @@ class SidecarApi {
       body: JSON.stringify({ proxy: proxyUrl }),
     });
   }
+
+  async getMapData(x = null, y = null, radius = 15, refresh = false) {
+    let query = `?radius=${radius}`;
+    if (x !== null && x !== undefined && !isNaN(x)) query += `&x=${x}`;
+    if (y !== null && y !== undefined && !isNaN(y)) query += `&y=${y}`;
+    if (refresh) query += `&refresh=true`;
+    return await this.request(`/api/map/data${query}`);
+  }
+
+  async addFarmTarget(x, y) {
+    return await this.request("/api/map/farm-target", {
+      method: "POST",
+      body: JSON.stringify({ x: parseInt(x, 10), y: parseInt(y, 10) }),
+    });
+  }
+
+  async sendQuickAttack(targetX, targetY, troops = {}) {
+    return await this.request("/api/map/quick-attack", {
+      method: "POST",
+      body: JSON.stringify({
+        target_x: parseInt(targetX, 10),
+        target_y: parseInt(targetY, 10),
+        spear: troops.spear || 0,
+        sword: troops.sword || 0,
+        axe: troops.axe || 0,
+        spy: troops.spy || 0,
+        light: troops.light || 0,
+      }),
+    });
+  }
 }
 
 

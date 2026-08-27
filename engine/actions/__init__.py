@@ -39,6 +39,13 @@ from engine.actions.recruitment import (
     RecruitmentState,
     TrainingOrder,
 )
+from engine.actions.map import (
+    MapData,
+    MapManager,
+    MapVillage,
+    calculate_distance,
+    parse_map_screen_data,
+)
 
 __all__ = [
     "BALANCED_TEMPLATE",
@@ -54,6 +61,9 @@ __all__ = [
     "MILITARY_RUSH_TEMPLATE",
     "MainBuildingManager",
     "MainBuildingState",
+    "MapData",
+    "MapManager",
+    "MapVillage",
     "NAME_TO_BUILDING",
     "POP_COST",
     "PlaceManager",
@@ -68,6 +78,8 @@ __all__ = [
     "UNIT_TO_BUILDING",
     "UnitType",
     "UnitsCount",
+    "calculate_distance",
+    "parse_map_screen_data",
 ]
 
 

@@ -1,11 +1,11 @@
 {
   "world": "pt117",
-  "sid": "0%3Af11f634daacab72c0aeb7310b12ca0df013f09fbc314442d3624d3af974d15df0cd2e37cf48c76bc5a1ed367e84efe87e8bdc5707ee3071509231f0872c774a9",
+  "sid": "0%3A289b7888783f0844c792ee5e6498999a12360ad0b084877fcc845bbe9de058c356a55716b8cf0bcbe009197bce726bf653f03382aa1f072daf4663fd5ebd1bba",
   "building": {
     "_comentario": "Templates disponíveis: 'rush_resources' (recursos), 'balanced' (balanceado), 'military_rush' (tropas/cavalaria) ou 'custom'",
-    "template": "rush_resources",
+    "template": "custom",
     "max_queue": 2,
-    "interval_seconds": 75.0,
+    "interval_seconds": 75,
     "custom_plan": [
       [
         "wood",
@@ -20,6 +20,22 @@
         1
       ],
       [
+        "wood",
+        2
+      ],
+      [
+        "stone",
+        2
+      ],
+      [
+        "wood",
+        3
+      ],
+      [
+        "stone",
+        3
+      ],
+      [
         "main",
         2
       ],
@@ -33,14 +49,14 @@
       ],
       [
         "wood",
-        2
+        4
       ],
       [
         "stone",
-        2
+        4
       ],
       [
-        "storage",
+        "iron",
         2
       ],
       [
@@ -49,15 +65,35 @@
       ],
       [
         "wood",
-        3
+        5
       ],
       [
         "stone",
-        3
+        5
       ],
       [
         "iron",
+        3
+      ],
+      [
+        "storage",
         2
+      ],
+      [
+        "wood",
+        6
+      ],
+      [
+        "stone",
+        6
+      ],
+      [
+        "iron",
+        4
+      ],
+      [
+        "farm",
+        3
       ],
       [
         "main",
@@ -68,8 +104,8 @@
         5
       ],
       [
-        "barracks",
-        2
+        "storage",
+        3
       ],
       [
         "smith",
@@ -77,43 +113,191 @@
       ],
       [
         "wood",
-        4
+        7
       ],
       [
         "stone",
-        4
+        7
       ],
       [
         "iron",
-        3
+        5
       ],
       [
         "storage",
+        4
+      ],
+      [
+        "farm",
+        4
+      ],
+      [
+        "wood",
+        8
+      ],
+      [
+        "stone",
+        8
+      ],
+      [
+        "wood",
+        9
+      ],
+      [
+        "stone",
+        9
+      ],
+      [
+        "iron",
+        6
+      ],
+      [
+        "storage",
+        5
+      ],
+      [
+        "main",
+        6
+      ],
+      [
+        "main",
+        7
+      ],
+      [
+        "main",
+        8
+      ],
+      [
+        "smith",
+        2
+      ],
+      [
+        "smith",
         3
       ],
       [
-        "wall",
+        "farm",
+        5
+      ],
+      [
+        "storage",
+        6
+      ],
+      [
+        "main",
+        9
+      ],
+      [
+        "main",
+        10
+      ],
+      [
+        "smith",
+        4
+      ],
+      [
+        "smith",
+        5
+      ],
+      [
+        "storage",
+        7
+      ],
+      [
+        "stable",
+        1
+      ],
+      [
+        "stable",
         2
+      ],
+      [
+        "stable",
+        3
+      ],
+      [
+        "farm",
+        6
+      ],
+      [
+        "storage",
+        8
+      ],
+      [
+        "barracks",
+        2
+      ],
+      [
+        "barracks",
+        3
+      ],
+      [
+        "barracks",
+        4
+      ],
+      [
+        "barracks",
+        5
+      ],
+      [
+        "farm",
+        7
+      ],
+      [
+        "storage",
+        9
+      ],
+      [
+        "storage",
+        10
+      ],
+      [
+        "farm",
+        8
+      ],
+      [
+        "stable",
+        4
+      ],
+      [
+        "stable",
+        5
+      ],
+      [
+        "farm",
+        9
+      ],
+      [
+        "farm",
+        10
+      ],
+      [
+        "storage",
+        11
+      ],
+      [
+        "storage",
+        12
       ]
     ]
   },
   "farm": {
     "_comentario": "Modos: 'am_farm' (Assistente de Farm) ou 'place' (direto via Praça)",
-    "enabled": false,
+    "enabled": true,
     "mode": "am_farm",
     "template": "A",
     "max_distance": 15.0,
     "skip_losses": true,
     "skip_wall": true,
-    "interval_minutes": 10.0,
+    "interval_minutes": 10,
     "custom_targets": [
       [
-        452,
-        553
+        450,
+        550
       ],
       [
-        453,
-        550
+        502,
+        503
       ]
     ],
     "custom_troops": {

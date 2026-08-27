@@ -837,3 +837,299 @@ body {
   from { transform: translateY(0); }
   to { transform: translateY(-8px); }
 }
+
+/* ==========================================================================
+   Mapa do Mundo - Visualizador Interativo
+   ========================================================================== */
+
+/* Container Principal do Mapa */
+.map-view-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 8px;
+  padding: 4px;
+}
+
+/* Barra de Ferramentas do Mapa */
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  flex-shrink: 0;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.map-toolbar-left,
+.map-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.map-coord-search {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.map-coord-search label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.coord-input {
+  width: 64px !important;
+  padding: 4px 6px !important;
+  font-size: 0.8rem !important;
+  font-family: var(--font-mono) !important;
+  text-align: center;
+}
+
+.map-radius-select {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.map-radius-select label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.map-radius-select .form-control {
+  width: 110px;
+  padding: 4px 6px;
+  font-size: 0.8rem;
+}
+
+.map-stats-badges {
+  display: flex;
+  gap: 8px;
+}
+
+.badge-barb {
+  background: rgba(34, 197, 94, 0.15) !important;
+  color: #22c55e !important;
+  border: 1px solid rgba(34, 197, 94, 0.3) !important;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.badge-players {
+  background: rgba(244, 63, 94, 0.12) !important;
+  color: #f43f5e !important;
+  border: 1px solid rgba(244, 63, 94, 0.3) !important;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+}
+
+/* Área do Canvas do Mapa */
+.map-canvas-wrapper {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  min-height: 420px;
+  padding: 0 !important;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-primary);
+}
+
+.map-canvas-wrapper canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+/* Controlos Flutuantes de Zoom */
+.map-zoom-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 10;
+}
+
+.zoom-btn {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-glass-highlight);
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  color: var(--neon-cyan);
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  user-select: none;
+}
+
+.zoom-btn:hover {
+  background: rgba(6, 182, 212, 0.15);
+  border-color: var(--neon-cyan);
+  box-shadow: var(--shadow-glow-cyan);
+  transform: scale(1.08);
+}
+
+.zoom-btn:active {
+  transform: scale(0.95);
+}
+
+/* Legenda do Mapa (Sobreposição) */
+.map-legend {
+  position: absolute;
+  bottom: 10px;
+  left: 12px;
+  display: flex;
+  gap: 14px;
+  padding: 6px 12px;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-sm);
+  z-index: 10;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot-own {
+  background: #00f0ff;
+  box-shadow: 0 0 6px rgba(0, 240, 255, 0.5);
+}
+
+.dot-barb {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+}
+
+.dot-player {
+  background: #f43f5e;
+  box-shadow: 0 0 6px rgba(244, 63, 94, 0.5);
+}
+
+/* Popover de Aldeia Selecionada */
+.village-popover {
+  position: absolute;
+  z-index: 20;
+  width: 260px;
+  padding: 0 !important;
+  overflow: hidden;
+  border: 1px solid var(--border-glass-highlight) !important;
+  box-shadow: 0 12px 40px -8px rgba(0, 0, 0, 0.6), 0 0 1px 1px var(--border-glass);
+  animation: popoverFadeIn 0.18s ease-out;
+}
+
+@keyframes popoverFadeIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: rgba(6, 182, 212, 0.08);
+  border-bottom: 1px solid var(--border-glass);
+}
+
+.popover-header h4 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--neon-cyan);
+}
+
+.popover-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: var(--transition-smooth);
+}
+
+.popover-close:hover {
+  color: var(--neon-rose);
+  background: rgba(244, 63, 94, 0.12);
+}
+
+.popover-body {
+  padding: 10px 12px;
+}
+
+.popover-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.popover-row:last-child {
+  border-bottom: none;
+}
+
+.popover-row strong {
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 0.77rem;
+}
+
+.popover-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--border-glass);
+}
+
+.popover-actions .btn {
+  flex: 1;
+  font-size: 0.72rem;
+  padding: 5px 6px;
+  white-space: nowrap;
+}
+
+/* Botão compacto */
+.btn-sm {
+  padding: 5px 10px !important;
+  font-size: 0.76rem !important;
+}
+

@@ -75,6 +75,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     btnSaveSettings: document.getElementById("btn-save-settings"),
   };
 
+  // Inicializar MapViewer
+  window.mapViewer = new MapViewer("tw-map-canvas");
+
   // --- 1. Gestão de Abas / Navegação ---
   elements.navTabs.forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -86,6 +89,18 @@ document.addEventListener("DOMContentLoaded", async () => {
       const targetContent = document.getElementById(targetId);
       if (targetContent) {
         targetContent.classList.add("active");
+      }
+
+      if (targetId === "tab-map") {
+        if (window.mapViewer) {
+          window.mapViewer.resizeCanvas();
+          window.mapViewer.startAnimationLoop();
+          window.mapViewer.loadMapData();
+        }
+      } else {
+        if (window.mapViewer) {
+          window.mapViewer.stopAnimationLoop();
+        }
       }
 
       if (targetId === "tab-settings") {
@@ -179,8 +194,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
       if (v.coordinates) {
         elements.villageCoords.textContent = `(${v.coordinates})`;
+        const parts = v.coordinates.split("|").map(Number);
+        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+          window.mapViewer?.setOwnVillage(parts[0], parts[1]);
+        }
       } else if (data.account.coordinates) {
         elements.villageCoords.textContent = `(${data.account.coordinates.x}|${data.account.coordinates.y})`;
+        window.mapViewer?.setOwnVillage(data.account.coordinates.x, data.account.coordinates.y);
       }
 
       // Seletor Multi-Aldeia
