@@ -98,11 +98,16 @@ def load_config(config_file: str = "config.json") -> BotConfig:
         # Se não existe, cria um modelo documentado para facilidade do utilizador
         _create_default_config_file(config_path)
 
-    # 1. Carrega dados básicos
-    world = os.getenv("TW_WORLD") or data.get("world", "pt117")
-    sid = os.getenv("TW_SID") or data.get("sid", "")
+    # 1. Carrega dados básicos (variáveis de ambiente só sobrepõem se não estiverem vazias)
+    env_world = (os.getenv("TW_WORLD") or "").strip()
+    env_sid = (os.getenv("TW_SID") or "").strip()
+    env_proxy = (os.getenv("TW_PROXY") or "").strip()
+
+    world = env_world if env_world else data.get("world", "pt117")
+    sid = env_sid if env_sid else data.get("sid", "")
     domain = data.get("domain", "tribalwars.com.pt")
-    proxy = os.getenv("TW_PROXY") or data.get("proxy")
+    proxy = env_proxy if env_proxy else data.get("proxy")
+
 
     # 2. Carrega configurações do Edifício Principal
     b_data = data.get("building", {})

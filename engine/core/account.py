@@ -118,12 +118,22 @@ class TribalAccount:
             verify=True,
         )
 
-        # Injeta o cookie de sessão 'sid' no jar de cookies para o domínio específico
+        # Normaliza o valor do SID (remove aspas, espaços e prefixo 'sid=')
+        clean_sid = self.sid.strip().strip('"').strip("'")
+        if clean_sid.lower().startswith("sid="):
+            clean_sid = clean_sid[4:].strip()
+        self.sid = clean_sid
+
+        # Injeta o cookie de sessão 'sid' no jar de cookies para o subdomínio e para o domínio raiz
         self._session.cookies.set("sid", self.sid, domain=self.host)
+        if self.domain:
+            self._session.cookies.set("sid", self.sid, domain=f".{self.domain}")
+            self._session.cookies.set("sid", self.sid, domain=self.domain)
 
         logger.info(
             f"[{self.world}] Sessão de rede inicializada via curl_cffi (impersonate={self.impersonate})"
         )
+
 
     async def close(self) -> None:
         """Encerra a sessão assíncrona e liberta recursos de rede."""
@@ -183,9 +193,11 @@ class TribalAccount:
         # 4. Sessão Expirada / Ecrã de Login
         final_url = str(response.url) if response.url else ""
         if is_session_expired(html, current_url=final_url):
+            logger.warning(f"[{self.world}] Sessão expirada ou redirecionada. URL final: '{final_url}'")
             raise SessionExpiredError(
                 f"Sessão expirada para o mundo {self.world}. É necessário renovar o cookie 'sid'."
             )
+
 
         # 5. Validação de status code padrão
         if response.status_code >= 400:
