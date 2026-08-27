@@ -227,6 +227,10 @@ class EngineContext:
 
     async def trigger_renew_session(self) -> Dict[str, Any]:
         """Dispara a renovação do cookie 'sid' via WebView2 nativo."""
+        if getattr(self, "on_renew_session", None):
+            self.on_renew_session()
+            return {"status": "success", "message": "A navegar para o ecrã de login do Tribal Wars..."}
+
         from engine.core.auth_manager import TribalAuthManager
         auth_mgr = TribalAuthManager(self.config_path)
 
@@ -245,6 +249,7 @@ class EngineContext:
             self.broadcast_sync("SESSION_RENEWED", {"world": self.account.world, "sid": self.account.sid[:12] + "..."})
             return {"status": "success", "message": "Sessão renovada e gravada com sucesso!"}
         return {"status": "error", "message": "Não foi possível capturar o cookie de sessão 'sid'."}
+
 
     def update_config_and_save(self, new_data: Dict[str, Any]) -> Dict[str, Any]:
 

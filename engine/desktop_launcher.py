@@ -48,7 +48,10 @@ class DesktopApp:
         self.engine_thread: threading.Thread = None
         self.server = None
         self.context = None
+        self.window = None
+        self.is_logging_in = False
         self.is_running = True
+
 
     def start_background_engine(self):
         """Executa o event loop assíncrono do motor numa thread dedicada."""
@@ -140,7 +143,7 @@ class DesktopApp:
                 config=cfg,
                 account=account,
             )
-
+            self.context.on_renew_session = self.navigate_to_login
 
             # Inicia Servidor FastAPI
             self.server = await start_sidecar_server(
@@ -149,7 +152,6 @@ class DesktopApp:
                 port=self.port,
             )
 
-
             logger.info("Motor Sidecar a correr em segundo plano.")
             await self.server.serve()
 
@@ -157,6 +159,74 @@ class DesktopApp:
             self.loop.run_until_complete(_run())
         except Exception as e:
             logger.error(f"Exceção no motor em background: {e}")
+
+    def navigate_to_login(self):
+        """Redireciona a janela atual para a página de login do Tribal Wars."""
+        if not self.window:
+            logger.warning("Janela desktop ainda não inicializada.")
+            return
+        target_url = f"https://www.{self.context.config.domain}/"
+        logger.info(f"A navegar janela desktop para login: {target_url}")
+        self.is_logging_in = True
+        try:
+            self.window.load_url(target_url)
+        except Exception as e:
+            logger.error(f"Erro ao carregar URL de login: {e}")
+        threading.Thread(target=self._monitor_login_success, daemon=True).start()
+
+    def _monitor_login_success(self):
+        """Monitoriza a sessão até que o utilizador entre no jogo e captura o cookie 'sid'."""
+        logger.info("Monitor de login ativo. À espera da entrada no mundo...")
+        time.sleep(2.5)
+        cfg = self.context.config
+        if cfg.auth.username and cfg.auth.password:
+            js_fill = f"""
+            (function() {{
+                var u = document.getElementById('user');
+                var p = document.getElementById('password');
+                if (u && p && !u.value) {{
+                    u.value = '{cfg.auth.username}';
+                    p.value = '{cfg.auth.password}';
+                    var btn = document.querySelector('.btn-login');
+                    if (btn) btn.click();
+                }}
+            }})();
+            """
+            try:
+                self.window.evaluate_js(js_fill)
+                logger.info("Credenciais preenchidas automaticamente no formulário de login.")
+            except Exception as e:
+                logger.debug(f"Preenchimento JS: {e}")
+
+        start_t = time.time()
+        while time.time() - start_t < 180 and self.is_logging_in and self.is_running:
+            time.sleep(1.0)
+            try:
+                curr_url = self.window.get_url() or ""
+                cookies = self.window.get_cookies()
+                from engine.core.auth_manager import extract_sid_from_cookies
+                sid = extract_sid_from_cookies(cookies)
+
+                if "game.php" in curr_url or (sid and "page/play" in curr_url):
+                    if sid:
+                        logger.info(f"✅ Login concluído! Novo SID capturado: {sid[:12]}...")
+                        from engine.config.settings import save_config_sid
+                        save_config_sid(sid)
+
+                        if self.context.account:
+                            self.context.account.sid = sid
+                            asyncio.run_coroutine_threadsafe(
+                                self.context.account.init_session(), self.loop
+                            )
+
+                        self.is_logging_in = False
+                        time.sleep(1.0)
+                        cockpit_url = f"http://{self.host}:{self.port}/"
+                        logger.info(f"A regressar ao Cockpit: {cockpit_url}")
+                        self.window.load_url(cockpit_url)
+                        break
+            except Exception as e:
+                logger.debug(f"Erro no monitor de login: {e}")
 
     def run(self):
         """Inicia a thread do motor e a janela nativa pywebview."""
@@ -177,8 +247,7 @@ class DesktopApp:
         window_url = f"http://{self.host}:{self.port}/"
         logger.info(f"A abrir janela desktop nativa: {window_url}")
 
-
-        window = webview.create_window(
+        self.window = webview.create_window(
             title="TribalWars Bot Cockpit - v2.0",
             url=window_url,
             width=1280,
@@ -191,6 +260,7 @@ class DesktopApp:
         def on_closed():
             logger.info("Janela desktop fechada. A encerrar motor...")
             self.is_running = False
+            self.is_logging_in = False
             auth_file = Path(".sidecar_auth.json")
             if auth_file.exists():
                 try:
@@ -198,10 +268,11 @@ class DesktopApp:
                 except Exception:
                     pass
 
-        window.events.closed += on_closed
+        self.window.events.closed += on_closed
 
         # Inicia o loop de interface gráfica nativa Edge WebView2
         webview.start(debug=False)
+
 
 
 def main():

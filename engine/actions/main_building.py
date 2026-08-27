@@ -10,8 +10,10 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from engine.core.account import TribalAccount
+from engine.core.exceptions import SessionExpiredError
 from engine.core.models import Resources, TaskPriority
 from engine.core.scheduler import TaskScheduler
+
 from engine.utils.parsers import (
     parse_build_queue,
     parse_building_levels,
