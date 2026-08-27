@@ -342,6 +342,9 @@ class DesktopApp:
                 self._finalize_login(sid)
             else:
                 logger.warning("[Login] Botão acionado mas SID não encontrado nos cookies.")
+        except Exception as e:
+            logger.warning(f"[Login] Erro ao capturar SID manualmente: {e}")
+
 
 
     def run(self):
