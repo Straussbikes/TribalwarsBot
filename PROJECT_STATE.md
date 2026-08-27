@@ -3,20 +3,24 @@
 > **Propósito deste ficheiro:** Manter o histórico de progresso, decisões arquiteturais, mapa de ficheiros e diretrizes de desenvolvimento para que qualquer sessão de IA recupere o contexto instantaneamente com consumo mínimo de tokens e sem perda de continuidade.
 
 **Última Atualização:** 2026-08-27  
-**Estado Geral:** Fase 3 em Progresso (Servidor Local FastAPI, WebSockets e Sidecar IPC Concluídos)  
-**Ambiente Validado:** Windows 11 / Python 3.14 / `curl_cffi` 0.16.2 / `fastapi` 0.141.1 / `uvicorn` 0.52.4 / Node.js v25.8.1
+**Estado Geral:** Fases 1, 3 e 4 Concluídas com Sucesso | 75 Testes Unitários Automatizados (100% OK)  
+**Ambiente Validado:** Windows 11 / Python 3.14 / `curl_cffi` 0.16.2 / `fastapi` 0.141.1 / `uvicorn` 0.52.4 / `pywebview` 6.1 (Edge WebView2) / Git Branch: `main`
 
 ---
 
 ## 1. Visão Geral e Arquitetura
 
 * **Conceito:** Cliente desktop autónomo (*estilo PS Evolution*) para automação do jogo Tribal Wars (Tribos).
-* **Camada de Rede:** Emulação pura HTTP sobre a versão mobile (`page=mobile`), sem Chromium pesado, com consumo ultrabaixo de RAM/CPU.
-* **Evasão de Assinaturas (TLS/JA3/JA4):** `curl_cffi` com `impersonate="chrome124"`, headers consistentes de Chrome Mobile Android (`Sec-CH-UA-Mobile: ?1`, `Sec-CH-UA-Platform: "Android"`).
+* **Camada de Rede:** Emulação pura HTTP sobre a versão mobile (`page=mobile`), sem instâncias pesadas de Chromium/Puppeteer, garantindo consumo ultrabaixo de RAM (<60MB) e CPU.
+* **Evasão de Assinaturas (TLS/JA3/JA4):** `curl_cffi` com `impersonate="chrome124"`, cabeçalhos consistentes de Chrome Mobile Android (`Sec-CH-UA-Mobile: ?1`, `Sec-CH-UA-Platform: "Android"`).
 * **Arquitetura de Processos (Sidecar Pattern):**
-  * **Shell Desktop:** Tauri (Rust) para janela nativa, system tray e WebView popup para resolução manual de captchas.
-  * **Core Engine:** Python (AsyncIO) rodando desacoplado como sidecar, orquestrando rede e agendamento.
+  * **Shell Desktop:** Janela nativa Windows Edge WebView2 (`pywebview`) servindo interface Cockpit moderna com isolamento de threads.
+  * **Core Engine:** Motor Python assíncrono (`asyncio`) desacoplado, orquestrando rede, agendamento de tarefas e keep-alive.
   * **Comunicação IPC:** FastAPI / WebSockets locais em `127.0.0.1` com token efêmero de segurança gerado em `.sidecar_auth.json`.
+* **Fluxo de Autenticação Manual & Interceção de Rede:**
+  * Modo 100% manual e seguro: o utilizador faz login diretamente no ecrã nativo do Tribal Wars (resolvendo captchas humanos se surgirem).
+  * **Intercetor de Rede em Tempo Real:** O WebView2 captura instantaneamente os cookies `sid` (incluindo `HttpOnly`) dos cabeçalhos HTTP (`request_sent` e `response_received`), persistindo no `config.json` e renovando a sessão `curl_cffi` via `account.update_sid()`.
+* **HUD Timer de Ultra-Alta Precisão:** Relógio digital no topo da aplicação exibindo horas, minutos, segundos e microssegundos (`HH:MM:SS.uuuuuu`) a 60 FPS com `requestAnimationFrame` e `performance.now()`.
 
 ---
 
@@ -24,12 +28,11 @@
 
 | Fase | Descrição | Status | Detalhes |
 |---|---|---|---|
-| **Fase 1** | **Fundação do Core & Rede** | ✅ Concluída | Estrutura modular, `TribalAccount`, `TaskScheduler`, parsers e 10 testes unitários. |
-| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (Edifício Principal), `place` (Praça), `farm` (Micro-Farming) e `recruitment` (Quartel/Estábulo/Oficina) concluídos. |
-| **Fase 3** | **Camada Sidecar IPC & Sessões** | ✅ Concluída | FastAPI REST, WebSockets bidirecionais (logs, status, captcha), autenticação efêmera. |
-| **Fase 4** | **Shell Desktop & Frontend Nativo** | ✅ Concluída | Cockpit moderno (Dark Glassmorphism), streaming WebSocket, WebView2 nativa e 59 testes unitários (100% OK). |
-| **Fase 5** | **Empacotamento & Release** | 📋 Pendente | Empacotamento com PyInstaller / Tauri Bundler e instalador final. |
-
+| **Fase 1** | **Fundação do Core & Rede** | ✅ Concluída | Estrutura modular, `TribalAccount`, `TaskScheduler`, parsers, anti-bot e 10 testes unitários. |
+| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (Edifício Principal), `place` (Praça), `farm` (Micro-Farming) e `recruitment` (Quartel/Estábulo/Oficina) concluídos. Scavenging e Snob pendentes. |
+| **Fase 3** | **Camada Sidecar IPC, Multi-Aldeia & Perfis** | ✅ Concluída | FastAPI REST, WebSockets bidirecionais (logs, status, captcha), autenticação efêmera, suporte multi-aldeia (`switch_village`), `ProfileManager` com AES/XOR e diagnóstico de proxies. |
+| **Fase 4** | **Shell Desktop & Frontend Nativo** | ✅ Concluída | Cockpit Dark Glassmorphism, streaming WebSocket, login manual com interceção de tráfego, HUD timer com microssegundos e 75 testes unitários (100% OK). |
+| **Fase 5** | **Empacotamento & Release** | 📋 Pendente | Empacotamento executável com PyInstaller e instalador desktop. |
 
 ---
 
@@ -41,16 +44,17 @@ TribalwarsBot/
 ├── TODO.md                          # Checklist detalhado e acionável de todas as funcionalidades
 ├── README.md                        # Documentação pública e instruções rápidas
 ├── pyproject.toml                   # Configuração de empacotamento e dependências Python
-├── requirements.txt                 # Dependências diretas (curl_cffi, pydantic, fastapi, uvicorn)
+├── requirements.txt                 # Dependências diretas (curl_cffi, pydantic, fastapi, uvicorn, pywebview)
 ├── config.json                      # Configuração personalizável (mundo, sid, templates, fila, farm, recrutamento)
+├── profiles.json                    # Perfis de contas encriptados (ProfileManager)
 │
 ├── engine/                          # Python Core Engine
 │   ├── core/                        # Núcleo da automação
 │   │   ├── __init__.py              # Exporta classes e exceções principais
-│   │   ├── account.py               # TribalAccount: AsyncSession, mobile headers, parsing, CSRF, multi-aldeia
-│   │   ├── auth_manager.py          # TribalAuthManager: extração de cookies, login WebView2, injeção de credenciais
+│   │   ├── account.py               # TribalAccount: AsyncSession, mobile headers, update_sid, parsing, CSRF, multi-aldeia
+│   │   ├── auth_manager.py          # TribalAuthManager: extração de cookies, normalização e validação de SID
 │   │   ├── profile_manager.py       # ProfileManager: múltiplos perfis (profiles.json), encriptação de senhas, proxy test
-│   │   ├── scheduler.py             # TaskScheduler: PriorityQueue, delays gaussianos, preempção
+│   │   ├── scheduler.py             # TaskScheduler: PriorityQueue, delays gaussianos, auto-pausa anti-bot
 │   │   ├── models.py                # Resources, VillageData, PlayerData, TaskPriority, Task
 │   │   └── exceptions.py            # BotProtectionError, SessionExpiredError, RateLimitError, etc.
 │   ├── utils/                       # Utilitários de evasão e parsers
@@ -63,7 +67,7 @@ TribalwarsBot/
 │   │   ├── place.py                 # PlaceManager: leitura de tropas, capacidade de saque, comandos em 2 etapas
 │   │   ├── farm.py                  # FarmManager: Assistente de Farm (A/B), filtros de segurança, fallback Praça
 │   │   └── recruitment.py           # RecruitmentManager: Quartel, Estábulo e Oficina em lotes graduais
-│   ├── api/                         # Camada de comunicação Sidecar IPC com Tauri (Fase 3)
+│   ├── api/                         # Camada de comunicação Sidecar IPC (Fase 3)
 │   │   ├── __init__.py              # Exporta EngineContext, create_app, start_sidecar_server
 │   │   ├── auth.py                  # Token efêmero criptográfico, verificação HTTP/WS e .sidecar_auth.json
 │   │   ├── context.py               # EngineContext: orquestração de estado, multi-aldeia, perfis, proxy e websockets
@@ -73,17 +77,17 @@ TribalwarsBot/
 │   ├── config/                      # Configurações e carregamento de perfis
 │   │   ├── __init__.py
 │   │   ├── settings.py              # BotConfig, BuildingConfig, FarmConfig, RecruitmentConfig, AuthConfig, load_config
-│   ├── desktop_launcher.py          # Desktop Launcher: janela nativa Edge WebView2 (pywebview)
+│   ├── desktop_launcher.py          # Desktop Launcher: janela nativa Edge WebView2, interceção de cookies e monitor de login
 │   └── main.py                      # Ponto de entrada CLI, Sidecar e Desktop (--gui, --api, --port)
 │
 ├── frontend/                        # Frontend Cockpit Web & Desktop (HTML5 / Vanilla CSS / Vanilla JS)
-│   ├── index.html                   # Estrutura do dashboard, cards, tabs, modal de captcha e seletor multi-aldeia
+│   ├── index.html                   # Estrutura do dashboard, cards, HUD timer, modal de captcha e seletor multi-aldeia
 │   ├── css/
-│   │   └── style.css                # Design system Glassmorphism, dark mode e micro-animações
+│   │   └── style.css                # Design system Dark Glassmorphism, badges de precisão e micro-animações
 │   └── js/
 │       ├── api.js                   # Cliente REST assíncrono para controle, multi-aldeia, perfis e proxy
-│       ├── websocket.js             # Conexão WebSocket em tempo real e sintetizador sonoro
-│       └── app.js                   # Controlador da interface, cronómetro e streaming de logs
+│       ├── websocket.js             # Conexão WebSocket em tempo real e sintetizador sonoro de alertas
+│       └── app.js                   # Controlador da interface, cronómetro de alta resolução e streaming de logs
 │
 ├── tests/                           # Suíte de testes unitários automatizados (75 testes, 100% OK)
 │   ├── __init__.py
@@ -98,13 +102,6 @@ TribalwarsBot/
 │   ├── test_profiles.py             # 4 testes cobrindo persistência de perfis e ofuscação de senhas
 │   ├── test_multi_village.py        # 3 testes cobrindo extração multi-aldeia e alternância de contexto
 │   └── test_proxy.py                # 2 testes cobrindo diagnóstico ativo de proxies
-
-
-
-
-│
-└── mdfiles/
-    └── contexto1.md                 # Contexto inicial da PoC
 ```
 
 ---
@@ -116,68 +113,27 @@ TribalwarsBot/
 3. **Anti-Bot (`BotProtectionError`):**
    * Marcadores: `id="bot_protect"`, `name="bot_check"`, ou telas de desafio humano.
    * Comportamento: Disparo imediato da exceção, **pausa instantânea do `TaskScheduler`**, preservação da tarefa na fila e disparo imediato do evento WebSocket `CAPTCHA_ALERT` para o frontend abrir a janela de resolução manual.
-4. **Comunicação Sidecar Segura:**
-   * O servidor roda estritamente em `127.0.0.1`.
-   * Acesso protegido por token gerado por `secrets.token_urlsafe(32)`. O ficheiro temporário `.sidecar_auth.json` comunica porta e credenciais ao Tauri e é eliminado no encerramento.
-   * Suporte a WebSockets bidirecionais transmitindo logs formatados (`LOG`) e eventos de estado (`STATE_UPDATE`, `SCHEDULER_STATE`).
-5. **Windows Event Loop Policy:** No Windows, utilizar `asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())` para compatibilidade estrita com os sockets do `curl_cffi`.
+4. **Thread-Safety no WebView2:**
+   * Em `pywebview` no Windows, métodos WinForms como `get_current_url()` ou reflexão em objetos .NET não devem ser acedidos diretamente fora da UI thread.
+   * A extração de URL e injeção de scripts utiliza `evaluate_js()` protegido.
+   * A captura de cookies utiliza o listener de eventos de tráfego de rede HTTP (`request_sent` / `response_received`), garantindo extração imediata e 100% estável de cookies `HttpOnly`.
+5. **Renovação de Sessão (`update_sid`):**
+   * Ao capturar um novo `sid`, a instância de `TribalAccount` fecha a sessão anterior e cria uma nova `AsyncSession` com os novos cookies injetados para todos os domínios do mundo e TLD.
+6. **Comunicação Sidecar Segura:**
+   * Servidor local estritamente em `127.0.0.1`.
+   * Acesso protegido por token gerado por `secrets.token_urlsafe(32)`. O ficheiro temporário `.sidecar_auth.json` comunica porta e credenciais e é eliminado no encerramento da aplicação.
 
 ---
 
 ## 5. Como Validar o Estado Atual
 
-Para rodar os testes automatizados da suíte completa (Fases 1, 2 e 3):
+Para rodar a suíte completa de 75 testes automatizados:
 ```powershell
 python -m unittest discover tests -v
 ```
-*Status esperado:* 56 testes, 0 falhas (`OK`), cobrindo modelos, delays gaussianos, parsers, anti-bot, account, scheduler, níveis virtuais, auto-build, configurações, praça de reunião (envio em 2 etapas), micro-farming, recrutamento militar e API Sidecar (REST + WebSockets).
+*Status esperado:* `Ran 75 tests in ~1.0s - OK`.
 
-Para testar o servidor Sidecar em execução real:
+Para iniciar a aplicação desktop completa com interface gráfica nativa:
 ```powershell
-python -m engine.main --api --port 8000
+python -m engine.main --gui
 ```
-*Validado:* Inicia o motor e o servidor FastAPI em `http://127.0.0.1:8000`, gera `.sidecar_auth.json` e transmite logs e estado em tempo real para o frontend via WebSocket `/ws`.
-
-
----
-
-## 4. Regras e Decisões Técnicas Críticas
-
-1. **Parâmetro `page=mobile`:** Obrigatório em **todas** as requisições GET/POST ao `game.php` para garantir a versão leve e consistência de headers.
-2. **Token CSRF (`h`):** Extraído do `game_data.csrf` ou links da página; deve ser sempre injetado nas rotas POST e de comandos.
-3. **Anti-Bot (`BotProtectionError`):**
-   * Marcadores: `id="bot_protect"`, `name="bot_check"`, ou telas de desafio humano.
-   * Comportamento: Disparo imediato da exceção, **pausa instantânea do `TaskScheduler`**, preservação da tarefa na fila e disparo de eventos assíncronos para o utilizador resolver o captcha na WebView.
-4. **Comandos Militares em 2 Etapas:** Sempre validar em 2 passos (`try=confirm` -> `action=command`), extraindo o hash de segurança do servidor (`chck`).
-5. **Micro-Farming Seguro:**
-   * Nunca disparar ataques simultâneos no mesmo milissegundo. Usar jitter de toque humano (200ms a 550ms) entre cliques na lista de saques.
-   * Filtragem de segurança obrigatória: ignorar perdas (`skip_losses`) e ignorar aldeias com muralha ativa (`skip_wall`).
-6. **Recrutamento Militar Inteligente:**
-   * Cálculo de défice: `Needed = Target - (Home + Queue)`.
-   * Produção em pequenos lotes (`batch_sizes`) para não estagnar os recursos da aldeia.
-   * Proteção de população: suspende o treino se a população livre for inferior a `min_free_pop`.
-7. **Temporização Realista:**
-   * Nunca usar atrasos fixos (`sleep(5)` é proibido em produção).
-   * Usar `get_human_delay(base, std_dev, min, max)` (distribuição normal truncada).
-   * Adicionar micro-jitters mecânicos de toque em ecrã com `get_click_jitter()` (120ms - 380ms).
-8. **Windows Event Loop Policy:** No Windows, utilizar `asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())` para compatibilidade estrita com os sockets do `curl_cffi`.
-
----
-
-## 5. Como Validar o Estado Atual
-
-Para rodar os testes automatizados da suíte completa (Fases 1 e 2):
-```powershell
-python -m unittest discover tests -v
-```
-*Status esperado:* 44 testes, 0 falhas (`OK`), cobrindo modelos, delays gaussianos, parsers, anti-bot, account, scheduler, níveis virtuais, auto-build, configurações, praça de reunião (envio em 2 etapas), micro-farming e recrutamento militar.
-
-Para testar no jogo real (online):
-```powershell
-python -m engine.main
-```
-*Validado:* Conexão online estabelecida no mundo `pt117`, leitura de aldeia/recursos em tempo real, auto-build, auto-farm e recrutamento inteligente respeitando `config.json`.
-
-
-
-

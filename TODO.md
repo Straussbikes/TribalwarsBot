@@ -12,22 +12,21 @@
 - [x] **Camada de Rede & Mascaramento Criptográfico (TLS/JA3)**
   - [x] Cliente `TribalAccount` com `curl_cffi` (`AsyncSession` + `impersonate="chrome124"`).
   - [x] Headers móveis Android (`Sec-CH-UA-Mobile: ?1`, `Sec-CH-UA-Platform: "Android"`).
-  - [x] Injeção dinâmica do cookie de sessão `sid`.
+  - [x] Injeção dinâmica do cookie de sessão `sid` nos domínios do mundo e raiz.
   - [x] Forçamento do parâmetro `page=mobile` em todas as rotas GET/POST.
   - [x] Tratamento de erros HTTP, rate limiting (HTTP 429) e manutenção de servidores (502/503).
+  - [x] Método `account.update_sid(new_sid)` para encerramento limpo e reconstrução atómica de sessão.
 - [x] **Deteção de Anti-Bot & Gestão de Sessão**
   - [x] Interceção de marcadores anti-bot (`id="bot_protect"`, `name="bot_check"`) disparando `BotProtectionError`.
   - [x] Deteção de expiração de sessão / ecrã de boas-vindas disparando `SessionExpiredError`.
-  - [x] **Autenticação Automática & Gestão de Sessão (`sid`)**
-    - [x] Extração e decodificação automática de cookies `sid` de sessões WebView2 (`extract_sid_from_cookies`).
-    - [x] Gestor de renovação `TribalAuthManager` com injeção de credenciais e modo interativo via Edge WebView2.
+  - [x] **Autenticação Manual & Interceção de Rede (`sid`)**
+    - [x] Intercetor de tráfego HTTP em tempo real (`request_sent` / `response_received`) no WebView2 para captura imediata de cookies `sid` (incluindo `HttpOnly`).
     - [x] Auto-persistência atómica do cookie `sid` no `config.json` perante rotação do servidor (`save_config_sid`).
     - [x] Rotina periódica suave de **Keep-Alive** no `TaskScheduler` (~15 min) para impedir expiração por inatividade.
-    - [x] Botão rápido "🔑 Renovar Sessão" no Cockpit e formulário de credenciais/auto-login nas Definições.
-    - [x] Endpoint `POST /api/auth/renew` integrado no Sidecar.
-    - [x] Suíte de testes unitários dedicada (`tests/test_auth.py` com 7 testes, totalizando 66 testes 100% OK).
+    - [x] Botão rápido "🔑 Entrar / Login" no Cockpit para abertura da janela nativa.
+    - [x] Banner informativo injetado no ecrã de login com botão interativo `[Entrei no Jogo →]`.
+    - [x] Suíte de testes unitários dedicada (`tests/test_auth.py` com 7 testes).
 - [x] **Temporização Humana & Micro-Jitters**
-
   - [x] Gerador de atrasos gaussianos truncados (`get_human_delay`).
   - [x] Micro-jitters mecânicos de toque em ecrã (`get_click_jitter`: 120ms a 380ms).
 - [x] **Agendador de Tarefas com Fila de Prioridade**
@@ -52,10 +51,9 @@
 - [x] Restrição de segurança de capacidade de fila (padrão de 2 construções sem custos extras).
 - [x] Modelos de evolução pré-definidos (`RUSH_RESOURCES_TEMPLATE`, `BALANCED_TEMPLATE`, `MILITARY_RUSH_TEMPLATE`).
 - [x] Controlador `MainBuildingManager` com disparo de `build` e `cancel` com token CSRF (`h`).
-- [x] Rotina periódica contínua de auto-build com feedback imediato aos 5s e ciclos humanos (60s-90s).
-- [x] Sistema de configuração flexível via `config.json` e `engine/config/settings.py` (suporte a templates e planos customizados).
-- [x] Suíte de testes unitários dedicada (11 testes do Edifício Principal + 2 de configuração, total de 23 testes, 100% OK).
-
+- [x] Rotina periódica contínua de auto-build com feedback imediato e ciclos humanos.
+- [x] Sistema de configuração flexível via `config.json` e propriedade compatível `effective_building_plan`.
+- [x] Suíte de testes unitários dedicada (12 testes do Edifício Principal + 2 de configuração).
 
 ### 2.2. Praça de Reunião & Gestão de Tropas (`screen=place`)
 - [x] Parsing da contagem de tropas disponíveis na aldeia ativa (`spear`, `sword`, `axe`, `archer`, `spy`, `light`, `marcher`, `heavy`, `ram`, `catapult`, `knight`, `snob`).
@@ -63,8 +61,7 @@
 - [x] Módulo de envio de comandos (Ataque / Apoio) em 2 etapas:
   - [x] Etapa 1: Envio do formulário inicial com coordenadas de destino (`target_x`, `target_y` ou ID da aldeia) e contagem de tropas.
   - [x] Etapa 2: Confirmação do comando (`action=command&h=...`) com extração da duração da marcha e tipo de ataque.
-- [x] Suíte de testes unitários para a Praça de Reunião (10 testes dedicados, total de 33 testes, 100% OK).
-
+- [x] Suíte de testes unitários para a Praça de Reunião (10 testes dedicados).
 
 ### 2.3. Micro-Farming Automatizado
 - [x] Suporte a Assistente de Farm (`screen=am_farm`):
@@ -75,45 +72,36 @@
   - [x] Lista configurável de aldeias bárbaras por coordenadas ou raio de distância.
   - [x] Envio automático de micro-grupos de saque (ex.: 5 lanceiros ou 2 cavalarias leves).
 - [x] Critérios de segurança: paragem imediata do farm caso as tropas sofram baixas (`skip_losses`) ou a muralha inimiga suba (`skip_wall`).
-- [x] Suíte de testes unitários para Micro-Farming (6 testes dedicados, total de 39 testes, 100% OK).
-
+- [x] Suíte de testes unitários para Micro-Farming (6 testes dedicados).
 
 ### 2.4. Coleta de Recursos / Scavenging (`screen=place&mode=scavenge`)
-- [ ] Leitura do estado de desbloqueio das 4 categorias de coleta:
-  - Categoria 1: Coleta Preguiçosa (*Lazy Scavenging* - 10%).
-  - Categoria 2: Coleta Modesta (*Humble Scavenging* - 25%).
-  - Categoria 3: Coleta Habilidosa (*Clever Scavenging* - 50%).
-  - Categoria 4: Coleta Excelente (*Great Scavenging* - 75%).
+- [ ] Leitura do estado de desbloqueio das 4 categorias de coleta (Lazy, Humble, Clever, Great).
 - [ ] Parsing de grupos de coleta em andamento e contadores de tempo restante.
-- [ ] **Algoritmo de Otimização de Coleta:**
-  - [ ] Cálculo proporcional da distribuição de tropas para que as 4 categorias terminem ao mesmo tempo, maximizando o ganho por hora.
-- [ ] Disparo automático com timer e agendamento para reenvio assim que as tropas regressam.
+- [ ] **Algoritmo de Otimização de Coleta:** Cálculo proporcional da distribuição de tropas para retorno simultâneo.
+- [ ] Disparo automático com timer e agendamento para reenvio.
 
 ### 2.5. Recrutamento Militar (Quartel, Estábulo, Oficina)
 - [x] Parsing do ecrã do Quartel (`screen=barracks`), Estábulo (`screen=stable`) e Oficina (`screen=garage`).
 - [x] Leitura das filas de recrutamento ativas e tempo de conclusão.
-- [x] Configuração de metas de exército (ex.: 1000 lanceiros, 1000 espadachins, 500 cavalarias leves).
-- [x] Recrutamento inteligente em pequenos lotes contínuos para não esgotar recursos necessários à evolução da aldeia.
+- [x] Configuração de metas de exército (ex.: lanceiros, espadachins, cavalaria leve).
+- [x] Recrutamento inteligente em pequenos lotes contínuos para preservação de recursos.
 - [x] Validação de limite de população livre da Fazenda antes de recrutar (`min_free_pop`).
-- [x] Suíte de testes unitários para Recrutamento Militar (5 testes dedicados, total de 44 testes, 100% OK).
-
+- [x] Suíte de testes unitários para Recrutamento Militar (5 testes dedicados).
 
 ### 2.6. Academia & Cunha de Moedas (`screen=snob`)
 - [ ] Leitura de moedas cunhadas / pacotes acumulados.
-- [ ] Cunha automática de moedas quando o armazém estiver prestes a encher (`wood/stone/iron >= 85% do storage_max`).
+- [ ] Cunha automática de moedas quando o armazém estiver prestes a encher.
 - [ ] Recrutamento automático de Nobres mediante configuração do utilizador.
 
 ### 2.7. Mercado & Balanceamento (`screen=market`)
 - [ ] Leitura de mercadores disponíveis.
 - [ ] Balanceamento automático de recursos entre aldeias da mesma conta.
-- [ ] Criação de ofertas no mercado para trocar excedentes de recursos por recursos deficitários.
+- [ ] Criação de ofertas no mercado para troca de excedentes.
 
 ### 2.8. Sistema de Defesa & Alarme de Ataques (Prioridade 0 / Alertas)
 - [ ] Monitorização em tempo real de ataques a chegar à aldeia (`incomings`).
-- [ ] Deteção da velocidade da unidade mais lenta atacante para estimar o tipo de ataque (Nobre, Aríete, Cavalaria, etc.).
-- [ ] **Rotina de Auto-Dodge (Desvio de Tropas e Recursos):**
-  - [ ] Envio das tropas e recursos para uma aldeia bárbara próxima 30 segundos antes do impacto do ataque.
-  - [ ] Cancelamento imediato do comando após o impacto para que as tropas regressem em segurança.
+- [ ] Deteção da velocidade da unidade mais lenta atacante (estimativa de Nobre / Aríete).
+- [ ] **Rotina de Auto-Dodge (Desvio de Tropas e Recursos):** Envio para aldeia bárbara 30s antes do impacto e cancelamento pós-impacto.
 - [ ] Notificação sonora e visual de emergência.
 
 ---
@@ -123,20 +111,16 @@
 - [x] **Servidor Local FastAPI & WebSockets**
   - [x] Execução em localhost com porta dinâmica e token efêmero de autenticação local (`.sidecar_auth.json`).
   - [x] Endpoints REST para comandos manuais, leitura de status, alteração de configurações e toggles de rotinas.
-  - [x] Canal WebSocket bidirecional para streaming em tempo real:
-    - [x] Logs do bot categorizados por severidade (`INFO`, `WARNING`, `CRITICAL`) via `WebSocketLogHandler`.
-    - [x] Recursos, aldeias e estado das filas em tempo real (`INITIAL_STATE`, `STATUS_UPDATE`).
-    - [x] Disparo de alerta de captcha anti-bot para o frontend (`CAPTCHA_ALERT`).
-  - [x] Suíte de testes unitários para a API Sidecar (12 testes dedicados, total de 56 testes, 100% OK).
+  - [x] Canal WebSocket bidirecional para streaming em tempo real de logs e status.
+  - [x] Disparo de alerta de captcha anti-bot para o frontend (`CAPTCHA_ALERT`).
+  - [x] Suíte de testes unitários para a API Sidecar (14 testes dedicados).
 - [x] **Gestor de Contas & Multi-Aldeia**
   - [x] Persistência segura de perfis de conta com ofuscação/encriptação (`ProfileManager` em `profiles.json`).
   - [x] Suporte a proxy dedicado ou residencial por conta com diagnóstico ativo (`test_proxy_connection`).
   - [x] Extração de todas as aldeias da conta a partir do `game_data` (`extract_all_villages`).
   - [x] Alternância fluida de contexto entre múltiplas aldeias (`account.switch_village` e `POST /api/account/switch-village`).
   - [x] Seletor de aldeias integrado na interface gráfica (Dropdown no card da aldeia).
-  - [x] Suíte de testes unitários dedicada (9 novos testes cobrindo perfis, multi-aldeia e proxies, totalizando 75 testes 100% OK).
-
-
+  - [x] Suíte de testes unitários dedicada (9 testes cobrindo perfis, multi-aldeia e proxies).
 
 ---
 
@@ -144,28 +128,25 @@
 
 - [x] **Interface Gráfica (UI/UX Premium Cockpit)**
   - [x] Dashboard com visual moderno (Dark Mode, Glassmorphism, Google Fonts Outfit & Inter, paleta Neon Cyber).
-  - [x] Visão geral da aldeia: cartões de recursos em tempo real (Madeira, Argila, Ferro), capacidade do Armazém e População livre.
+  - [x] **HUD Timer de Alta Precisão:** Relógio digital no topo da aplicação exibindo horas, minutos, segundos e microssegundos (`HH:MM:SS.uuuuuu`) a 60 FPS com `requestAnimationFrame`.
+  - [x] Visão geral da aldeia: cartões de recursos em tempo real, capacidade do Armazém e População livre.
   - [x] Fila de construção em tempo real com contagem decrescente ativa e estimativa de custos para o próximo edifício.
   - [x] Painel de controlo de módulos com botões de ação imediata (Pausar/Retomar, Construir Agora, Farm Agora, Recrutar Agora).
-  - [x] Consola de logs ao vivo via streaming WebSocket com busca por texto, filtros de severidade (`INFO`, `WARNING`, `CRITICAL`), auto-scroll e limpeza.
+  - [x] Consola de logs ao vivo via streaming WebSocket com busca por texto, filtros de severidade, auto-scroll e limpeza.
   - [x] Painel de configurações visuais com gravação instantânea e recarregamento a quente no `config.json`.
-- [x] **Shell Desktop Nativa Edge WebView2 & Tauri v2 Ready**
+- [x] **Shell Desktop Nativa Edge WebView2**
   - [x] Execução como aplicação desktop nativa via Edge WebView2 (`engine/desktop_launcher.py` ou `python -m engine.main --gui`).
   - [x] Servidor Sidecar serve a interface web diretamente em `http://127.0.0.1:8000/` (`python -m engine.main --api`).
-  - [x] Estrutura do frontend (`frontend/`) 100% isolada e compatível para build final via Tauri v2 (`tauri.conf.json`).
+  - [x] Estrutura do frontend (`frontend/`) 100% isolada e compatível para build final.
 - [x] **Modal de Alerta & Resolução de Captchas Anti-Bot**
   - [x] Overlay modal de emergência ativado instantaneamente por evento WebSocket (`CAPTCHA_ALERT`) com aviso sonoro sintetizado.
   - [x] Botão para abertura direta da janela do jogo para resolução humana e botão para retoma automática do motor.
-- [ ] **Notificações de Sistema & System Tray**
-  - [ ] Notificações sonoras do sistema para ataques inimigos a chegar (`incomings`).
-  - [ ] Minimizar para o System Tray com menu de contexto rápido.
-
 
 ---
 
 ## 📌 Fase 5: Empacotamento, Testes E2E & Release
 
-- [ ] Empacotamento do executável Python isolado com PyInstaller ou PyStandalone.
-- [ ] Build do instalador desktop nativo (`.msi` / `.exe`) via Tauri Bundler.
-- [ ] Testes de robustez com reconexão automática em caso de quebra de internet.
-- [ ] Documentação de utilização final e guia de configuração de proxies e templates.
+- [ ] Empacotamento do executável Python isolado com PyInstaller.
+- [ ] Build do instalador desktop nativo (`.msi` / `.exe`).
+- [ ] Testes de robustez com reconexão automática em caso de quebra de rede.
+- [ ] Documentação de utilização final e guia de configuração.
