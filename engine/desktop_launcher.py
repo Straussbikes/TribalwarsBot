@@ -268,8 +268,8 @@ class DesktopApp:
             # Aguarda estabilização dos cookies
             time.sleep(2.0)
 
-            # Captura o SID via document.cookie (via JS, thread-safe)
-            sid = self._extract_sid_via_js()
+            # Captura o SID via API nativa de cookies WebView2 e fallbacks
+            sid = self._extract_sid()
 
             if not sid:
                 logger.warning("[Login] Entrada no jogo detetada mas SID não encontrado. A tentar novamente em 3s...")
@@ -284,50 +284,50 @@ class DesktopApp:
             logger.warning("[Login] Tempo limite de 5 minutos atingido sem detetar login.")
             self.is_logging_in = False
 
-    def _extract_sid_via_js(self) -> str:
+    def _extract_sid(self) -> str:
         """
-        Lê o SID dos cookies via JavaScript (thread-safe).
-        Nota: document.cookie não expõe cookies HttpOnly — mas o Tribal Wars
-        também guarda o sid em localStorage/sessionStorage ou como cookie acessível.
-        Tenta múltiplas fontes.
+        Extrai o cookie 'sid' (mesmo HttpOnly) através da API nativa do WebView2
+        e com fallback para JavaScript.
         """
-        # Tenta localStorage (algumas versões do Tribal Wars)
+        # 1. Método Principal: Extração nativa de cookies WebView2 (suporta HttpOnly)
+        try:
+            cookies = self.window.get_cookies()
+            if cookies:
+                from engine.core.auth_manager import extract_sid_from_cookies
+                sid = extract_sid_from_cookies(cookies)
+                if sid and len(sid) > 10:
+                    logger.info(f"[Login] SID HttpOnly capturado via get_cookies(): {sid[:12]}...")
+                    return sid
+        except Exception as e:
+            logger.debug(f"[Login] Falha ao ler cookies nativos: {e}")
+
+        # 2. Fallback: localStorage
         sid = self._js_safe("window.localStorage ? (window.localStorage.getItem('sid') || '') : ''")
-        if sid and len(sid) > 5:
+        if sid and len(sid) > 10:
             logger.info(f"[Login] SID capturado via localStorage: {sid[:12]}...")
             return sid
 
-        # Tenta document.cookie
+        # 3. Fallback: document.cookie
         raw_cookie = self._js_safe("document.cookie")
         if raw_cookie:
             for part in raw_cookie.split(";"):
                 kv = part.strip()
                 if kv.startswith("sid="):
                     sid = kv[4:].strip()
-                    if sid:
+                    if sid and len(sid) > 10:
                         logger.info(f"[Login] SID capturado via document.cookie: {sid[:12]}...")
                         return sid
 
-        # Tenta extrair da URL (alguns servidores passam sid como query param)
+        # 4. Fallback: URL params
         curr_url = self._js_safe("window.location.href")
         if "sid=" in curr_url:
             for part in curr_url.split("&"):
                 if part.startswith("sid=") or "?sid=" in part:
                     sid = part.split("sid=")[-1].split("&")[0].strip()
-                    if sid:
+                    if sid and len(sid) > 10:
                         logger.info(f"[Login] SID capturado via URL param: {sid[:12]}...")
                         return sid
 
-        logger.warning("[Login] SID não encontrado (HttpOnly — não acessível via JS). A tentar reler config...")
-        # Último recurso: reler o config.json que pode já ter o SID (e.g. se o utilizador o colocou manualmente)
-        try:
-            from engine.config import load_config
-            cfg = load_config()
-            if cfg.sid and len(cfg.sid) > 5:
-                logger.info(f"[Login] SID lido do config: {cfg.sid[:12]}...")
-                return cfg.sid
-        except Exception:
-            pass
         return ""
 
     def _finalize_login(self, sid: str):
@@ -373,7 +373,7 @@ class DesktopApp:
 
     def _manual_capture_and_finalize(self):
         """Captura o SID e finaliza o login quando disparado manualmente pelo botão do banner."""
-        sid = self._extract_sid_via_js()
+        sid = self._extract_sid()
         if sid:
             self._finalize_login(sid)
         else:
