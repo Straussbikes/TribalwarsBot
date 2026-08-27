@@ -175,31 +175,13 @@ class DesktopApp:
         threading.Thread(target=self._monitor_login_success, daemon=True).start()
 
     def _monitor_login_success(self):
-        """Monitoriza a sessão até que o utilizador entre no jogo e captura o cookie 'sid'."""
-        logger.info("Monitor de login ativo. À espera da entrada no mundo...")
-        time.sleep(2.5)
-        cfg = self.context.config
-        if cfg.auth.username and cfg.auth.password:
-            js_fill = f"""
-            (function() {{
-                var u = document.getElementById('user');
-                var p = document.getElementById('password');
-                if (u && p && !u.value) {{
-                    u.value = '{cfg.auth.username}';
-                    p.value = '{cfg.auth.password}';
-                    var btn = document.querySelector('.btn-login');
-                    if (btn) btn.click();
-                }}
-            }})();
-            """
-            try:
-                self.window.evaluate_js(js_fill)
-                logger.info("Credenciais preenchidas automaticamente no formulário de login.")
-            except Exception as e:
-                logger.debug(f"Preenchimento JS: {e}")
-
+        """
+        Monitoriza a sessão enquanto o utilizador efetua o login manualmente no ecrã.
+        Assim que a entrada no jogo (game.php) é detetada, captura o cookie 'sid' e regressa ao Cockpit.
+        """
+        logger.info("Aguardando login manual do utilizador no ecrã do Tribal Wars...")
         start_t = time.time()
-        while time.time() - start_t < 180 and self.is_logging_in and self.is_running:
+        while time.time() - start_t < 300 and self.is_logging_in and self.is_running:
             time.sleep(1.0)
             try:
                 curr_url = self.window.get_url() or ""
@@ -207,9 +189,18 @@ class DesktopApp:
                 from engine.core.auth_manager import extract_sid_from_cookies
                 sid = extract_sid_from_cookies(cookies)
 
-                if "game.php" in curr_url or (sid and "page/play" in curr_url):
+                # Se o utilizador já acedeu a game.php ou entrou no mundo
+                if "game.php" in curr_url or (sid and ("page/play" in curr_url or "screen=" in curr_url)):
+                    if not sid:
+                        # Fallback: tenta ler via JavaScript document.cookie se o container Edge ainda não sincronizou
+                        raw_cookie = self.window.evaluate_js("document.cookie") or ""
+                        for part in raw_cookie.split(";"):
+                            if "sid=" in part:
+                                sid = part.split("sid=")[-1].strip()
+                                break
+
                     if sid:
-                        logger.info(f"✅ Login concluído! Novo SID capturado: {sid[:12]}...")
+                        logger.info(f"✅ Login manual concluído com sucesso! Novo SID capturado: {sid[:12]}...")
                         from engine.config.settings import save_config_sid
                         save_config_sid(sid)
 
@@ -218,15 +209,20 @@ class DesktopApp:
                             asyncio.run_coroutine_threadsafe(
                                 self.context.account.init_session(), self.loop
                             )
+                            # Atualiza dados da aldeia imediatamente
+                            asyncio.run_coroutine_threadsafe(
+                                self.context.account.refresh_state(), self.loop
+                            )
 
                         self.is_logging_in = False
-                        time.sleep(1.0)
+                        time.sleep(1.2)
                         cockpit_url = f"http://{self.host}:{self.port}/"
                         logger.info(f"A regressar ao Cockpit: {cockpit_url}")
                         self.window.load_url(cockpit_url)
                         break
             except Exception as e:
                 logger.debug(f"Erro no monitor de login: {e}")
+
 
     def run(self):
         """Inicia a thread do motor e a janela nativa pywebview."""

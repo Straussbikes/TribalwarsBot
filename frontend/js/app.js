@@ -394,24 +394,25 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   elements.btnRenewSession?.addEventListener("click", async () => {
     try {
-      addLogEntry("INFO", "auth", "A iniciar renovação de sessão via WebView2...");
+      addLogEntry("INFO", "auth", "A abrir ecrã do Tribal Wars para login manual...");
       elements.btnRenewSession.disabled = true;
-      elements.btnRenewSession.textContent = "A renovar...";
+      elements.btnRenewSession.textContent = "A abrir...";
       const res = await window.api.renewSession();
       if (res.status === "success" || res.status === "ok") {
-        addLogEntry("SUCCESS", "auth", res.message || "Sessão renovada com sucesso!");
+        addLogEntry("SUCCESS", "auth", res.message || "A navegar para a página de login...");
         await loadSettingsIntoForm();
         refreshStatus();
       } else {
-        addLogEntry("WARNING", "auth", res.message || "Não foi possível capturar o 'sid'.");
+        addLogEntry("WARNING", "auth", res.message || "Não foi possível abrir o ecrã de login.");
       }
     } catch (e) {
-      addLogEntry("CRITICAL", "auth", `Erro ao solicitar renovação: ${e.message}`);
+      addLogEntry("CRITICAL", "auth", `Erro: ${e.message}`);
     } finally {
       elements.btnRenewSession.disabled = false;
-      elements.btnRenewSession.innerHTML = "<span>🔑</span> Renovar Sessão";
+      elements.btnRenewSession.innerHTML = "<span>🔑</span> Entrar / Login";
     }
   });
+
 
   elements.btnBuildNow.addEventListener("click", async () => {
     try {
