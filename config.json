@@ -1,6 +1,6 @@
 {
   "world": "pt117",
-  "sid": "3A36ba8a9eba2545f5c55d56d8d045a03410d2dc5174bd9b3532be7e26e1de6c043662888b85c04e9000c45a1d6b23b1dd72a6672bfdf8fb0697ab75c003501602",
+  "sid": "0%3A8002fc4a57351e61d3772826cc13823781724ff02fef9c1bfb65de9d1ec369556ad1ec55d968b0fa27181712b9ccd9201800b56bd9bc9e66d63966e4102d386a",
   "building": {
     "_comentario": "Templates disponíveis: 'rush_resources' (recursos), 'balanced' (balanceado), 'military_rush' (tropas/cavalaria) ou 'custom'",
     "template": "rush_resources",
@@ -107,8 +107,14 @@
     "skip_wall": true,
     "interval_minutes": 10.0,
     "custom_targets": [
-      [452, 553],
-      [453, 550]
+      [
+        452,
+        553
+      ],
+      [
+        453,
+        550
+      ]
     ],
     "custom_troops": {
       "spear": 5,

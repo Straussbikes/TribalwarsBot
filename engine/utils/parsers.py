@@ -12,10 +12,14 @@ from engine.core.models import Resources, VillageData, PlayerData
 
 logger = logging.getLogger(__name__)
 
-# Regex robusto para localizar o objeto JavaScript global 'game_data'
+# Regex robusto para localizar o início do objeto JavaScript global 'game_data'
+GAME_DATA_START_REGEX = re.compile(
+    r"(?:var\s+game_data\s*=|TribalWars\.updateGameData\()\s*(\{)",
+    re.IGNORECASE,
+)
 GAME_DATA_REGEX = re.compile(
-    r"(?:var\s+game_data\s*=|TribalWars\.updateGameData\()\s*(\{.+?\})\s*;",
-    re.DOTALL,
+    r"(?:var\s+game_data\s*=|TribalWars\.updateGameData\()\s*(\{.+?\})\s*(?:\);|;)",
+    re.DOTALL | re.IGNORECASE,
 )
 
 # Regex de fallback para extração direta de chaves individuais do game_data
@@ -54,25 +58,39 @@ SESSION_EXPIRED_PATTERNS = [
 def extract_game_data(html: str) -> Optional[Dict[str, Any]]:
     """
     Localiza e decodifica o JSON do 'game_data' embutido nas páginas do Tribal Wars.
+    Utiliza JSONDecoder.raw_decode para consumir estritamente o objeto JSON até ao fecho de chavetas,
+    suportando tanto 'var game_data = {...};' como 'TribalWars.updateGameData({...});'.
     """
     if not html:
         return None
 
-    match = GAME_DATA_REGEX.search(html)
-    if match:
-        raw_json = match.group(1)
+    # 1. Extração robusta via JSONDecoder.raw_decode a partir da chaveta inicial
+    match_start = GAME_DATA_START_REGEX.search(html)
+    if match_start:
+        start_idx = match_start.start(1)
+        try:
+            decoder = json.JSONDecoder()
+            obj, _ = decoder.raw_decode(html, idx=start_idx)
+            if isinstance(obj, dict):
+                return obj
+        except Exception as e:
+            logger.debug(f"raw_decode inicial falhou: {e}")
+
+    # 2. Fallback de regex tradicional com tolerância a JS imperfeito
+    match_legacy = GAME_DATA_REGEX.search(html)
+    if match_legacy:
+        raw_json = match_legacy.group(1)
         try:
             return json.loads(raw_json)
         except json.JSONDecodeError:
-            # Em versões mobile antigas, chaves JS podem não conter aspas perfeitas
             try:
-                # Tenta reparar JSON com regex básico
                 repaired = re.sub(r'([{,])\s*([a-zA-Z0-9_]+)\s*:', r'\1"\2":', raw_json)
                 return json.loads(repaired)
             except Exception as e:
                 logger.warning(f"Falha ao decodificar JSON do game_data: {e}")
                 return None
     return None
+
 
 
 def extract_csrf_token(html: str, game_data: Optional[Dict[str, Any]] = None) -> Optional[str]:
