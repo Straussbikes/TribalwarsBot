@@ -161,6 +161,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       } else if (targetId === "tab-map") {
         loadMapGrid();
         loadMapBarbarians();
+      } else if (targetId === "tab-military") {
+        loadRecruitmentIntoForm();
       }
     });
   });
@@ -330,6 +332,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Tropas Disponíveis na Aldeia (12 Unidades)
     const troops = data.troops || (data.account && data.account.village && data.account.village.troops) || {};
+    state.army = troops;
     const unitMap = {
       spear: elements.armySpear,
       sword: elements.armySword,
@@ -349,6 +352,20 @@ document.addEventListener("DOMContentLoaded", async () => {
         const count = troops[uKey] || 0;
         el.textContent = count.toLocaleString();
         el.style.color = count > 0 ? "var(--neon-cyan)" : "var(--text-muted)";
+      }
+    }
+
+    // Atualiza barras de progresso do painel de Recrutamento
+    updateRecruitmentProgressBars(troops);
+
+    // Atualiza badge de status do recrutamento
+    if (data.modules && data.modules.recruitment) {
+      const recBadge = document.getElementById("badge-rec-status");
+      if (recBadge) {
+        const isOn = data.modules.recruitment.enabled;
+        recBadge.textContent = isOn ? "ATIVO" : "INATIVO";
+        recBadge.style.background = isOn ? "rgba(16,185,129,0.25)" : "rgba(100,116,139,0.25)";
+        recBadge.style.color = isOn ? "#34d399" : "#94a3b8";
       }
     }
 
@@ -1886,6 +1903,179 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  // --- 9. Painel de Recrutamento & Templates Táticos ---
+  const REC_UNITS = ["spear", "sword", "axe", "archer", "spy", "light", "marcher", "heavy", "ram", "catapult"];
+
+  const REC_TEMPLATES = {
+    nuke: {
+      label: "⚔️ Ataque Nuke",
+      targets: { spear: 0, sword: 0, axe: 6000, archer: 0, spy: 100, light: 3000, marcher: 0, heavy: 0, ram: 250, catapult: 0 },
+      batches: { spear: 10, sword: 10, axe: 25, archer: 10, spy: 5, light: 10, marcher: 5, heavy: 5, ram: 5, catapult: 2 },
+    },
+    defense: {
+      label: "🛡️ Defesa Bunker",
+      targets: { spear: 7000, sword: 7000, axe: 0, archer: 0, spy: 100, light: 0, marcher: 0, heavy: 1000, ram: 0, catapult: 0 },
+      batches: { spear: 25, sword: 25, axe: 10, archer: 10, spy: 5, light: 5, marcher: 5, heavy: 5, ram: 2, catapult: 2 },
+    },
+    farm: {
+      label: "🌾 Rush Farm",
+      targets: { spear: 0, sword: 0, axe: 200, archer: 0, spy: 20, light: 200, marcher: 0, heavy: 0, ram: 0, catapult: 0 },
+      batches: { spear: 10, sword: 10, axe: 15, archer: 10, spy: 5, light: 5, marcher: 5, heavy: 5, ram: 2, catapult: 2 },
+    },
+    balanced: {
+      label: "⚖️ Equilibrado",
+      targets: { spear: 150, sword: 150, axe: 300, archer: 0, spy: 30, light: 100, marcher: 0, heavy: 0, ram: 0, catapult: 0 },
+      batches: { spear: 10, sword: 10, axe: 15, archer: 10, spy: 5, light: 5, marcher: 5, heavy: 5, ram: 2, catapult: 2 },
+    },
+    clear: {
+      label: "🧹 Limpar",
+      targets: { spear: 0, sword: 0, axe: 0, archer: 0, spy: 0, light: 0, marcher: 0, heavy: 0, ram: 0, catapult: 0 },
+      batches: { spear: 10, sword: 10, axe: 10, archer: 10, spy: 5, light: 5, marcher: 5, heavy: 5, ram: 2, catapult: 2 },
+    },
+  };
+
+  function applyRecruitmentTemplate(tmplKey) {
+    const tmpl = REC_TEMPLATES[tmplKey];
+    if (!tmpl) return;
+    for (const unit of REC_UNITS) {
+      const tInput = document.getElementById(`rec-target-${unit}`);
+      const bInput = document.getElementById(`rec-batch-${unit}`);
+      if (tInput) tInput.value = tmpl.targets[unit] || 0;
+      if (bInput) bInput.value = tmpl.batches[unit] || 10;
+    }
+    // Destaca o botão do template ativo
+    document.querySelectorAll("[id^='btn-tmpl-']").forEach(btn => {
+      btn.style.borderColor = "";
+      btn.style.background = "";
+    });
+    const activeBtn = document.getElementById(`btn-tmpl-${tmplKey}`);
+    if (activeBtn && tmplKey !== "clear") {
+      activeBtn.style.borderColor = "var(--neon-cyan)";
+      activeBtn.style.background = "rgba(6, 182, 212, 0.15)";
+    }
+    addLogEntry("INFO", "recruitment", `Template "${tmpl.label}" aplicado com sucesso.`);
+  }
+
+  async function loadRecruitmentIntoForm() {
+    try {
+      const config = await window.api.getConfig();
+      if (!config) return;
+      const rec = config.recruitment || {};
+      const targets = rec.targets || {};
+      const batches = rec.batch_sizes || {};
+
+      for (const unit of REC_UNITS) {
+        const tInput = document.getElementById(`rec-target-${unit}`);
+        const bInput = document.getElementById(`rec-batch-${unit}`);
+        if (tInput && targets[unit] !== undefined) tInput.value = targets[unit];
+        if (bInput && batches[unit] !== undefined) bInput.value = batches[unit];
+      }
+
+      const enabledCb = document.getElementById("rec-enabled");
+      if (enabledCb) enabledCb.checked = !!rec.enabled;
+
+      const minPopInput = document.getElementById("rec-min-free-pop");
+      if (minPopInput && rec.min_free_pop !== undefined) minPopInput.value = rec.min_free_pop;
+
+      const intervalInput = document.getElementById("rec-interval-minutes");
+      if (intervalInput && rec.interval_minutes !== undefined) intervalInput.value = rec.interval_minutes;
+
+      // Atualiza barras de progresso com tropas atuais
+      updateRecruitmentProgressBars(state.army);
+    } catch (e) {
+      console.warn("Falha ao carregar configurações de recrutamento:", e);
+    }
+  }
+
+  function updateRecruitmentProgressBars(troops) {
+    if (!troops) return;
+    for (const unit of REC_UNITS) {
+      const currEl = document.getElementById(`rec-curr-${unit}`);
+      const barEl = document.getElementById(`rec-bar-${unit}`);
+      const targetInput = document.getElementById(`rec-target-${unit}`);
+      if (!currEl || !barEl) continue;
+
+      const current = troops[unit] || 0;
+      currEl.textContent = current.toLocaleString();
+
+      const target = targetInput ? parseInt(targetInput.value, 10) || 0 : 0;
+      if (target > 0) {
+        const pct = Math.min(100, Math.round((current / target) * 100));
+        barEl.style.width = `${pct}%`;
+        // Cor dinâmica: verde se atingiu a meta, cyan em progresso
+        if (pct >= 100) {
+          barEl.style.background = "linear-gradient(90deg, #059669, #34d399)";
+        } else {
+          barEl.style.background = "linear-gradient(90deg, #0284c7, var(--neon-cyan))";
+        }
+      } else {
+        barEl.style.width = "0%";
+      }
+    }
+  }
+
+  function collectRecruitmentPayload() {
+    const targets = {};
+    const batch_sizes = {};
+    for (const unit of REC_UNITS) {
+      const tInput = document.getElementById(`rec-target-${unit}`);
+      const bInput = document.getElementById(`rec-batch-${unit}`);
+      targets[unit] = tInput ? parseInt(tInput.value, 10) || 0 : 0;
+      batch_sizes[unit] = bInput ? Math.max(1, parseInt(bInput.value, 10) || 10) : 10;
+    }
+    return {
+      recruitment: {
+        enabled: document.getElementById("rec-enabled")?.checked || false,
+        min_free_pop: parseInt(document.getElementById("rec-min-free-pop")?.value, 10) || 10,
+        interval_minutes: parseFloat(document.getElementById("rec-interval-minutes")?.value) || 5,
+        targets: targets,
+        batch_sizes: batch_sizes,
+      },
+    };
+  }
+
+  async function saveRecruitmentConfig() {
+    try {
+      const payload = collectRecruitmentPayload();
+      await window.api.updateConfig(payload);
+      addLogEntry("SUCCESS", "recruitment", "Metas de recrutamento gravadas com sucesso no config.json.");
+      alert("Metas de recrutamento atualizadas com sucesso!");
+    } catch (err) {
+      alert(`Falha ao gravar metas de recrutamento: ${err.message}`);
+    }
+  }
+
+  // Botões de Template
+  document.getElementById("btn-tmpl-nuke")?.addEventListener("click", () => applyRecruitmentTemplate("nuke"));
+  document.getElementById("btn-tmpl-defense")?.addEventListener("click", () => applyRecruitmentTemplate("defense"));
+  document.getElementById("btn-tmpl-farm")?.addEventListener("click", () => applyRecruitmentTemplate("farm"));
+  document.getElementById("btn-tmpl-balanced")?.addEventListener("click", () => applyRecruitmentTemplate("balanced"));
+  document.getElementById("btn-tmpl-clear")?.addEventListener("click", () => applyRecruitmentTemplate("clear"));
+
+  // Botões de Guardar (topo e fundo)
+  document.getElementById("btn-save-recruitment")?.addEventListener("click", saveRecruitmentConfig);
+  document.getElementById("btn-save-recruitment-bottom")?.addEventListener("click", saveRecruitmentConfig);
+
+  // Botão Recrutar Agora
+  document.getElementById("btn-trigger-recruit-tab")?.addEventListener("click", async () => {
+    try {
+      // Guarda primeiro as metas atuais antes de recrutar
+      const payload = collectRecruitmentPayload();
+      await window.api.updateConfig(payload);
+      const res = await window.api.triggerRecruit();
+      addLogEntry("INFO", "recruitment", `🪖 Ciclo de recrutamento forçado! ${res?.message || ""}`  );
+    } catch (err) {
+      addLogEntry("ERROR", "recruitment", `Falha ao forçar recrutamento: ${err.message}`);
+    }
+  });
+
+  // Atualiza barras de progresso ao editar inputs de meta
+  REC_UNITS.forEach(unit => {
+    const tInput = document.getElementById(`rec-target-${unit}`);
+    if (tInput) {
+      tInput.addEventListener("input", () => updateRecruitmentProgressBars(state.army));
+    }
+  });
 
 
   async function refreshStatus() {
