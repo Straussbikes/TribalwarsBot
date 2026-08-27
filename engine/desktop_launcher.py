@@ -191,6 +191,17 @@ class DesktopApp:
             logger.error(f"Erro ao carregar URL de login: {e}")
         threading.Thread(target=self._monitor_login_success, daemon=True).start()
 
+    def _js_safe(self, script: str, default=""):
+        """
+        Executa JavaScript de forma segura a partir de qualquer thread.
+        evaluate_js() é o único método WebView2 thread-safe em pywebview.
+        """
+        try:
+            result = self.window.evaluate_js(script)
+            return result if result is not None else default
+        except Exception:
+            return default
+
     def _inject_login_banner(self):
         """Injeta um banner flutuante no topo do ecrã de login com instruções para o utilizador."""
         banner_js = """
@@ -199,14 +210,11 @@ class DesktopApp:
             var d = document.createElement('div');
             d.id = 'tw-bot-banner';
             d.style.cssText = 'position:fixed;top:0;left:0;right:0;background:linear-gradient(135deg,#0d1117,#161b22);color:#58a6ff;padding:10px 20px;z-index:2147483647;text-align:center;font-family:Arial,sans-serif;font-size:14px;box-shadow:0 2px 12px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;gap:10px;border-bottom:2px solid #58a6ff;';
-            d.innerHTML = '🔑 <b>TribalWars Bot:</b> Faça login normalmente e entre no seu mundo. A sessão será capturada automaticamente.';
+            d.innerHTML = '\uD83D\uDD11 <b>TribalWars Bot:</b> Fa\u00E7a login normalmente e entre no seu mundo. A sess\u00E3o ser\u00E1 capturada automaticamente.';
             document.body.prepend(d);
         })();
         """
-        try:
-            self.window.evaluate_js(banner_js)
-        except Exception:
-            pass
+        self._js_safe(banner_js)
 
     def _monitor_login_success(self):
         """
@@ -223,73 +231,94 @@ class DesktopApp:
         last_url = ""
         while time.time() - start_t < 300 and self.is_logging_in and self.is_running:
             time.sleep(1.5)
-            try:
-                # NOTA: O método correto do pywebview é get_current_url(), NÃO get_url()
-                curr_url = self.window.get_current_url() or ""
 
-                # Loga mudanças de URL para diagnóstico
-                if curr_url != last_url:
-                    logger.info(f"[Login] Navegação detetada: {curr_url[:80]}")
-                    last_url = curr_url
-                    # Re-injeta o banner após cada navegação
-                    time.sleep(0.5)
-                    self._inject_login_banner()
+            # evaluate_js() é o ÚNICO método WebView2 seguro de chamar fora da UI thread.
+            # get_current_url() e get_cookies() causam crash (E_NOINTERFACE / UI thread only).
+            curr_url = self._js_safe("window.location.href")
 
-                # Deteção: o utilizador entrou no jogo
-                is_in_game = (
-                    "game.php" in curr_url
-                    or "page/play" in curr_url
-                    or ("/game" in curr_url and "screen=" in curr_url)
-                )
+            # Loga mudanças de URL para diagnóstico
+            if curr_url and curr_url != last_url:
+                logger.info(f"[Login] Navegação detetada: {curr_url[:80]}")
+                last_url = curr_url
+                time.sleep(0.5)
+                self._inject_login_banner()
 
-                if not is_in_game:
-                    continue
+            # Deteção: o utilizador entrou no jogo
+            is_in_game = (
+                "game.php" in curr_url
+                or "page/play" in curr_url
+                or ("/game" in curr_url and "screen=" in curr_url)
+            )
 
-                logger.info(f"[Login] Entrada no jogo detetada! URL: {curr_url[:80]}")
+            if not is_in_game:
+                continue
 
-                # Aguarda estabilização dos cookies após login
-                time.sleep(2.0)
+            logger.info(f"[Login] Entrada no jogo detetada! URL: {curr_url[:80]}")
 
-                # Tenta capturar o SID pelos cookies do WebView2 (inclui HttpOnly)
-                sid = None
-                try:
-                    cookies = self.window.get_cookies()
-                    from engine.core.auth_manager import extract_sid_from_cookies
-                    sid = extract_sid_from_cookies(cookies)
-                    if sid:
-                        logger.info(f"[Login] SID capturado via get_cookies(): {sid[:12]}...")
-                except Exception as e:
-                    logger.warning(f"[Login] Falha ao ler cookies via get_cookies: {e}")
+            # Aguarda estabilização dos cookies
+            time.sleep(2.0)
 
-                # Fallback: tenta via document.cookie (não lê HttpOnly, mas vale tentar)
-                if not sid:
-                    try:
-                        raw_cookie = self.window.evaluate_js("document.cookie") or ""
-                        for part in raw_cookie.split(";"):
-                            kv = part.strip()
-                            if kv.startswith("sid="):
-                                sid = kv[4:].strip()
-                                if sid:
-                                    logger.info(f"[Login] SID capturado via document.cookie: {sid[:12]}...")
-                                break
-                    except Exception as e:
-                        logger.warning(f"[Login] Fallback document.cookie falhou: {e}")
+            # Captura o SID via document.cookie (via JS, thread-safe)
+            sid = self._extract_sid_via_js()
 
-                if not sid:
-                    logger.warning("[Login] Entrada no jogo detetada mas SID não encontrado. A tentar novamente em 3s...")
-                    time.sleep(3.0)
-                    continue
+            if not sid:
+                logger.warning("[Login] Entrada no jogo detetada mas SID não encontrado. A tentar novamente em 3s...")
+                time.sleep(3.0)
+                continue
 
-                # SID capturado com sucesso!
-                self._finalize_login(sid)
-                break
-
-            except Exception as e:
-                logger.warning(f"[Login] Erro no monitor: {e}")
+            # SID capturado com sucesso!
+            self._finalize_login(sid)
+            break
 
         if self.is_logging_in:
             logger.warning("[Login] Tempo limite de 5 minutos atingido sem detetar login.")
             self.is_logging_in = False
+
+    def _extract_sid_via_js(self) -> str:
+        """
+        Lê o SID dos cookies via JavaScript (thread-safe).
+        Nota: document.cookie não expõe cookies HttpOnly — mas o Tribal Wars
+        também guarda o sid em localStorage/sessionStorage ou como cookie acessível.
+        Tenta múltiplas fontes.
+        """
+        # Tenta localStorage (algumas versões do Tribal Wars)
+        sid = self._js_safe("window.localStorage ? (window.localStorage.getItem('sid') || '') : ''")
+        if sid and len(sid) > 5:
+            logger.info(f"[Login] SID capturado via localStorage: {sid[:12]}...")
+            return sid
+
+        # Tenta document.cookie
+        raw_cookie = self._js_safe("document.cookie")
+        if raw_cookie:
+            for part in raw_cookie.split(";"):
+                kv = part.strip()
+                if kv.startswith("sid="):
+                    sid = kv[4:].strip()
+                    if sid:
+                        logger.info(f"[Login] SID capturado via document.cookie: {sid[:12]}...")
+                        return sid
+
+        # Tenta extrair da URL (alguns servidores passam sid como query param)
+        curr_url = self._js_safe("window.location.href")
+        if "sid=" in curr_url:
+            for part in curr_url.split("&"):
+                if part.startswith("sid=") or "?sid=" in part:
+                    sid = part.split("sid=")[-1].split("&")[0].strip()
+                    if sid:
+                        logger.info(f"[Login] SID capturado via URL param: {sid[:12]}...")
+                        return sid
+
+        logger.warning("[Login] SID não encontrado (HttpOnly — não acessível via JS). A tentar reler config...")
+        # Último recurso: reler o config.json que pode já ter o SID (e.g. se o utilizador o colocou manualmente)
+        try:
+            from engine.config import load_config
+            cfg = load_config()
+            if cfg.sid and len(cfg.sid) > 5:
+                logger.info(f"[Login] SID lido do config: {cfg.sid[:12]}...")
+                return cfg.sid
+        except Exception:
+            pass
+        return ""
 
     def _finalize_login(self, sid: str):
         """Grava o SID capturado, re-inicializa a conta e regressa ao Cockpit."""
@@ -334,16 +363,11 @@ class DesktopApp:
 
     def _manual_capture_and_finalize(self):
         """Captura o SID e finaliza o login quando disparado manualmente pelo botão do banner."""
-        try:
-            cookies = self.window.get_cookies()
-            from engine.core.auth_manager import extract_sid_from_cookies
-            sid = extract_sid_from_cookies(cookies)
-            if sid:
-                self._finalize_login(sid)
-            else:
-                logger.warning("[Login] Botão acionado mas SID não encontrado nos cookies.")
-        except Exception as e:
-            logger.warning(f"[Login] Erro ao capturar SID manualmente: {e}")
+        sid = self._extract_sid_via_js()
+        if sid:
+            self._finalize_login(sid)
+        else:
+            logger.warning("[Login] Botão acionado mas SID não encontrado.")
 
 
 
