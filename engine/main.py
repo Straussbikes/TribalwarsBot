@@ -40,12 +40,20 @@ logger = logging.getLogger("TribalEngine")
 async def main():
     parser = argparse.ArgumentParser(description="Tribal Wars Mobile Automation Engine")
     parser.add_argument("--api", action="store_true", help="Ativa o servidor Sidecar IPC (FastAPI + WebSockets)")
+    parser.add_argument("--desktop", "--gui", action="store_true", help="Abre a aplicação desktop nativa com interface visual Edge WebView2")
     parser.add_argument("--port", type=int, default=8000, help="Porta local do servidor API (padrão: 8000)")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host local do servidor API (padrão: 127.0.0.1)")
     args, _ = parser.parse_known_args()
 
+    if args.desktop:
+        from engine.desktop_launcher import DesktopApp
+        app = DesktopApp(host=args.host, port=args.port)
+        app.run()
+        return
+
     # Carrega definições do config.json e variáveis de ambiente
     config = load_config()
+
     world = config.world
     sid = config.sid
 

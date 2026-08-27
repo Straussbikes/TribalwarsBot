@@ -208,6 +208,27 @@ class TestApiSidecar(unittest.TestCase):
             pong_msg = ws.receive_json()
             self.assertEqual(pong_msg["type"], "PONG")
 
+    def test_auth_info_endpoint(self):
+        """Endpoint /api/auth-info deve retornar o token de sessão para o cliente local."""
+        resp = self.client.get("/api/auth-info")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["token"], self.token)
+
+    def test_frontend_static_serving(self):
+        """A raiz do servidor deve carregar o HTML da interface frontend."""
+        resp = self.client.get("/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("TribalWars Bot", resp.text)
+        self.assertIn("badge-world", resp.text)
+
+        # Testa também um asset CSS
+        css_resp = self.client.get("/css/style.css")
+        self.assertEqual(css_resp.status_code, 200)
+        self.assertIn("neon-cyan", css_resp.text)
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -54,6 +54,15 @@ def create_app(
     # 2. Verificador de Token
     token_verifier = TokenVerifier(valid_token=token)
 
+    # Rota pública de descoberta para o cliente local (localhost)
+    @app.get("/api/auth-info")
+    async def get_auth_info():
+        """Fornece o token de autenticação exclusivamente para clientes na interface local."""
+        return {
+            "token": token,
+            "status": "ok",
+        }
+
     # 3. Regista rotas REST e WebSockets
     app.include_router(create_api_router(context, token_verifier))
     app.include_router(create_websocket_router(context, token_verifier))
@@ -72,7 +81,18 @@ def create_app(
         main_logger = logging.getLogger("TribalEngine")
         main_logger.addHandler(ws_handler)
 
+    # 5. Monta a interface estática do Frontend se a pasta existir
+    frontend_dir = Path(__file__).resolve().parent.parent.parent / "frontend"
+    if not frontend_dir.exists():
+        frontend_dir = Path("frontend")
+
+    if frontend_dir.exists() and (frontend_dir / "index.html").exists():
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
+        logger.info(f"Interface Web montada com sucesso a partir de: {frontend_dir}")
+
     return app
+
 
 
 async def start_sidecar_server(

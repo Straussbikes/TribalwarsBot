@@ -127,22 +127,26 @@
 
 ---
 
-## 📌 Fase 4: Shell Desktop Tauri v2 (Frontend Nativo)
+## 📌 Fase 4: Shell Desktop & Frontend Nativo (`frontend/`)
 
-- [ ] **Setup do Projeto Tauri v2**
-  - [ ] Inicialização do shell desktop em Rust + HTML/CSS/JS (Vanilla ou framework leve).
-  - [ ] Integração do sidecar Python com ciclo de vida controlado (start/stop automático com o aplicativo).
-- [ ] **Interface Gráfica (UI/UX Premium)**
-  - [ ] Dashboard com visual moderno (dark mode, glassmorphism, tipografia moderna).
-  - [ ] Visão geral da aldeia: cartões de recursos, capacidade do armazém, fazenda e gráficos.
-  - [ ] Painel de controlo de módulos com toggles individuais (Auto-Build, Auto-Farm, Scavenge, Recrutamento).
-  - [ ] Consola de logs ao vivo com filtros de pesquisa e cores por severidade.
-- [ ] **Janela Popup WebView para Resolução de Captchas**
-  - [ ] Abertura automática de janela nativa isolada apontando para a URL do captcha do jogo quando surgir `BotProtectionError`.
-  - [ ] Deteção do captcha resolvido pelo utilizador, fechamento do popup e retoma instantânea do agendador.
-- [ ] **Notificações de Sistema**
-  - [ ] Notificações no Windows para ataques inimigos recebidos e captchas pendentes.
-  - [ ] Minimizar para o System Tray com menu de contexto rápido (Pausar/Retomar/Encerrar).
+- [x] **Interface Gráfica (UI/UX Premium Cockpit)**
+  - [x] Dashboard com visual moderno (Dark Mode, Glassmorphism, Google Fonts Outfit & Inter, paleta Neon Cyber).
+  - [x] Visão geral da aldeia: cartões de recursos em tempo real (Madeira, Argila, Ferro), capacidade do Armazém e População livre.
+  - [x] Fila de construção em tempo real com contagem decrescente ativa e estimativa de custos para o próximo edifício.
+  - [x] Painel de controlo de módulos com botões de ação imediata (Pausar/Retomar, Construir Agora, Farm Agora, Recrutar Agora).
+  - [x] Consola de logs ao vivo via streaming WebSocket com busca por texto, filtros de severidade (`INFO`, `WARNING`, `CRITICAL`), auto-scroll e limpeza.
+  - [x] Painel de configurações visuais com gravação instantânea e recarregamento a quente no `config.json`.
+- [x] **Shell Desktop Nativa Edge WebView2 & Tauri v2 Ready**
+  - [x] Execução como aplicação desktop nativa via Edge WebView2 (`engine/desktop_launcher.py` ou `python -m engine.main --gui`).
+  - [x] Servidor Sidecar serve a interface web diretamente em `http://127.0.0.1:8000/` (`python -m engine.main --api`).
+  - [x] Estrutura do frontend (`frontend/`) 100% isolada e compatível para build final via Tauri v2 (`tauri.conf.json`).
+- [x] **Modal de Alerta & Resolução de Captchas Anti-Bot**
+  - [x] Overlay modal de emergência ativado instantaneamente por evento WebSocket (`CAPTCHA_ALERT`) com aviso sonoro sintetizado.
+  - [x] Botão para abertura direta da janela do jogo para resolução humana e botão para retoma automática do motor.
+- [ ] **Notificações de Sistema & System Tray**
+  - [ ] Notificações sonoras do sistema para ataques inimigos a chegar (`incomings`).
+  - [ ] Minimizar para o System Tray com menu de contexto rápido.
+
 
 ---
 

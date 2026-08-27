@@ -26,8 +26,10 @@
 |---|---|---|---|
 | **Fase 1** | **Fundação do Core & Rede** | ✅ Concluída | Estrutura modular, `TribalAccount`, `TaskScheduler`, parsers e 10 testes unitários. |
 | **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (Edifício Principal), `place` (Praça), `farm` (Micro-Farming) e `recruitment` (Quartel/Estábulo/Oficina) concluídos. |
-| **Fase 3** | **Camada Sidecar IPC & Sessões** | 🔄 Em Curso | FastAPI REST, WebSockets bidirecionais (logs, status, captcha), autenticação efêmera. 56 testes unitários (100% OK). |
-| **Fase 4** | **Frontend Tauri & Integração** | 📋 Pendente | Shell desktop Tauri v2, interface de logs, controlos e WebView de captcha. |
+| **Fase 3** | **Camada Sidecar IPC & Sessões** | ✅ Concluída | FastAPI REST, WebSockets bidirecionais (logs, status, captcha), autenticação efêmera. |
+| **Fase 4** | **Shell Desktop & Frontend Nativo** | ✅ Concluída | Cockpit moderno (Dark Glassmorphism), streaming WebSocket, WebView2 nativa e 59 testes unitários (100% OK). |
+| **Fase 5** | **Empacotamento & Release** | 📋 Pendente | Empacotamento com PyInstaller / Tauri Bundler e instalador final. |
+
 
 ---
 
@@ -68,10 +70,20 @@ TribalwarsBot/
 │   │   └── server.py                # create_app (CORS tauri://localhost) e start_sidecar_server (uvicorn)
 │   ├── config/                      # Configurações e carregamento de perfis
 │   │   ├── __init__.py
-│   │   └── settings.py              # BotConfig, BuildingConfig, FarmConfig, RecruitmentConfig, load_config
-│   └── main.py                      # Ponto de entrada CLI e Sidecar (--api, --port, --host)
+│   │   ├── settings.py              # BotConfig, BuildingConfig, FarmConfig, RecruitmentConfig, load_config
+│   ├── desktop_launcher.py          # Desktop Launcher: janela nativa Edge WebView2 (pywebview)
+│   └── main.py                      # Ponto de entrada CLI, Sidecar e Desktop (--gui, --api, --port)
 │
-├── tests/                           # Suíte de testes unitários automatizados (57 testes, 100% OK)
+├── frontend/                        # Frontend Cockpit Web & Desktop (HTML5 / Vanilla CSS / Vanilla JS)
+│   ├── index.html                   # Estrutura do dashboard, cards, tabs e modal de captcha
+│   ├── css/
+│   │   └── style.css                # Design system Glassmorphism, dark mode e micro-animações
+│   └── js/
+│       ├── api.js                   # Cliente REST assíncrono para controle e configurações
+│       ├── websocket.js             # Conexão WebSocket em tempo real e sintetizador sonoro
+│       └── app.js                   # Controlador da interface, cronómetro e streaming de logs
+│
+├── tests/                           # Suíte de testes unitários automatizados (59 testes, 100% OK)
 │   ├── __init__.py
 │   ├── test_core.py                 # 10 testes cobrindo models, timing, parsers, account e scheduler
 │   ├── test_main_building.py        # 12 testes cobrindo níveis, fila mobile/desktop, templates, auto-build e cancelamento
@@ -79,7 +91,8 @@ TribalwarsBot/
 │   ├── test_place.py                # 10 testes cobrindo tropas, capacidade de carga, comandos e envio em 2 etapas
 │   ├── test_farm.py                 # 6 testes cobrindo Assistente de Farm, modelos A/B, filtros e fallback
 │   ├── test_recruitment.py          # 5 testes cobrindo filas de treino, metas, lotes e reserva de população
-│   └── test_api.py                  # 12 testes cobrindo autenticação, REST endpoints, pausa/retoma e WebSockets
+│   └── test_api.py                  # 14 testes cobrindo auth, REST, WebSockets, auth-info e static files
+
 
 │
 └── mdfiles/

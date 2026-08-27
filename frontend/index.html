@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TribalWars Bot Cockpit - Automação Avançada</title>
+  
+  <!-- Fontes do Google: Outfit (Títulos) & Inter (Interface) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Estilos Customizados -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- Top Navigation Bar -->
+    <header class="top-nav">
+      <div class="brand-section">
+        <div class="brand-logo">⚔</div>
+        <div class="brand-text">
+          <h1>TribalWars Bot <span class="version-tag">v2.0 HUD</span></h1>
+          <p class="brand-subtitle">Automação Mobile HTTP com Evasão de TLS</p>
+        </div>
+      </div>
+
+      <div class="nav-indicators">
+        <div class="badge badge-world" id="badge-world">PT117</div>
+        <div class="badge badge-status active" id="badge-status">
+          <span class="status-dot"></span>
+          <span id="status-text">MOTOR ATIVO</span>
+        </div>
+      </div>
+
+      <div class="quick-actions">
+        <button class="btn btn-warning" id="btn-toggle-scheduler">
+          <span>⏸</span> Pausar
+        </button>
+        <button class="btn btn-primary" id="btn-build-now" title="Força a execução de um ciclo imediato de construção">
+          <span>🔨</span> Construir
+        </button>
+        <button class="btn btn-secondary" id="btn-farm-now" title="Dispara uma onda imediata do Assistente de Farm">
+          <span>🌾</span> Farm
+        </button>
+        <button class="btn btn-secondary" id="btn-recruit-now" title="Dispara verificação imediata de recrutamento militar">
+          <span>🪖</span> Recrutar
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="main-workspace">
+      
+      <!-- Sidebar Tabs -->
+      <nav class="sidebar">
+        <button class="nav-tab active" data-tab="tab-dashboard" id="tab-btn-dashboard">
+          <span class="tab-icon">📊</span> Painel Principal
+        </button>
+        <button class="nav-tab" data-tab="tab-building" id="tab-btn-building">
+          <span class="tab-icon">🏛</span> Edifícios & Fila
+        </button>
+        <button class="nav-tab" data-tab="tab-military" id="tab-btn-military">
+          <span class="tab-icon">⚔</span> Farm & Exército
+        </button>
+        <button class="nav-tab" data-tab="tab-terminal" id="tab-btn-terminal">
+          <span class="tab-icon">🖥</span> Terminal de Logs
+        </button>
+        <button class="nav-tab" data-tab="tab-settings" id="tab-btn-settings">
+          <span class="tab-icon">⚙</span> Configurações
+        </button>
+      </nav>
+
+      <!-- Panel 1: Dashboard Principal -->
+      <main class="tab-content active" id="tab-dashboard">
+        <div class="dashboard-grid">
+          
+          <!-- Card: Aldeia e Recursos -->
+          <section class="glass-card col-8">
+            <div class="card-header">
+              <div class="card-title">
+                <span class="icon">🏰</span>
+                <span id="village-name">Aldeia Ativa</span>
+                <span id="village-coords" style="color: var(--neon-cyan); font-family: var(--font-mono); font-size: 0.85rem">(571|485)</span>
+              </div>
+              <div style="font-size: 0.8rem; color: var(--text-muted)">
+                Capacidade do Armazém: <strong id="storage-capacity" style="color: var(--text-main)">1.512</strong>
+              </div>
+            </div>
+
+            <!-- Grid de Recursos -->
+            <div class="resources-grid">
+              <!-- Madeira -->
+              <div class="resource-item">
+                <div class="res-header">
+                  <span class="res-label">Madeira</span>
+                  <span style="color: var(--res-wood)">🌲</span>
+                </div>
+                <div class="res-value" id="res-wood-val">0</div>
+                <div class="res-progress-container">
+                  <div class="res-progress-bar wood" id="res-wood-bar" style="width: 0%"></div>
+                </div>
+              </div>
+
+              <!-- Argila -->
+              <div class="resource-item">
+                <div class="res-header">
+                  <span class="res-label">Argila</span>
+                  <span style="color: var(--res-stone)">🧱</span>
+                </div>
+                <div class="res-value" id="res-stone-val">0</div>
+                <div class="res-progress-container">
+                  <div class="res-progress-bar stone" id="res-stone-bar" style="width: 0%"></div>
+                </div>
+              </div>
+
+              <!-- Ferro -->
+              <div class="resource-item">
+                <div class="res-header">
+                  <span class="res-label">Ferro</span>
+                  <span style="color: var(--res-iron)">⛏</span>
+                </div>
+                <div class="res-value" id="res-iron-val">0</div>
+                <div class="res-progress-container">
+                  <div class="res-progress-bar iron" id="res-iron-bar" style="width: 0%"></div>
+                </div>
+              </div>
+
+              <!-- População -->
+              <div class="resource-item">
+                <div class="res-header">
+                  <span class="res-label">População</span>
+                  <span style="color: var(--res-pop)">👥</span>
+                </div>
+                <div class="res-value" id="res-pop-val" style="font-size: 0.95rem">0 / 240</div>
+                <div class="res-progress-container">
+                  <div class="res-progress-bar pop" id="res-pop-bar" style="width: 0%"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Card: Fila de Construção Ativa -->
+          <section class="glass-card col-4">
+            <div class="card-header">
+              <div class="card-title">
+                <span class="icon">🔨</span> Fila de Construção <span id="queue-count" style="font-size: 0.8rem; color: var(--text-muted)">(0/2)</span>
+              </div>
+            </div>
+            <div class="queue-list" id="queue-container">
+              <div class="queue-empty-state">
+                <span>A carregar estado da fila...</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- Card: Força Militar da Aldeia -->
+          <section class="glass-card col-6">
+            <div class="card-header">
+              <div class="card-title">
+                <span class="icon">🛡</span> Tropas na Aldeia
+              </div>
+            </div>
+            <div class="army-matrix">
+              <div class="army-cell">
+                <div class="army-cell-name">Lanceiro</div>
+                <div class="army-cell-count" id="army-spear">0</div>
+              </div>
+              <div class="army-cell">
+                <div class="army-cell-name">Espadachim</div>
+                <div class="army-cell-count" id="army-sword">0</div>
+              </div>
+              <div class="army-cell">
+                <div class="army-cell-name">Viking</div>
+                <div class="army-cell-count" id="army-axe">0</div>
+              </div>
+              <div class="army-cell">
+                <div class="army-cell-name">Explorador</div>
+                <div class="army-cell-count" id="army-spy">0</div>
+              </div>
+              <div class="army-cell">
+                <div class="army-cell-name">Cav. Leve</div>
+                <div class="army-cell-count" id="army-light">0</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Card: Assistente de Farm & Micro-Farming -->
+          <section class="glass-card col-6">
+            <div class="card-header">
+              <div class="card-title">
+                <span class="icon">🌾</span> Assistente de Farm (AF)
+              </div>
+              <div class="badge" style="color: var(--neon-amber)">Modelo A/B Ativo</div>
+            </div>
+            <div style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.6">
+              <p>• <strong>Modo de Ataque:</strong> Submissão direta de micro-ataques com tempos gaussianos.</p>
+              <p>• <strong>Filtros Ativos:</strong> Deteção de perdas totais/parciais e verificação de nível de muralha.</p>
+              <p>• <strong>Proteção Anti-Dormência:</strong> Micro-jitter e dispersão de cliques humanos.</p>
+            </div>
+          </section>
+
+        </div>
+      </main>
+
+      <!-- Panel 2: Edifícios & Template -->
+      <main class="tab-content" id="tab-building">
+        <div class="glass-card" style="max-width: 1000px; margin: 0 auto">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="icon">🏛</span> Gestão de Evolução do Edifício Principal
+            </div>
+          </div>
+          <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 20px">
+            O bot calcula os níveis virtuais em tempo real (nível atual + ordens na fila de construção) e executa o plano configurado sem penalidades de recursos.
+          </p>
+          <div class="next-target-box" id="next-target-box">
+            <div>
+              <div class="next-target-label">Próximo Alvo no Plano de Construção</div>
+              <div class="next-target-value" id="next-target-name">Poço de Argila (stone) para Nível 2</div>
+            </div>
+            <div class="next-target-cost" id="next-target-cost">
+              Custo: 83 Madeira | 63 Argila | 50 Ferro
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- Panel 3: Farm & Exército -->
+      <main class="tab-content" id="tab-military">
+        <div class="glass-card" style="max-width: 1000px; margin: 0 auto">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="icon">⚔</span> Recrutamento & Estratégia Militar
+            </div>
+          </div>
+          <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 20px">
+            O gestor de recrutamento treina tropas em lotes controlados para nunca estrangular o crescimento do Edifício Principal e reserva automaticamente vagas de população livre da Fazenda.
+          </p>
+        </div>
+      </main>
+
+      <!-- Panel 4: Terminal de Logs ao Vivo -->
+      <main class="tab-content" id="tab-terminal">
+        <div class="terminal-container">
+          <div class="terminal-header">
+            <div class="terminal-controls">
+              <span style="font-weight: 700; font-size: 0.85rem; color: var(--text-muted)">Streaming de Logs (WebSocket):</span>
+              <select id="filter-log-level" class="terminal-search" style="width: 120px">
+                <option value="ALL">Todos os Níveis</option>
+                <option value="INFO">Apenas INFO</option>
+                <option value="WARNING">Avisos (WARN)</option>
+                <option value="CRITICAL">Erros Críticos</option>
+              </select>
+              <input type="text" id="search-logs" class="terminal-search" placeholder="Filtrar por texto...">
+            </div>
+            <div class="terminal-controls">
+              <button class="btn btn-secondary" id="btn-autoscroll" style="padding: 4px 10px; font-size: 0.75rem">Scroll: Ativo</button>
+              <button class="btn btn-secondary" id="btn-clear-logs" style="padding: 4px 10px; font-size: 0.75rem">Limpar</button>
+            </div>
+          </div>
+          <div class="terminal-body" id="terminal-logs">
+            <!-- Logs inseridos dinamicamente aqui -->
+          </div>
+        </div>
+      </main>
+
+      <!-- Panel 5: Configurações Globais -->
+      <main class="tab-content" id="tab-settings">
+        <div class="glass-card" style="max-width: 900px; margin: 0 auto">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="icon">⚙</span> Configurações do Bot (config.json)
+            </div>
+          </div>
+
+          <form id="settings-form">
+            <div class="settings-section">
+              <h3>Autenticação & Sessão</h3>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label for="cfg-world">Mundo do Jogo</label>
+                  <input type="text" id="cfg-world" class="form-control" value="pt117">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-sid">Cookie de Sessão (sid)</label>
+                  <input type="password" id="cfg-sid" class="form-control" placeholder="Cole o cookie sid aqui...">
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h3>Edifício Principal (Auto-Build)</h3>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label for="cfg-building-template">Template de Construção</label>
+                  <select id="cfg-building-template" class="form-control">
+                    <option value="rush_resources">rush_resources (Foco em Recursos)</option>
+                    <option value="balanced">balanced (Balanceado)</option>
+                    <option value="military_rush">military_rush (Tropas e Muralha)</option>
+                    <option value="custom">custom (Plano Personalizado)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="cfg-max-queue">Limite Máximo da Fila</label>
+                  <input type="number" id="cfg-max-queue" class="form-control" min="1" max="5" value="2">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-build-interval">Intervalo Entre Ciclos (Segundos)</label>
+                  <input type="number" id="cfg-build-interval" class="form-control" min="30" value="75">
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h3>Micro-Farming (Assistente de Farm)</h3>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+                    <input type="checkbox" id="cfg-farm-enabled" style="accent-color: var(--neon-cyan)">
+                    Ativar Micro-Farming Automático
+                  </label>
+                </div>
+                <div class="form-group">
+                  <label for="cfg-farm-interval">Intervalo Entre Ondas (Minutos)</label>
+                  <input type="number" id="cfg-farm-interval" class="form-control" min="1" value="5">
+                </div>
+              </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; margin-top: 10px">
+              <button type="submit" class="btn btn-primary" id="btn-save-settings" style="padding: 10px 24px">
+                💾 Gravar Configurações
+              </button>
+            </div>
+          </form>
+        </div>
+      </main>
+
+    </div>
+
+    <!-- Modal Emergência Captcha Anti-Bot -->
+    <div class="modal-overlay" id="captcha-modal">
+      <div class="modal-box">
+        <div class="modal-icon">🚨</div>
+        <h2 class="modal-title">VERIFICAÇÃO ANTI-BOT DETETADA</h2>
+        <p class="modal-desc">
+          O Tribal Wars solicitou a resolução de um Captcha Humano. 
+          Todas as rotas do bot foram <strong>pausadas de imediato</strong> para proteger a integridade da tua conta.
+        </p>
+        <div class="modal-actions">
+          <button class="btn btn-primary" id="btn-open-tw-window">
+            🌐 Abrir Janela do Jogo
+          </button>
+          <button class="btn btn-warning" id="btn-resolve-captcha">
+            ✅ Concluído, Retomar Bot
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Scripts da Aplicação -->
+  <script src="js/api.js"></script>
+  <script src="js/websocket.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
