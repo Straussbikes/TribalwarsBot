@@ -111,17 +111,19 @@
 
 ## 📌 Fase 3: Camada Sidecar IPC & Gestão de Sessões (`engine/api/`)
 
-- [ ] **Servidor Local FastAPI & WebSockets**
-  - [ ] Execução em localhost com porta dinâmica e token efêmero de autenticação local.
-  - [ ] Endpoints REST para comandos manuais, leitura de status, alteração de configurações e toggles de rotinas.
-  - [ ] Canal WebSocket bidirecional para streaming em tempo real:
-    - [ ] Logs do bot categorizados por severidade (`INFO`, `WARNING`, `CRITICAL`).
-    - [ ] Recursos, aldeias e estado das filas em tempo real.
-    - [ ] Disparo de alerta de captcha anti-bot para o frontend.
+- [x] **Servidor Local FastAPI & WebSockets**
+  - [x] Execução em localhost com porta dinâmica e token efêmero de autenticação local (`.sidecar_auth.json`).
+  - [x] Endpoints REST para comandos manuais, leitura de status, alteração de configurações e toggles de rotinas.
+  - [x] Canal WebSocket bidirecional para streaming em tempo real:
+    - [x] Logs do bot categorizados por severidade (`INFO`, `WARNING`, `CRITICAL`) via `WebSocketLogHandler`.
+    - [x] Recursos, aldeias e estado das filas em tempo real (`INITIAL_STATE`, `STATUS_UPDATE`).
+    - [x] Disparo de alerta de captcha anti-bot para o frontend (`CAPTCHA_ALERT`).
+  - [x] Suíte de testes unitários para a API Sidecar (12 testes dedicados, total de 56 testes, 100% OK).
 - [ ] **Gestor de Contas & Multi-Aldeia**
   - [ ] Persistência segura de perfis de conta (ficheiro JSON/SQLite encriptado).
   - [ ] Suporte a proxy dedicado ou residencial por conta (`http://user:pass@ip:port`).
   - [ ] Alternância fluida de contexto entre múltiplas aldeias (`village_id`).
+
 
 ---
 

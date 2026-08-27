@@ -55,6 +55,11 @@ class TaskScheduler:
     def pending_count(self) -> int:
         return self.queue.qsize()
 
+    @property
+    def queue_size(self) -> int:
+        return self.queue.qsize()
+
+
     def on_bot_protection(self, handler: Callable[[BotProtectionError], Coroutine]) -> None:
         """Regista um callback assíncrono executado quando um captcha/bot protect é detetado."""
         self._bot_protect_handlers.append(handler)

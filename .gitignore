@@ -35,3 +35,8 @@ ENV/
 
 # Logs
 *.log
+
+# Sidecar IPC
+.sidecar_auth.json
+test_config_scratch.json
+

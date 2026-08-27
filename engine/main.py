@@ -18,7 +18,11 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+import argparse
+from pathlib import Path
+
 from engine.actions import FarmManager, MainBuildingManager, RecruitmentManager
+from engine.api import EngineContext, remove_auth_file, start_sidecar_server
 from engine.config import load_config
 from engine.core.account import TribalAccount
 from engine.core.exceptions import BotProtectionError, SessionExpiredError
@@ -34,10 +38,17 @@ logger = logging.getLogger("TribalEngine")
 
 
 async def main():
+    parser = argparse.ArgumentParser(description="Tribal Wars Mobile Automation Engine")
+    parser.add_argument("--api", action="store_true", help="Ativa o servidor Sidecar IPC (FastAPI + WebSockets)")
+    parser.add_argument("--port", type=int, default=8000, help="Porta local do servidor API (padrão: 8000)")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host local do servidor API (padrão: 127.0.0.1)")
+    args, _ = parser.parse_known_args()
+
     # Carrega definições do config.json e variáveis de ambiente
     config = load_config()
     world = config.world
     sid = config.sid
+
 
     if not sid:
         logger.warning(
@@ -153,9 +164,34 @@ async def main():
         else:
             logger.info("Módulo de Recrutamento Militar desativado no config.json (enabled=false).")
 
-    # 4. Inicia o loop de tarefas do agendador
+    # 4. Inicializa o Contexto da API Sidecar
+    api_server = None
+    server_task = None
+    auth_file = Path(".sidecar_auth.json")
 
+    context = EngineContext(
+        scheduler=scheduler,
+        config=config,
+        account=account if sid and "account" in locals() else None,
+    )
 
+    # Conecta o evento de verificação anti-bot para broadcast imediato via WebSocket
+    async def _on_bot_protect_alert(err: BotProtectionError):
+        await context.notify_captcha_detected(world=world, html_snippet=err.html_snippet)
+
+    scheduler.on_bot_protection(_on_bot_protect_alert)
+
+    # Inicia o servidor Sidecar se solicitado por argumento CLI (--api) ou variável de ambiente
+    if args.api or os.getenv("TW_API") == "1":
+        api_server = await start_sidecar_server(
+            context=context,
+            host=args.host,
+            port=args.port,
+            auth_file_path=auth_file,
+        )
+        server_task = asyncio.create_task(api_server.serve())
+
+    # 5. Inicia o loop de tarefas do agendador
     scheduler.start()
     logger.info("Motor iniciado. Pressione Ctrl+C para encerrar.")
 
@@ -166,9 +202,15 @@ async def main():
         logger.info("A encerrar motor de forma graciosa...")
     finally:
         await scheduler.stop()
+        if api_server:
+            api_server.should_exit = True
+            if server_task:
+                server_task.cancel()
+        remove_auth_file(auth_file)
         if sid and "account" in locals():
             await account.close()
         logger.info("Motor encerrado com sucesso.")
+
 
 
 if __name__ == "__main__":
