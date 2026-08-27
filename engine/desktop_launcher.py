@@ -72,52 +72,46 @@ class DesktopApp:
                 except Exception as e:
                     logger.warning(f"Sessão não pôde ser inicializada no arranque: {e}")
 
-            mb_mgr = MainBuildingManager()
+            mb_mgr = MainBuildingManager(default_max_queue=cfg.building.max_queue)
             place_mgr = PlaceManager()
             farm_mgr = FarmManager()
             recruit_mgr = RecruitmentManager()
 
             # Agenda rotinas ativas
             if account and cfg.building.template:
+                build_plan = cfg.get_active_build_plan()
                 mb_mgr.schedule_auto_build(
                     scheduler=scheduler,
                     account=account,
-                    template_name=cfg.building.template,
+                    plan=build_plan,
                     max_queue=cfg.building.max_queue,
                     interval_seconds=cfg.building.interval_seconds,
-                    custom_plan=cfg.building.custom_plan,
                 )
 
             if account and cfg.farm.enabled:
                 farm_mgr.schedule_auto_farm(
                     scheduler=scheduler,
                     account=account,
-                    interval_minutes=cfg.farm.interval_minutes,
+                    farm_config=cfg.farm,
                 )
 
             if account and cfg.recruitment.enabled:
                 recruit_mgr.schedule_auto_recruit(
                     scheduler=scheduler,
                     account=account,
-                    targets=cfg.recruitment.targets,
-                    batch_sizes=cfg.recruitment.batch_sizes,
-                    interval_minutes=cfg.recruitment.interval_minutes,
-                    min_free_pop=cfg.recruitment.min_free_pop,
+                    recruit_config=cfg.recruitment,
                 )
 
             # Inicia scheduler
-            await scheduler.start()
+            scheduler.start()
 
             # Cria Contexto Sidecar
             self.context = EngineContext(
                 scheduler=scheduler,
-                account=account,
-                building_manager=mb_mgr,
-                place_manager=place_mgr,
-                farm_manager=farm_mgr,
-                recruitment_manager=recruit_mgr,
                 config=cfg,
+                account=account,
             )
+
 
             # Inicia Servidor FastAPI
             self.server = await start_sidecar_server(
@@ -125,6 +119,7 @@ class DesktopApp:
                 host=self.host,
                 port=self.port,
             )
+
 
             logger.info("Motor Sidecar a correr em segundo plano.")
             await self.server.serve()
@@ -139,11 +134,20 @@ class DesktopApp:
         self.engine_thread = threading.Thread(target=self.start_background_engine, daemon=True)
         self.engine_thread.start()
 
-        # Aguarda 1 segundo para o servidor subir
-        time.sleep(1.2)
+        # Aguarda ativamente até que o servidor local esteja a responder
+        import urllib.request
+        logger.info(f"A aguardar inicialização do servidor em http://{self.host}:{self.port}...")
+        for _ in range(50):
+            try:
+                with urllib.request.urlopen(f"http://{self.host}:{self.port}/api/health", timeout=1) as resp:
+                    if resp.status == 200:
+                        break
+            except Exception:
+                time.sleep(0.15)
 
         window_url = f"http://{self.host}:{self.port}/"
         logger.info(f"A abrir janela desktop nativa: {window_url}")
+
 
         window = webview.create_window(
             title="TribalWars Bot Cockpit - v2.0",
