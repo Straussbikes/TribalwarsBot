@@ -413,3 +413,215 @@ def parse_building_upgrades(html: str) -> Dict[str, Dict[str, Any]]:
 
     return upgrades
 
+
+# Regex para Praça de Reunião (screen=place)
+ALL_UNITS = (
+    "spear", "sword", "axe", "archer", "spy", "light",
+    "marcher", "heavy", "ram", "catapult", "knight", "snob"
+)
+
+UNIT_LINK_ALL_REGEX = re.compile(
+    r'(?:id=["\']unit_input_([a-z_]+)_all["\']|data-unit=["\']([a-z_]+)["\'][^>]*class=["\']units-entry-all["\']|class=["\']units-entry-all["\'][^>]*data-unit=["\']([a-z_]+)["\'])[^>]*>\s*\((\d+)\)\s*</a>',
+    re.IGNORECASE,
+)
+
+UNIT_INPUT_ALL_REGEX = re.compile(
+    r'<input[^>]*id=["\']unit_input_([a-z_]+)["\'][^>]*data-all-count=["\'](\d+)["\']|<input[^>]*data-all-count=["\'](\d+)["\'][^>]*id=["\']unit_input_([a-z_]+)["\']',
+    re.IGNORECASE,
+)
+
+COMMAND_ROW_REGEX = re.compile(
+    r'<tr[^>]*class=["\'](?:command-row|nowrap)[^>]*>(.*?)</tr>|<tr[^>]*id=["\']command_(\d+)["\'][^>]*>(.*?)</tr>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def parse_available_units(html: str) -> Dict[str, int]:
+    """
+    Extrai a quantidade de tropas disponíveis na aldeia a partir do ecrã da Praça de Reunião (screen=place).
+    Retorna um dicionário com todas as 12 unidades (0 se ausente).
+    """
+    units: Dict[str, int] = {u: 0 for u in ALL_UNITS}
+    if not html:
+        return units
+
+    normalized = html.replace("&amp;", "&")
+
+    # 1. Busca por links do tipo <a id="unit_input_spear_all">(150)</a> ou data-unit="spear">(150)</a>
+    for match in UNIT_LINK_ALL_REGEX.finditer(normalized):
+        unit_name = next(g for g in match.groups()[:3] if g is not None).lower().strip()
+        count_str = match.group(4)
+        if unit_name in units:
+            try:
+                units[unit_name] = max(units[unit_name], int(count_str))
+            except ValueError:
+                pass
+
+    # 2. Busca por inputs com data-all-count="150"
+    for match in UNIT_INPUT_ALL_REGEX.finditer(normalized):
+        g1, g2, g3, g4 = match.groups()
+        if g1 and g2:
+            unit_name = g1.lower().strip()
+            count_str = g2
+        elif g3 and g4:
+            unit_name = g4.lower().strip()
+            count_str = g3
+        else:
+            continue
+
+        if unit_name in units:
+            try:
+                units[unit_name] = max(units[unit_name], int(count_str))
+            except ValueError:
+                pass
+
+    # 3. Fallback genérico para elementos simples com id="units_entry_all_<unit>"
+    for unit_key in ALL_UNITS:
+        rgx = re.compile(rf'id=["\'](?:units_entry_all_{unit_key}|unit_input_{unit_key}_all)["\'][^>]*>\s*\(?(\d+)\)?\s*<', re.IGNORECASE)
+        m = rgx.search(normalized)
+        if m:
+            try:
+                units[unit_key] = max(units[unit_key], int(m.group(1)))
+            except ValueError:
+                pass
+
+    return units
+
+
+def parse_place_commands(html: str) -> List[Dict[str, Any]]:
+    """
+    Extrai os comandos de tropas em andamento (ataques, apoios e tropas a regressar)
+    listados na Praça de Reunião.
+    """
+    commands: List[Dict[str, Any]] = []
+    if not html:
+        return commands
+
+    normalized = html.replace("&amp;", "&")
+
+    # Localiza blocos ou linhas de comandos
+    # Exemplo: <a href="...screen=info_command&id=12345...">Ataque a Aldeia Bárbara (452|550)</a>
+    cmd_link_matches = re.finditer(
+        r'<a[^>]*href=["\'][^"\']*[?&]screen=info_command[^"\']*[?&]id=(\d+)[^"\']*["\'][^>]*>(.*?)</a>',
+        normalized,
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    for match in cmd_link_matches:
+        cmd_id = match.group(1)
+        raw_text = re.sub(r'<[^>]+>', '', match.group(2)).strip()
+
+        # Determina o tipo de movimento
+        m_lower = raw_text.lower()
+        if "ataque" in m_lower or "attack" in m_lower:
+            cmd_type = "attack"
+        elif "apoio" in m_lower or "support" in m_lower:
+            cmd_type = "support"
+        elif "regresso" in m_lower or "return" in m_lower:
+            cmd_type = "return"
+        else:
+            cmd_type = "command"
+
+        # Extrai coordenadas (xxx|yyy)
+        coords_match = re.search(r'\((\d{1,3}\|\d{1,3})\)', raw_text)
+        coords = coords_match.group(1) if coords_match else ""
+
+        # Extrai nome do alvo
+        target_name = raw_text
+        if coords_match:
+            target_name = raw_text[:coords_match.start()].strip()
+
+        # Procura timer adjacente
+        start_idx = match.end()
+        surrounding_text = normalized[start_idx:start_idx + 300]
+        timer_match = re.search(r'<span[^>]*class=["\']timer["\'][^>]*>([\d:]+)</span>', surrounding_text, re.IGNORECASE)
+        timer_str = timer_match.group(1) if timer_match else ""
+
+        commands.append({
+            "command_id": cmd_id,
+            "type": cmd_type,
+            "raw_text": raw_text,
+            "target_name": target_name,
+            "target_coords": coords,
+            "timer_str": timer_str,
+        })
+
+    return commands
+
+
+def parse_command_confirmation(html: str) -> Dict[str, Any]:
+    """
+    Analisa a página de confirmação de envio de comandos (screen=place&try=confirm).
+    Extrai todos os inputs ocultos necessários para a confirmação final (action=command),
+    além de verificar caixas de erro do jogo.
+    """
+    result: Dict[str, Any] = {
+        "success": True,
+        "error_message": "",
+        "hidden_fields": {},
+        "target_name": "",
+        "target_coords": "",
+        "duration_str": "",
+        "arrival_time": "",
+    }
+
+    if not html:
+        result["success"] = False
+        result["error_message"] = "Resposta HTML vazia."
+        return result
+
+    normalized = html.replace("&amp;", "&")
+
+    # 1. Verifica erros retornados pelo jogo (ex.: proteção de iniciantes, aldeia inválida)
+    error_match = re.search(r'<div[^>]*class=["\'](?:error_box|info_box\s+error)["\'][^>]*>(.*?)</div>', normalized, re.DOTALL | re.IGNORECASE)
+    if error_match:
+        err_msg = re.sub(r'<[^>]+>', '', error_match.group(1)).strip()
+        result["success"] = False
+        result["error_message"] = err_msg
+        return result
+
+    # 2. Extrai todos os campos input hidden do formulário de confirmação
+    hidden_inputs = re.findall(
+        r'<input[^>]*type=["\']hidden["\'][^>]*name=["\']([^"\']+)["\'][^>]*value=["\']([^"\']*)["\']|<input[^>]*value=["\']([^"\']*)["\'][^>]*type=["\']hidden["\'][^>]*name=["\']([^"\']+)["\']',
+        normalized,
+        re.IGNORECASE,
+    )
+
+    for g1, g2, g3, g4 in hidden_inputs:
+        if g1:
+            name, val = g1, g2
+        else:
+            name, val = g4, g3
+        result["hidden_fields"][name] = val
+
+    # 3. Duração da marcha
+    dur_match = re.search(
+        r'(?:Duração|Duration)\s*:?\s*</td>\s*<td>\s*(?:<span[^>]*>)?\s*([\d]+:[\d]+(?::[\d]+)?)\s*(?:</span>)?\s*</td>|'
+        r'(?:Duração|Duration)\s*:\s*([\d]+:[\d]+(?::[\d]+)?)',
+        normalized,
+        re.IGNORECASE,
+    )
+    if dur_match:
+        result["duration_str"] = next(g for g in dur_match.groups() if g is not None)
+
+
+    # 4. Chegada
+    arrival_match = re.search(r'Chegada:?\s*</td>\s*<td>\s*(.*?)(?:<span|</td>)', normalized, re.DOTALL | re.IGNORECASE)
+    if arrival_match:
+        result["arrival_time"] = re.sub(r'<[^>]+>', '', arrival_match.group(1)).strip()
+
+    # 5. Coordenadas do alvo
+    coords_match = re.search(r'\((\d{1,3}\|\d{1,3})\)', normalized)
+    if coords_match:
+        result["target_coords"] = coords_match.group(1)
+
+    # Validação mínima: campo 'chck' ou 'action_id' ou 'h'
+    if not result["hidden_fields"]:
+        # Se não encontrou campos ocultos, pode não ser a página de confirmação
+        if "action=command" not in normalized and "try=confirm" not in normalized:
+            result["success"] = False
+            result["error_message"] = "Formulário de confirmação não localizado na página."
+
+    return result
+
+

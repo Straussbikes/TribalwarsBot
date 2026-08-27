@@ -3,7 +3,7 @@
 > **Propósito deste ficheiro:** Manter o histórico de progresso, decisões arquiteturais, mapa de ficheiros e diretrizes de desenvolvimento para que qualquer sessão de IA recupere o contexto instantaneamente com consumo mínimo de tokens e sem perda de continuidade.
 
 **Última Atualização:** 2026-08-27  
-**Estado Geral:** Fase 2 em Progresso (Edifício Principal Concluído)  
+**Estado Geral:** Fase 2 em Progresso (Edifício Principal e Praça de Reunião Concluídos)  
 **Ambiente Validado:** Windows 11 / Python 3.14 / `curl_cffi` 0.16.2 / Node.js v25.8.1
 
 ---
@@ -25,7 +25,7 @@
 | Fase | Descrição | Status | Detalhes |
 |---|---|---|---|
 | **Fase 1** | **Fundação do Core & Rede** | ✅ Concluída | Estrutura modular, `TribalAccount`, `TaskScheduler`, parsers e 10 testes unitários. |
-| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (Edifício Principal & Auto-Build) concluído com 11 testes adicionais (21 no total). Próximos: `place` (farm), `scavenge`, `barracks`. |
+| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (Edifício Principal) e `place` (Praça de Reunião e tropas) concluídos. Total de 33 testes unitários. Próximos: `am_farm` (farm) e `scavenge`. |
 | **Fase 3** | **Camada Sidecar IPC & Sessões** | 📋 Pendente | Servidor local FastAPI/WebSocket, autenticação local, persistência multi-conta. |
 | **Fase 4** | **Frontend Tauri & Integração** | 📋 Pendente | Shell desktop Tauri v2, interface de logs, controlos e WebView de captcha. |
 
@@ -36,9 +36,11 @@
 ```text
 TribalwarsBot/
 ├── PROJECT_STATE.md                 # [ESTE FICHEIRO] Estado consolidado e memória do projeto
+├── TODO.md                          # Checklist detalhado e acionável de todas as funcionalidades
 ├── README.md                        # Documentação pública e instruções rápidas
 ├── pyproject.toml                   # Configuração de empacotamento e dependências Python
 ├── requirements.txt                 # Dependências diretas (curl_cffi, pydantic, fastapi, uvicorn)
+├── config.json                      # Configuração personalizável (mundo, sid, templates, fila)
 │
 ├── engine/                          # Python Core Engine
 │   ├── core/                        # Núcleo da automação
@@ -49,11 +51,12 @@ TribalwarsBot/
 │   │   └── exceptions.py            # BotProtectionError, SessionExpiredError, RateLimitError, etc.
 │   ├── utils/                       # Utilitários de evasão e parsers
 │   │   ├── __init__.py
-│   │   ├── parsers.py               # Extração de game_data, CSRF, recursos, bot protect, níveis e fila de construção
+│   │   ├── parsers.py               # Extração de game_data, CSRF, recursos, bot protect, níveis, fila, tropas e confirmações
 │   │   └── timing.py                # get_human_delay (gaussiano), get_click_jitter
 │   ├── actions/                     # Handlers por ecrã (Fase 2)
-│   │   ├── __init__.py              # Exporta MainBuildingManager, templates e tipos de edifícios
-│   │   └── main_building.py         # MainBuildingManager: leitura, níveis virtuais, auto-build, cancelamento
+│   │   ├── __init__.py              # Exporta MainBuildingManager, PlaceManager, templates e tipos
+│   │   ├── main_building.py         # MainBuildingManager: leitura, níveis virtuais, auto-build, cancelamento
+│   │   └── place.py                 # PlaceManager: leitura de tropas, capacidade de saque, comandos em 2 etapas
 │   ├── api/                         # Camada de comunicação IPC com Tauri (Fase 3)
 │   │   └── __init__.py
 │   ├── config/                      # Configurações e carregamento de perfis
@@ -61,13 +64,13 @@ TribalwarsBot/
 │   │   └── settings.py              # BotConfig, BuildingConfig, load_config a partir de config.json
 │   └── main.py                      # Ponto de entrada CLI com carregamento dinâmico de config.json
 │
-├── tests/                           # Suíte de testes unitários automatizados (23 testes, 100% OK)
+├── tests/                           # Suíte de testes unitários automatizados (33 testes, 100% OK)
 │   ├── __init__.py
 │   ├── test_core.py                 # 10 testes cobrindo models, timing, parsers, account e scheduler
 │   ├── test_main_building.py        # 11 testes cobrindo níveis, fila, templates, auto-build e cancelamento
-│   └── test_config.py               # 2 testes cobrindo parsing de config.json e seleção de templates
+│   ├── test_config.py               # 2 testes cobrindo parsing de config.json e seleção de templates
+│   └── test_place.py                # 10 testes cobrindo tropas, capacidade de carga, comandos e envio em 2 etapas
 │
-├── config.json                      # Configuração personalizável pelo utilizador (mundo, templates, fila)
 └── mdfiles/
     └── contexto1.md                 # Contexto inicial da PoC
 ```
@@ -81,11 +84,12 @@ TribalwarsBot/
 3. **Anti-Bot (`BotProtectionError`):**
    * Marcadores: `id="bot_protect"`, `name="bot_check"`, ou telas de desafio humano.
    * Comportamento: Disparo imediato da exceção, **pausa instantânea do `TaskScheduler`**, preservação da tarefa na fila e disparo de eventos assíncronos para o utilizador resolver o captcha na WebView.
-4. **Temporização Realista:**
+4. **Comandos Militares em 2 Etapas:** Sempre validar em 2 passos (`try=confirm` -> `action=command`), extraindo o hash de segurança do servidor (`chck`).
+5. **Temporização Realista:**
    * Nunca usar atrasos fixos (`sleep(5)` é proibido em produção).
    * Usar `get_human_delay(base, std_dev, min, max)` (distribuição normal truncada).
    * Adicionar micro-jitters mecânicos de toque em ecrã com `get_click_jitter()` (120ms - 380ms).
-5. **Windows Event Loop Policy:** No Windows, utilizar `asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())` para compatibilidade estrita com os sockets do `curl_cffi`.
+6. **Windows Event Loop Policy:** No Windows, utilizar `asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())` para compatibilidade estrita com os sockets do `curl_cffi`.
 
 ---
 
@@ -95,13 +99,12 @@ Para rodar os testes automatizados da suíte completa (Fases 1 e 2):
 ```powershell
 python -m unittest discover tests -v
 ```
-*Status esperado:* 23 testes, 0 falhas (`OK`), cobrindo modelos, delays gaussianos, parsers, anti-bot, account, scheduler, níveis virtuais, auto-build e carregamento de configurações.
+*Status esperado:* 33 testes, 0 falhas (`OK`), cobrindo modelos, delays gaussianos, parsers, anti-bot, account, scheduler, níveis virtuais, auto-build, configurações e praça de reunião (envio em 2 etapas).
 
 Para testar no jogo real (online):
 ```powershell
-$env:TW_WORLD="pt117"
-$env:TW_SID="teu_cookie_sid"
 python -m engine.main
 ```
-*Validado:* Conexão online estabelecida no mundo `pt117`, feedback inicial rápido aos 2s e auto-reagendamento contínuo a cada ~60s-90s com atrasos humanos.
+*Validado:* Conexão online estabelecida no mundo `pt117`, leitura de aldeia/recursos em tempo real e auto-build respeitando `config.json`.
+
 

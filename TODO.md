@@ -49,12 +49,13 @@
 
 
 ### 2.2. Praça de Reunião & Gestão de Tropas (`screen=place`)
-- [ ] Parsing da contagem de tropas disponíveis na aldeia ativa (`spear`, `sword`, `axe`, `archer`, `spy`, `light`, `marcher`, `heavy`, `ram`, `catapult`, `knight`, `snob`).
-- [ ] Leitura de comandos em curso (tropas a atacar, apoiar ou a regressar à aldeia).
-- [ ] Módulo de envio de comandos (Ataque / Apoio) em 2 etapas:
-  - [ ] Etapa 1: Envio do formulário inicial com coordenadas de destino (`target_x`, `target_y` ou ID da aldeia) e contagem de tropas.
-  - [ ] Etapa 2: Confirmação do comando (`action=command&h=...`) com extração da duração da marcha e tipo de ataque.
-- [ ] Suíte de testes unitários para a Praça de Reunião.
+- [x] Parsing da contagem de tropas disponíveis na aldeia ativa (`spear`, `sword`, `axe`, `archer`, `spy`, `light`, `marcher`, `heavy`, `ram`, `catapult`, `knight`, `snob`).
+- [x] Leitura de comandos em curso (tropas a atacar, apoiar ou a regressar à aldeia).
+- [x] Módulo de envio de comandos (Ataque / Apoio) em 2 etapas:
+  - [x] Etapa 1: Envio do formulário inicial com coordenadas de destino (`target_x`, `target_y` ou ID da aldeia) e contagem de tropas.
+  - [x] Etapa 2: Confirmação do comando (`action=command&h=...`) com extração da duração da marcha e tipo de ataque.
+- [x] Suíte de testes unitários para a Praça de Reunião (10 testes dedicados, total de 33 testes, 100% OK).
+
 
 ### 2.3. Micro-Farming Automatizado
 - [ ] Suporte a Assistente de Farm (`screen=am_farm`):

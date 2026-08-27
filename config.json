@@ -1,34 +1,100 @@
 {
   "world": "pt117",
-  "sid": "",
+  "sid": "3A36ba8a9eba2545f5c55d56d8d045a03410d2dc5174bd9b3532be7e26e1de6c043662888b85c04e9000c45a1d6b23b1dd72a6672bfdf8fb0697ab75c003501602",
   "building": {
     "_comentario": "Templates disponíveis: 'rush_resources' (recursos), 'balanced' (balanceado), 'military_rush' (tropas/cavalaria) ou 'custom'",
     "template": "rush_resources",
-    "max_queue": 2,
+    "max_queue": 4,
     "interval_seconds": 75.0,
     "custom_plan": [
-      ["wood", 1],
-      ["stone", 1],
-      ["iron", 1],
-      ["main", 2],
-      ["main", 3],
-      ["barracks", 1],
-      ["wood", 2],
-      ["stone", 2],
-      ["storage", 2],
-      ["farm", 2],
-      ["wood", 3],
-      ["stone", 3],
-      ["iron", 2],
-      ["main", 4],
-      ["main", 5],
-      ["barracks", 2],
-      ["smith", 1],
-      ["wood", 4],
-      ["stone", 4],
-      ["iron", 3],
-      ["storage", 3],
-      ["wall", 2]
+      [
+        "wood",
+        1
+      ],
+      [
+        "stone",
+        1
+      ],
+      [
+        "iron",
+        1
+      ],
+      [
+        "main",
+        2
+      ],
+      [
+        "main",
+        3
+      ],
+      [
+        "barracks",
+        1
+      ],
+      [
+        "wood",
+        2
+      ],
+      [
+        "stone",
+        2
+      ],
+      [
+        "storage",
+        2
+      ],
+      [
+        "farm",
+        2
+      ],
+      [
+        "wood",
+        3
+      ],
+      [
+        "stone",
+        3
+      ],
+      [
+        "iron",
+        2
+      ],
+      [
+        "main",
+        4
+      ],
+      [
+        "main",
+        5
+      ],
+      [
+        "barracks",
+        2
+      ],
+      [
+        "smith",
+        1
+      ],
+      [
+        "wood",
+        4
+      ],
+      [
+        "stone",
+        4
+      ],
+      [
+        "iron",
+        3
+      ],
+      [
+        "storage",
+        3
+      ],
+      [
+        "wall",
+        2
+      ]
     ]
   }
 }
