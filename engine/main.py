@@ -18,7 +18,8 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from engine.actions import MainBuildingManager, RUSH_RESOURCES_TEMPLATE
+from engine.actions import MainBuildingManager
+from engine.config import load_config
 from engine.core.account import TribalAccount
 from engine.core.exceptions import BotProtectionError, SessionExpiredError
 from engine.core.models import TaskPriority
@@ -33,12 +34,14 @@ logger = logging.getLogger("TribalEngine")
 
 
 async def main():
-    world = os.getenv("TW_WORLD", "pt117")
-    sid = os.getenv("TW_SID", "")
+    # Carrega definições do config.json e variáveis de ambiente
+    config = load_config()
+    world = config.world
+    sid = config.sid
 
     if not sid:
         logger.warning(
-            "Cookie 'sid' não fornecido via variável de ambiente TW_SID. "
+            "Cookie 'sid' não configurado (nem em config.json nem via TW_SID). "
             "A executar em modo de demonstração com componentes isolados."
         )
 
@@ -64,7 +67,12 @@ async def main():
 
     # 3. Inicialização da Conta (se sid disponível)
     if sid:
-        account = TribalAccount(world=world, sid=sid)
+        account = TribalAccount(
+            world=world,
+            sid=sid,
+            domain=config.domain,
+            proxy=config.proxy,
+        )
         await account.init_session()
 
         # Tarefa periódica de atualização de recursos
@@ -100,16 +108,20 @@ async def main():
             delay_seconds=2.0,
         )
 
-        # Gestor do Edifício Principal com auto-construção (máx 2 na fila, 1ª verificação aos 5s)
-        main_manager = MainBuildingManager(default_max_queue=2)
+        # Obtém o plano de construção ativo do config.json
+        build_plan = config.get_active_build_plan()
+        main_manager = MainBuildingManager(default_max_queue=config.building.max_queue)
         main_manager.schedule_auto_build(
             scheduler=scheduler,
             account=account,
-            plan=RUSH_RESOURCES_TEMPLATE,
-            max_queue=2,
-            interval_seconds=75.0,
+            plan=build_plan,
+            max_queue=config.building.max_queue,
+            interval_seconds=config.building.interval_seconds,
         )
-        logger.info("Módulo do Edifício Principal ativado (Template: RUSH_RESOURCES).")
+        logger.info(
+            f"Módulo do Edifício Principal ativado (Template: '{config.building.template}', "
+            f"{len(build_plan)} metas, máx fila: {config.building.max_queue})."
+        )
 
     # 4. Inicia o loop de tarefas do agendador
     scheduler.start()

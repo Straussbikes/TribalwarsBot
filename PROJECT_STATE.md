@@ -56,14 +56,18 @@ TribalwarsBot/
 │   │   └── main_building.py         # MainBuildingManager: leitura, níveis virtuais, auto-build, cancelamento
 │   ├── api/                         # Camada de comunicação IPC com Tauri (Fase 3)
 │   │   └── __init__.py
-│   ├── config/                      # Configurações e perfis de contas
-│   └── main.py                      # Ponto de entrada CLI com graceful shutdown e auto-build integrado
+│   ├── config/                      # Configurações e carregamento de perfis
+│   │   ├── __init__.py
+│   │   └── settings.py              # BotConfig, BuildingConfig, load_config a partir de config.json
+│   └── main.py                      # Ponto de entrada CLI com carregamento dinâmico de config.json
 │
-├── tests/                           # Suíte de testes unitários automatizados (21 testes, 100% OK)
+├── tests/                           # Suíte de testes unitários automatizados (23 testes, 100% OK)
 │   ├── __init__.py
 │   ├── test_core.py                 # 10 testes cobrindo models, timing, parsers, account e scheduler
-│   └── test_main_building.py        # 11 testes cobrindo níveis, fila, templates, auto-build e cancelamento
+│   ├── test_main_building.py        # 11 testes cobrindo níveis, fila, templates, auto-build e cancelamento
+│   └── test_config.py               # 2 testes cobrindo parsing de config.json e seleção de templates
 │
+├── config.json                      # Configuração personalizável pelo utilizador (mundo, templates, fila)
 └── mdfiles/
     └── contexto1.md                 # Contexto inicial da PoC
 ```
@@ -91,7 +95,7 @@ Para rodar os testes automatizados da suíte completa (Fases 1 e 2):
 ```powershell
 python -m unittest discover tests -v
 ```
-*Status esperado:* 21 testes, 0 falhas (`OK`), cobrindo modelos, delays gaussianos, parsers, anti-bot, account, scheduler, níveis virtuais e auto-build.
+*Status esperado:* 23 testes, 0 falhas (`OK`), cobrindo modelos, delays gaussianos, parsers, anti-bot, account, scheduler, níveis virtuais, auto-build e carregamento de configurações.
 
 Para testar no jogo real (online):
 ```powershell

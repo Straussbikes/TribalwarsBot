@@ -44,7 +44,9 @@
 - [x] Modelos de evolução pré-definidos (`RUSH_RESOURCES_TEMPLATE`, `BALANCED_TEMPLATE`, `MILITARY_RUSH_TEMPLATE`).
 - [x] Controlador `MainBuildingManager` com disparo de `build` e `cancel` com token CSRF (`h`).
 - [x] Rotina periódica contínua de auto-build com feedback imediato aos 5s e ciclos humanos (60s-90s).
-- [x] 11 testes unitários dedicados em `tests/test_main_building.py` (total de 21 testes, 100% OK).
+- [x] Sistema de configuração flexível via `config.json` e `engine/config/settings.py` (suporte a templates e planos customizados).
+- [x] Suíte de testes unitários dedicada (11 testes do Edifício Principal + 2 de configuração, total de 23 testes, 100% OK).
+
 
 ### 2.2. Praça de Reunião & Gestão de Tropas (`screen=place`)
 - [ ] Parsing da contagem de tropas disponíveis na aldeia ativa (`spear`, `sword`, `axe`, `archer`, `spy`, `light`, `marcher`, `heavy`, `ram`, `catapult`, `knight`, `snob`).

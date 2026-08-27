@@ -1,0 +1,141 @@
+"""
+Tribal Wars Mobile Automation Engine - Config & Settings Loader
+Carrega definições a partir de 'config.json' e variáveis de ambiente com validações.
+"""
+
+from dataclasses import dataclass, field
+import json
+import logging
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+from engine.actions.main_building import (
+    BALANCED_TEMPLATE,
+    MILITARY_RUSH_TEMPLATE,
+    RUSH_RESOURCES_TEMPLATE,
+)
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BuildingConfig:
+    """Configurações da rotina do Edifício Principal."""
+    template: str = "rush_resources"  # 'rush_resources', 'balanced', 'military_rush', 'custom'
+    max_queue: int = 2                 # Máximo de construções sem custos adicionais
+    interval_seconds: float = 75.0     # Intervalo médio entre verificações
+    custom_plan: List[Tuple[str, int]] = field(default_factory=list)
+
+
+@dataclass
+class BotConfig:
+    """Configuração global consolidada do bot."""
+    world: str = "pt117"
+    sid: str = ""
+    domain: str = "tribalwars.com.pt"
+    proxy: Optional[str] = None
+    building: BuildingConfig = field(default_factory=BuildingConfig)
+
+    def get_active_build_plan(self) -> List[Tuple[str, int]]:
+        """
+        Retorna a lista de metas de construção com base no template configurado.
+        """
+        tmpl = self.building.template.lower().strip()
+        if tmpl == "balanced":
+            return BALANCED_TEMPLATE
+        elif tmpl in ("military", "military_rush"):
+            return MILITARY_RUSH_TEMPLATE
+        elif tmpl == "custom" and self.building.custom_plan:
+            return self.building.custom_plan
+        else:
+            return RUSH_RESOURCES_TEMPLATE
+
+
+def load_config(config_file: str = "config.json") -> BotConfig:
+    """
+    Carrega as configurações a partir de 'config.json' na raiz do projeto.
+    Se o ficheiro não existir, cria um exemplo por defeito e recorre às variáveis de ambiente.
+    """
+    config_path = Path(config_file)
+    data: Dict[str, Any] = {}
+
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            logger.info(f"Ficheiro de configuração '{config_file}' carregado com sucesso.")
+        except Exception as e:
+            logger.warning(f"Erro ao ler '{config_file}', usando valores por defeito: {e}")
+    else:
+        # Se não existe, cria um modelo documentado para facilidade do utilizador
+        _create_default_config_file(config_path)
+
+    # 1. Carrega dados básicos
+    world = os.getenv("TW_WORLD") or data.get("world", "pt117")
+    sid = os.getenv("TW_SID") or data.get("sid", "")
+    domain = data.get("domain", "tribalwars.com.pt")
+    proxy = os.getenv("TW_PROXY") or data.get("proxy")
+
+    # 2. Carrega configurações do Edifício Principal
+    b_data = data.get("building", {})
+    template = b_data.get("template", "rush_resources")
+    max_queue = int(b_data.get("max_queue", 2))
+    interval_seconds = float(b_data.get("interval_seconds", 75.0))
+
+    # Converte custom_plan se fornecido como lista de listas/tuplos no JSON
+    raw_custom = b_data.get("custom_plan", [])
+    custom_plan: List[Tuple[str, int]] = []
+    for item in raw_custom:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            custom_plan.append((str(item[0]).strip().lower(), int(item[1])))
+
+    building_config = BuildingConfig(
+        template=template,
+        max_queue=max_queue,
+        interval_seconds=interval_seconds,
+        custom_plan=custom_plan,
+    )
+
+    return BotConfig(
+        world=world.strip().lower(),
+        sid=sid.strip(),
+        domain=domain.strip().lower(),
+        proxy=proxy,
+        building=building_config,
+    )
+
+
+def _create_default_config_file(target_path: Path) -> None:
+    """Cria um ficheiro config.json inicial documentado."""
+    default_payload = {
+        "world": "pt117",
+        "sid": "",
+        "building": {
+            "_info": "Opções de template: 'rush_resources', 'balanced', 'military_rush' ou 'custom'",
+            "template": "rush_resources",
+            "max_queue": 2,
+            "interval_seconds": 75.0,
+            "custom_plan": [
+                ["wood", 1],
+                ["stone", 1],
+                ["iron", 1],
+                ["main", 2],
+                ["main", 3],
+                ["barracks", 1],
+                ["wood", 2],
+                ["stone", 2],
+                ["storage", 2],
+                ["farm", 2],
+                ["wood", 3],
+                ["stone", 3],
+                ["iron", 2]
+            ]
+        }
+    }
+    try:
+        with open(target_path, "w", encoding="utf-8") as f:
+            json.dump(default_payload, f, indent=2, ensure_ascii=False)
+        logger.info(f"Ficheiro de exemplo '{target_path.name}' gerado na raiz do projeto.")
+    except Exception as e:
+        logger.debug(f"Não foi possível criar '{target_path.name}': {e}")
