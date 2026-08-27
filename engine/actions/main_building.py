@@ -626,8 +626,29 @@ class MainBuildingManager:
                     max_queue=max_queue,
                     village_id=village_id,
                 )
+            except SessionExpiredError:
+                logger.warning(f"[{account.world}] Sessão expirada no ciclo de construção. A verificar auto-login...")
+                from engine.config.settings import load_config
+                cfg = load_config()
+                if cfg.auth.auto_login:
+                    from engine.core.auth_manager import TribalAuthManager
+                    auth_mgr = TribalAuthManager()
+                    renewed = await auth_mgr.auto_renew_session(account, cfg)
+                    if renewed:
+                        logger.info(f"[{account.world}] Sessão renovada com sucesso! A retomar ciclo de construção...")
+                        try:
+                            await account.refresh_state(village_id=village_id)
+                            await self.run_auto_build_cycle(
+                                account=account,
+                                plan=plan,
+                                max_queue=max_queue,
+                                village_id=village_id,
+                            )
+                        except Exception as e_inner:
+                            logger.warning(f"Erro ao retomar após renovação: {e_inner}")
             except Exception as e:
                 logger.warning(f"Erro no ciclo de auto-build: {e}")
+
             finally:
                 # Reagenda continuamente para o próximo ciclo
                 if scheduler.is_running and not scheduler.is_paused:

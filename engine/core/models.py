@@ -23,6 +23,8 @@ class TaskPriority(IntEnum):
     RECRUIT = 50     # Recrutamento de tropas (Quartel/Estábulo/Oficina)
     REFRESH = 90     # Atualização periódica de recursos / estado
     IDLE = 100       # Tarefas de manutenção em segundo plano
+    BACKGROUND = 100 # Tarefas de fundo / keep-alive da sessão
+
 
 
 @dataclass

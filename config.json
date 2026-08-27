@@ -1,5 +1,11 @@
 {
   "world": "pt117",
+  "auth": {
+    "username": "bot-bikes",
+    "password": "!Jnuno123123",
+    "auto_login": true,
+    "keep_alive": true
+  },
   "sid": "0%3A20aa544c8c3d5739c80e695bcb12fe19b27c236cb0545478cad8fcc8bb8c320a6517dbb9c6a58ba6d0096c7a3276ba85e3bfda38f2a4d22d9dd8f3c5f72e3739",
   "building": {
     "_comentario": "Templates disponíveis: 'rush_resources' (recursos), 'balanced' (balanceado), 'military_rush' (tropas/cavalaria) ou 'custom'",
