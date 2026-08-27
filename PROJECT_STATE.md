@@ -87,8 +87,17 @@ TribalwarsBot/
 
 ## 5. Como Validar o Estado Atual
 
-Para rodar os testes automatizados da Fase 1:
+Para rodar os testes automatizados da suíte completa (Fases 1 e 2):
 ```powershell
-python -m unittest discover tests
+python -m unittest discover tests -v
 ```
-*Status esperado:* 10 testes, 0 falhas (`OK`).
+*Status esperado:* 21 testes, 0 falhas (`OK`), cobrindo modelos, delays gaussianos, parsers, anti-bot, account, scheduler, níveis virtuais e auto-build.
+
+Para testar no jogo real (online):
+```powershell
+$env:TW_WORLD="pt117"
+$env:TW_SID="teu_cookie_sid"
+python -m engine.main
+```
+*Validado:* Conexão online estabelecida no mundo `pt117`, feedback inicial rápido aos 2s e auto-reagendamento contínuo a cada ~60s-90s com atrasos humanos.
+
