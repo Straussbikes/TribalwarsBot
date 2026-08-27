@@ -96,5 +96,23 @@
         2
       ]
     ]
+  },
+  "farm": {
+    "_comentario": "Modos: 'am_farm' (Assistente de Farm) ou 'place' (direto via Praça)",
+    "enabled": false,
+    "mode": "am_farm",
+    "template": "A",
+    "max_distance": 15.0,
+    "skip_losses": true,
+    "skip_wall": true,
+    "interval_minutes": 10.0,
+    "custom_targets": [
+      [452, 553],
+      [453, 550]
+    ],
+    "custom_troops": {
+      "spear": 5,
+      "spy": 1
+    }
   }
 }

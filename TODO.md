@@ -58,14 +58,16 @@
 
 
 ### 2.3. Micro-Farming Automatizado
-- [ ] Suporte a Assistente de Farm (`screen=am_farm`):
-  - [ ] Leitura da tabela de aldeias bárbaras vizinhas.
-  - [ ] Leitura do estado dos relatórios (verde, amarelo, vermelho).
-  - [ ] Disparo automatizado dos modelos A e B com atrasos humanos entre toques (150ms - 400ms).
-- [ ] Fallback para Farming via Praça de Reunião (`screen=place`):
-  - [ ] Lista configurável de aldeias bárbaras por coordenadas ou raio de distância.
-  - [ ] Envio automático de micro-grupos de saque (ex.: 5 lanceiros ou 2 cavalarias leves).
-- [ ] Critérios de segurança: paragem imediata do farm caso as tropas sofram baixas ou a muralha inimiga suba.
+- [x] Suporte a Assistente de Farm (`screen=am_farm`):
+  - [x] Leitura da tabela de aldeias bárbaras vizinhas (`#plunder_list`).
+  - [x] Leitura do estado dos relatórios (verde, amarelo, vermelho) e nível de muralha.
+  - [x] Disparo automatizado dos modelos A e B com atrasos humanos entre toques (200ms - 550ms).
+- [x] Fallback para Farming via Praça de Reunião (`screen=place`):
+  - [x] Lista configurável de aldeias bárbaras por coordenadas ou raio de distância.
+  - [x] Envio automático de micro-grupos de saque (ex.: 5 lanceiros ou 2 cavalarias leves).
+- [x] Critérios de segurança: paragem imediata do farm caso as tropas sofram baixas (`skip_losses`) ou a muralha inimiga suba (`skip_wall`).
+- [x] Suíte de testes unitários para Micro-Farming (6 testes dedicados, total de 39 testes, 100% OK).
+
 
 ### 2.4. Coleta de Recursos / Scavenging (`screen=place&mode=scavenge`)
 - [ ] Leitura do estado de desbloqueio das 4 categorias de coleta:

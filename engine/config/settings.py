@@ -29,6 +29,20 @@ class BuildingConfig:
 
 
 @dataclass
+class FarmConfig:
+    """Configurações da rotina de Micro-Farming."""
+    enabled: bool = False
+    mode: str = "am_farm"              # 'am_farm' (Assistente de Farm) ou 'place' (Praça de Reunião)
+    template: str = "A"                # 'A' ou 'B'
+    max_distance: float = 15.0         # Raio máximo de ataque em campos
+    skip_losses: bool = True           # Ignorar aldeias com relatórios amarelos/vermelhos
+    skip_wall: bool = True             # Ignorar aldeias com muralha > 0
+    interval_minutes: float = 10.0     # Frequência de envio de ondas em minutos
+    custom_targets: List[Tuple[int, int]] = field(default_factory=list)
+    custom_troops: Dict[str, int] = field(default_factory=lambda: {"spear": 5, "spy": 1})
+
+
+@dataclass
 class BotConfig:
     """Configuração global consolidada do bot."""
     world: str = "pt117"
@@ -36,6 +50,7 @@ class BotConfig:
     domain: str = "tribalwars.com.pt"
     proxy: Optional[str] = None
     building: BuildingConfig = field(default_factory=BuildingConfig)
+    farm: FarmConfig = field(default_factory=FarmConfig)
 
     def get_active_build_plan(self) -> List[Tuple[str, int]]:
         """
@@ -97,13 +112,42 @@ def load_config(config_file: str = "config.json") -> BotConfig:
         custom_plan=custom_plan,
     )
 
+    # 3. Carrega configurações do Micro-Farming
+    f_data = data.get("farm", {})
+    raw_targets = f_data.get("custom_targets", [])
+    custom_targets: List[Tuple[int, int]] = []
+    for t in raw_targets:
+        if isinstance(t, (list, tuple)) and len(t) == 2:
+            custom_targets.append((int(t[0]), int(t[1])))
+
+    raw_troops = f_data.get("custom_troops", {"spear": 5, "spy": 1})
+    custom_troops = (
+        {str(k): int(v) for k, v in raw_troops.items()}
+        if isinstance(raw_troops, dict)
+        else {"spear": 5, "spy": 1}
+    )
+
+    farm_config = FarmConfig(
+        enabled=bool(f_data.get("enabled", False)),
+        mode=str(f_data.get("mode", "am_farm")),
+        template=str(f_data.get("template", "A")),
+        max_distance=float(f_data.get("max_distance", 15.0)),
+        skip_losses=bool(f_data.get("skip_losses", True)),
+        skip_wall=bool(f_data.get("skip_wall", True)),
+        interval_minutes=float(f_data.get("interval_minutes", 10.0)),
+        custom_targets=custom_targets,
+        custom_troops=custom_troops,
+    )
+
     return BotConfig(
         world=world.strip().lower(),
         sid=sid.strip(),
         domain=domain.strip().lower(),
         proxy=proxy,
         building=building_config,
+        farm=farm_config,
     )
+
 
 
 def _create_default_config_file(target_path: Path) -> None:

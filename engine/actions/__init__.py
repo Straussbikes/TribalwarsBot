@@ -27,6 +27,11 @@ from engine.actions.place import (
     UnitType,
     UnitsCount,
 )
+from engine.actions.farm import (
+    FarmAssistantState,
+    FarmManager,
+    FarmTarget,
+)
 
 __all__ = [
     "BALANCED_TEMPLATE",
@@ -34,6 +39,9 @@ __all__ = [
     "BUILDING_REQUIREMENTS",
     "CARRY_CAPACITY",
     "CommandMovement",
+    "FarmAssistantState",
+    "FarmManager",
+    "FarmTarget",
     "MAX_BUILDING_LEVELS",
     "MILITARY_RUSH_TEMPLATE",
     "MainBuildingManager",
@@ -49,5 +57,6 @@ __all__ = [
     "UnitType",
     "UnitsCount",
 ]
+
 
 

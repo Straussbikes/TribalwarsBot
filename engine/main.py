@@ -18,7 +18,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from engine.actions import MainBuildingManager
+from engine.actions import FarmManager, MainBuildingManager
 from engine.config import load_config
 from engine.core.account import TribalAccount
 from engine.core.exceptions import BotProtectionError, SessionExpiredError
@@ -123,7 +123,23 @@ async def main():
             f"{len(build_plan)} metas, máx fila: {config.building.max_queue})."
         )
 
+        # 3.2. Módulo de Micro-Farming (se ativado no config.json)
+        if config.farm.enabled:
+            farm_manager = FarmManager()
+            farm_manager.schedule_auto_farm(
+                scheduler=scheduler,
+                account=account,
+                farm_config=config.farm,
+            )
+            logger.info(
+                f"Módulo de Micro-Farming ativado (Modo: {config.farm.mode.upper()}, "
+                f"Template: {config.farm.template}, a cada ~{config.farm.interval_minutes:.1f}min)."
+            )
+        else:
+            logger.info("Módulo de Micro-Farming desativado no config.json (enabled=false).")
+
     # 4. Inicia o loop de tarefas do agendador
+
     scheduler.start()
     logger.info("Motor iniciado. Pressione Ctrl+C para encerrar.")
 

@@ -625,3 +625,158 @@ def parse_command_confirmation(html: str) -> Dict[str, Any]:
     return result
 
 
+# Regex para Assistente de Farm (screen=am_farm)
+PLUNDER_ROW_REGEX = re.compile(
+    r'<tr[^>]*id=["\']village_(\d+)["\'][^>]*>(.*?)</tr>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def parse_am_farm_targets(html: str) -> List[Dict[str, Any]]:
+    """
+    Extrai a lista de aldeias bárbaras disponíveis no Assistente de Farm (screen=am_farm).
+    Retorna uma lista de dicionários contendo: target_id, target_name, target_coords,
+    distance, report_color, wall_level, template_a_id, template_b_id, template_a_available, template_b_available.
+    """
+    targets: List[Dict[str, Any]] = []
+    if not html:
+        return targets
+
+    normalized = html.replace("&amp;", "&")
+
+    # Localiza cada linha da tabela de saques (tr id="village_12345")
+    for row_match in PLUNDER_ROW_REGEX.finditer(normalized):
+        target_id = row_match.group(1)
+        row_content = row_match.group(2)
+
+        # 1. Coordenadas (xxx|yyy) e Nome
+        coords_match = re.search(r'\((\d{1,3}\|\d{1,3})\)', row_content)
+        coords = coords_match.group(1) if coords_match else ""
+
+        name_match = re.search(
+            r'<a[^>]*screen=info_village[^>]*>(.*?)</a>',
+            row_content,
+            re.DOTALL | re.IGNORECASE,
+        )
+        target_name = ""
+        if name_match:
+            raw_n = re.sub(r'<[^>]+>', '', name_match.group(1)).strip()
+            # Remove as coordenadas se estiverem dentro do nome
+            target_name = re.sub(r'\(\d{1,3}\|\d{1,3}\)', '', raw_n).strip()
+
+        # 2. Distância
+        dist_match = re.search(r'(\d+\.\d+)\s*(?:campos|fields)?|<td>(\d+(?:\.\d+)?)</td>', row_content, re.IGNORECASE)
+        distance = 0.0
+        if dist_match:
+            val = next(g for g in dist_match.groups() if g is not None)
+            try:
+                distance = float(val)
+            except ValueError:
+                distance = 0.0
+
+        # 3. Status do último relatório (verde, amarelo, vermelho, azul)
+        report_color = "none"
+        if "dots/green" in row_content or "dot green" in row_content or "max_loot/1" in row_content:
+            report_color = "green"
+        elif "dots/yellow" in row_content or "dot yellow" in row_content:
+            report_color = "yellow"
+        elif "dots/red" in row_content or "dot red" in row_content:
+            report_color = "red"
+        elif "dots/blue" in row_content or "dot blue" in row_content:
+            report_color = "blue"
+
+        # 4. Nível de muralha
+        wall_level = 0
+        wall_match = re.search(
+            r'(?:Muralha|Wall)[:\s]*<span[^>]*>(\d+)</span>|(?:Muralha|Wall)[:\s]*(\d+)|<td[^>]*class=["\']wall["\'][^>]*>(\d+)</td>',
+            row_content,
+            re.IGNORECASE,
+        )
+        if wall_match:
+            w_val = next(g for g in wall_match.groups() if g is not None)
+            try:
+                wall_level = int(w_val)
+            except ValueError:
+                wall_level = 0
+
+        # 5. Botões do Modelo A e Modelo B
+        # Exemplo: href="...action=farm&target=12345&template_id=987&h=..."
+        # ou class="farm_icon farm_icon_a"
+        def extract_template_btn(tmpl_letter: str) -> Tuple[Optional[str], bool]:
+            # Captura a tag completa <a> do modelo correspondente
+            btn_match = re.search(
+                rf'(<a\s+[^>]*class=["\'][^"\']*farm_icon_{tmpl_letter}[^"\']*["\'][^>]*>)',
+                row_content,
+                re.IGNORECASE,
+            )
+            if not btn_match:
+                # Fallback por URL com action=farm e template_id
+                btn_match = re.search(
+                    rf'(<a\s+[^>]*href=["\'][^"\']*[?&]action=farm[^"\']*[?&]target={target_id}[^"\']*[?&]template_id=(\d+)[^"\']*["\'][^>]*>)',
+                    row_content,
+                    re.IGNORECASE,
+                )
+
+            if btn_match:
+                tag_str = btn_match.group(1)
+                # Extrai template_id da URL contida no atributo href
+                t_id_m = re.search(r'[?&]template_id=(\d+)', tag_str)
+                t_id = t_id_m.group(1) if t_id_m else None
+                # Verifica se este botão específico possui classe disabled
+                is_disabled = "farm_icon_disabled" in tag_str or "disabled" in tag_str.lower()
+                return t_id, not is_disabled
+            return None, False
+
+
+        tmpl_a_id, tmpl_a_avail = extract_template_btn("a")
+        tmpl_b_id, tmpl_b_avail = extract_template_btn("b")
+
+        targets.append({
+            "target_id": target_id,
+            "target_name": target_name,
+            "target_coords": coords,
+            "distance": distance,
+            "report_color": report_color,
+            "wall_level": wall_level,
+            "template_a_id": tmpl_a_id,
+            "template_b_id": tmpl_b_id,
+            "template_a_available": tmpl_a_avail,
+            "template_b_available": tmpl_b_avail,
+        })
+
+    return targets
+
+
+def parse_am_farm_templates(html: str) -> Dict[str, Dict[str, int]]:
+    """
+    Extrai as contagens de tropas configuradas para o Modelo A e Modelo B no Assistente de Farm.
+    """
+    templates: Dict[str, Dict[str, int]] = {
+        "a": {u: 0 for u in ALL_UNITS},
+        "b": {u: 0 for u in ALL_UNITS},
+    }
+    if not html:
+        return templates
+
+    normalized = html.replace("&amp;", "&")
+
+    for tmpl in ("a", "b"):
+        for unit in ALL_UNITS:
+            # Padrão: <input name="a[spear]" value="5" /> ou name="template_a[spear]"
+            pattern = re.compile(
+                rf'<input[^>]*name=["\'](?:template_)?{tmpl}\[{unit}\]["\'][^>]*value=["\'](\d+)["\']|'
+                rf'<input[^>]*value=["\'](\d+)["\'][^>]*name=["\'](?:template_)?{tmpl}\[{unit}\]["\']',
+                re.IGNORECASE,
+            )
+            m = pattern.search(normalized)
+            if m:
+                val = next(g for g in m.groups() if g is not None)
+                try:
+                    templates[tmpl][unit] = int(val)
+                except ValueError:
+                    templates[tmpl][unit] = 0
+
+    return templates
+
+
+
