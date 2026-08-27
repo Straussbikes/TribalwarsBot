@@ -43,15 +43,17 @@ logger = logging.getLogger("TribalDesktop")
 
 
 class DesktopJsApi:
-    """API Python exposta ao JavaScript da janela Edge WebView2."""
+    """API Python exposta de forma segura ao JavaScript da janela Edge WebView2."""
 
-    def __init__(self, app: "DesktopApp"):
-        self.app = app
+    def __init__(self, on_finish_callback=None):
+        self._on_finish_callback = on_finish_callback
 
     def finish_login(self):
-        """Disparado pelo botão do banner superior quando o utilizador conclui o login."""
+        """Disparado pelo botão do banner quando o utilizador conclui o login."""
         logger.info("Botão 'Concluir Login' acionado no banner.")
-        self.app.on_login_finished()
+        if self._on_finish_callback:
+            self._on_finish_callback()
+
 
 
 class DesktopApp:
@@ -209,9 +211,17 @@ class DesktopApp:
             if (document.getElementById('tw-bot-banner')) return;
             var d = document.createElement('div');
             d.id = 'tw-bot-banner';
-            d.style.cssText = 'position:fixed;top:0;left:0;right:0;background:linear-gradient(135deg,#0d1117,#161b22);color:#58a6ff;padding:10px 20px;z-index:2147483647;text-align:center;font-family:Arial,sans-serif;font-size:14px;box-shadow:0 2px 12px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;gap:10px;border-bottom:2px solid #58a6ff;';
-            d.innerHTML = '\uD83D\uDD11 <b>TribalWars Bot:</b> Fa\u00E7a login normalmente e entre no seu mundo. A sess\u00E3o ser\u00E1 capturada automaticamente.';
+            d.style.cssText = 'position:fixed;top:0;left:0;right:0;background:linear-gradient(135deg,#0d1117,#161b22);color:#58a6ff;padding:10px 20px;z-index:2147483647;text-align:center;font-family:Arial,sans-serif;font-size:14px;box-shadow:0 2px 12px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;gap:15px;border-bottom:2px solid #58a6ff;';
+            d.innerHTML = '<span>\uD83D\uDD11 <b>TribalWars Bot:</b> Fa\u00E7a login e entre no mundo.</span> <button id="tw-bot-finish-btn" style="background:#238636;color:#fff;border:none;border-radius:4px;padding:4px 12px;font-weight:bold;cursor:pointer;">Entrei no Jogo \u2192</button>';
             document.body.prepend(d);
+            var btn = document.getElementById('tw-bot-finish-btn');
+            if (btn) {
+                btn.onclick = function() {
+                    if (window.pywebview && window.pywebview.api && window.pywebview.api.finish_login) {
+                        window.pywebview.api.finish_login();
+                    }
+                };
+            }
         })();
         """
         self._js_safe(banner_js)
@@ -390,7 +400,7 @@ class DesktopApp:
         window_url = f"http://{self.host}:{self.port}/"
         logger.info(f"A abrir janela desktop nativa: {window_url}")
 
-        self.js_api = DesktopJsApi(self)
+        self.js_api = DesktopJsApi(on_finish_callback=self.on_login_finished)
         self.window = webview.create_window(
             title="TribalWars Bot Cockpit - v2.0",
             url=window_url,
