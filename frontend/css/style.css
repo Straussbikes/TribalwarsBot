@@ -162,6 +162,43 @@ body {
   border-color: rgba(6, 182, 212, 0.3);
 }
 
+.badge-clock {
+  color: var(--neon-cyan);
+  border-color: rgba(6, 182, 212, 0.35);
+  background: rgba(15, 23, 42, 0.85);
+  font-family: var(--font-mono);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 5px 14px;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.12);
+  cursor: default;
+}
+
+.badge-clock .clock-icon {
+  font-size: 0.85rem;
+  margin-right: 4px;
+  opacity: 0.85;
+}
+
+.badge-clock .clock-digits {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #f8fafc;
+  letter-spacing: 0.5px;
+}
+
+.badge-clock .clock-sub {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--neon-cyan);
+  opacity: 0.95;
+  letter-spacing: -0.2px;
+  min-width: 62px;
+  display: inline-block;
+}
+
 .badge-status {
   transition: var(--transition-smooth);
 }

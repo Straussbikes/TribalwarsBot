@@ -580,4 +580,34 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Polling de segurança a cada 15 segundos para atualizar dados
   setInterval(refreshStatus, 15000);
+
+  // --- 8. Relógio do Servidor de Alta Precisão (HH:MM:SS.uuuuuu) ---
+  const clockHmsEl = document.getElementById("clock-hms");
+  const clockMsEl = document.getElementById("clock-ms");
+
+  function startHighPrecisionClock() {
+    function tick() {
+      const now = new Date();
+      const h = String(now.getHours()).padStart(2, "0");
+      const m = String(now.getMinutes()).padStart(2, "0");
+      const s = String(now.getSeconds()).padStart(2, "0");
+      
+      const ms = now.getMilliseconds();
+      const frac = Math.floor((performance.now() % 1) * 1000);
+      const micros = String(ms * 1000 + frac).padStart(6, "0");
+
+      if (clockHmsEl) {
+        clockHmsEl.textContent = `${h}:${m}:${s}`;
+      }
+      if (clockMsEl) {
+        clockMsEl.textContent = `.${micros}`;
+      }
+
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  startHighPrecisionClock();
 });
+
