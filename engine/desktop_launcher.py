@@ -356,13 +356,16 @@ class DesktopApp:
         save_config_sid(sid)
 
         if self.context.account:
-            self.context.account.sid = sid
-            asyncio.run_coroutine_threadsafe(
-                self.context.account.init_session(), self.loop
-            )
-            asyncio.run_coroutine_threadsafe(
-                self.context.account.refresh_state(), self.loop
-            )
+            try:
+                fut = asyncio.run_coroutine_threadsafe(
+                    self.context.account.update_sid(sid), self.loop
+                )
+                fut.result(timeout=10)
+                asyncio.run_coroutine_threadsafe(
+                    self.context.account.refresh_state(), self.loop
+                )
+            except Exception as e:
+                logger.warning(f"Erro ao sincronizar nova sessão da conta: {e}")
         else:
             # Cria a conta pela primeira vez se ainda não existia
             cfg = self.context.config
@@ -373,9 +376,16 @@ class DesktopApp:
                 proxy=cfg.proxy,
             )
             self.context.account = account
-            asyncio.run_coroutine_threadsafe(
-                account.init_session(), self.loop
-            )
+            try:
+                fut = asyncio.run_coroutine_threadsafe(
+                    account.init_session(), self.loop
+                )
+                fut.result(timeout=10)
+                asyncio.run_coroutine_threadsafe(
+                    account.refresh_state(), self.loop
+                )
+            except Exception as e:
+                logger.warning(f"Erro ao inicializar nova conta: {e}")
 
         self.is_logging_in = False
         time.sleep(1.5)

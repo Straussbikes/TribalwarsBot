@@ -107,6 +107,20 @@ class TribalAccount:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
 
+    async def update_sid(self, new_sid: str) -> None:
+        """Atualiza o SID da conta e renova a sessão curl_cffi com os novos cookies."""
+        clean_sid = new_sid.strip().strip('"').strip("'")
+        if clean_sid.lower().startswith("sid="):
+            clean_sid = clean_sid[4:].strip()
+        self.sid = clean_sid
+        if self._session is not None:
+            try:
+                await self._session.close()
+            except Exception:
+                pass
+            self._session = None
+        await self.init_session()
+
     async def init_session(self) -> None:
         """Inicializa a AsyncSession do curl_cffi com os cookies e headers móveis."""
         if self._session is not None:

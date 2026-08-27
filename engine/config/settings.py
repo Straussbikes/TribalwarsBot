@@ -90,6 +90,11 @@ class BotConfig:
         else:
             return RUSH_RESOURCES_TEMPLATE
 
+    @property
+    def effective_building_plan(self) -> List[Tuple[str, int]]:
+        """Propriedade de compatibilidade que retorna o plano ativo."""
+        return self.get_active_build_plan()
+
 
 def load_config(config_file: str = "config.json") -> BotConfig:
     """
