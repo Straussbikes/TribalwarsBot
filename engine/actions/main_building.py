@@ -502,7 +502,10 @@ class MainBuildingManager:
         """
         limit = max_queue if max_queue is not None else state.max_queue_size
         if state.queue_count >= limit:
-            logger.debug(f"Fila atingiu o limite configurado ({state.queue_count}/{limit}).")
+            logger.info(
+                f"Fila de construção cheia ({state.queue_count}/{limit}). "
+                f"A aguardar conclusão da ordem em andamento."
+            )
             return None
 
         virt_levels = state.virtual_levels
@@ -534,17 +537,19 @@ class MainBuildingManager:
                     ):
                         return upgrade_info
                     else:
-                        logger.debug(
-                            f"Próximo edifício do plano '{b}' (Nível {current_virt + 1}) "
-                            f"aguarda recursos: {resources.wood}/{upgrade_info.wood} M, "
+                        b_name = BUILDING_NAMES.get(b, b)
+                        logger.info(
+                            f"Próximo alvo do plano: '{b_name}' ({b}) para Nível {current_virt + 1}. "
+                            f"Recursos: {resources.wood}/{upgrade_info.wood} M, "
                             f"{resources.stone}/{upgrade_info.stone} A, "
-                            f"{resources.iron}/{upgrade_info.iron} F"
+                            f"{resources.iron}/{upgrade_info.iron} F (Pop: {resources.free_pop}/{upgrade_info.pop})"
                         )
                         return None
                 else:
                     # Se não temos a linha no HTML (ex.: ainda não desbloqueado)
                     continue
 
+        logger.info(f"Todas as {len(plan)} metas do plano de construção ativo foram alcançadas!")
         return None
 
     async def run_auto_build_cycle(
@@ -562,6 +567,10 @@ class MainBuildingManager:
         Retorna o identificador do edifício construído, ou None.
         """
         state = await self.get_state(account, village_id=village_id)
+        limit = max_queue if max_queue is not None else state.max_queue_size
+        logger.info(
+            f"[{account.world}] A avaliar Edifício Principal (Fila atual: {state.queue_count}/{limit})."
+        )
         candidate = self.get_next_build_candidate(
             state=state,
             plan=plan,
@@ -576,12 +585,14 @@ class MainBuildingManager:
                 village_id=village_id,
             )
             if success:
+                b_name = BUILDING_NAMES.get(candidate.building, candidate.building)
                 logger.info(
-                    f"[{account.world}] Sucesso ao colocar na fila: "
-                    f"{candidate.building} para nível {candidate.target_level}"
+                    f"[{account.world}] ✅ Sucesso ao colocar na fila: "
+                    f"'{b_name}' para Nível {candidate.target_level}!"
                 )
                 return candidate.building
         return None
+
 
     def schedule_auto_build(
         self,

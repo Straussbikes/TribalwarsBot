@@ -4,7 +4,7 @@
   "building": {
     "_comentario": "Templates disponíveis: 'rush_resources' (recursos), 'balanced' (balanceado), 'military_rush' (tropas/cavalaria) ou 'custom'",
     "template": "rush_resources",
-    "max_queue": 4,
+    "max_queue": 2,
     "interval_seconds": 75.0,
     "custom_plan": [
       [
