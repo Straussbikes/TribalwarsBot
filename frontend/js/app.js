@@ -173,13 +173,32 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Conta / Aldeia
     if (data.account) {
       elements.badgeWorld.textContent = (data.account.world || "PT117").toUpperCase();
-      if (data.account.village_name) {
-        elements.villageName.textContent = data.account.village_name;
+      const v = data.account.village || {};
+      if (v.name || data.account.village_name) {
+        elements.villageName.textContent = v.name || data.account.village_name;
       }
-      if (data.account.coordinates) {
+      if (v.coordinates) {
+        elements.villageCoords.textContent = `(${v.coordinates})`;
+      } else if (data.account.coordinates) {
         elements.villageCoords.textContent = `(${data.account.coordinates.x}|${data.account.coordinates.y})`;
       }
+
+      // Seletor Multi-Aldeia
+      const vSelect = document.getElementById("village-selector");
+      if (vSelect && data.account.villages && data.account.villages.length > 1) {
+        vSelect.style.display = "inline-block";
+        const currentVId = v.id || data.account.current_village_id;
+        vSelect.innerHTML = data.account.villages
+          .map(
+            (vill) =>
+              `<option value="${vill.id}" ${vill.id === currentVId ? "selected" : ""}>${vill.name} (${vill.coordinates})</option>`
+          )
+          .join("");
+      } else if (vSelect) {
+        vSelect.style.display = "none";
+      }
     }
+
 
     // Recursos
     if (data.resources) {
@@ -442,6 +461,44 @@ document.addEventListener("DOMContentLoaded", async () => {
     window.open("https://pt117.tribalwars.com.pt/game.php", "_blank");
   });
 
+  // Seletor Multi-Aldeia
+  document.getElementById("village-selector")?.addEventListener("change", async (e) => {
+    const vId = e.target.value;
+    try {
+      addLogEntry("INFO", "account", `A alternar para a aldeia ${vId}...`);
+      const res = await window.api.switchVillage(vId);
+      if (res.status === "success") {
+        addLogEntry("SUCCESS", "account", res.message || "Aldeia alternada!");
+        refreshStatus();
+      } else {
+        addLogEntry("WARNING", "account", res.message || "Falha ao alternar aldeia.");
+      }
+    } catch (err) {
+      addLogEntry("CRITICAL", "account", `Erro ao alternar aldeia: ${err.message}`);
+    }
+  });
+
+  // Teste de Proxy
+  document.getElementById("btn-test-proxy")?.addEventListener("click", async () => {
+    const proxyVal = document.getElementById("cfg-proxy").value.trim();
+    const resultSpan = document.getElementById("proxy-test-result");
+    if (!proxyVal) {
+      resultSpan.innerHTML = "<span style='color: var(--neon-crimson)'>Indique um proxy para testar.</span>";
+      return;
+    }
+    resultSpan.innerHTML = "<span style='color: var(--neon-cyan)'>A testar conexão...</span>";
+    try {
+      const res = await window.api.testProxy(proxyVal);
+      if (res.status === "online") {
+        resultSpan.innerHTML = `<span style='color: var(--neon-emerald)'>✅ Online (IP: ${res.ip}, Latência: ${res.latency_ms}ms)</span>`;
+      } else {
+        resultSpan.innerHTML = `<span style='color: var(--neon-crimson)'>❌ Erro: ${res.error || res.status}</span>`;
+      }
+    } catch (err) {
+      resultSpan.innerHTML = `<span style='color: var(--neon-crimson)'>❌ Falha: ${err.message}</span>`;
+    }
+  });
+
   // --- 7. Painel de Definições ---
   async function loadSettingsIntoForm() {
     try {
@@ -450,6 +507,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       document.getElementById("cfg-world").value = config.world || "pt117";
       document.getElementById("cfg-sid").value = config.sid || "";
+      if (document.getElementById("cfg-proxy")) {
+        document.getElementById("cfg-proxy").value = config.proxy || "";
+      }
       if (config.auth) {
         document.getElementById("cfg-username").value = config.auth.username || "";
         document.getElementById("cfg-auto-login").checked = !!config.auth.auto_login;
@@ -473,9 +533,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     e.preventDefault();
     try {
       const pwdVal = document.getElementById("cfg-password").value.trim();
+      const proxyVal = document.getElementById("cfg-proxy") ? document.getElementById("cfg-proxy").value.trim() : "";
       const payload = {
         world: document.getElementById("cfg-world").value.trim(),
         sid: document.getElementById("cfg-sid").value.trim(),
+        proxy: proxyVal || null,
         auth: {
           username: document.getElementById("cfg-username").value.trim(),
           auto_login: document.getElementById("cfg-auto-login").checked,
@@ -503,6 +565,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       alert(`Falha ao gravar configurações: ${err.message}`);
     }
   });
+
 
 
   async function refreshStatus() {

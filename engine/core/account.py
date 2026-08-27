@@ -22,6 +22,7 @@ from engine.core.exceptions import (
 )
 from engine.core.models import PlayerData, Resources, VillageData
 from engine.utils.parsers import (
+    extract_all_villages,
     extract_csrf_token,
     extract_game_data,
     extract_resources,
@@ -29,6 +30,7 @@ from engine.utils.parsers import (
     is_bot_protection_present,
     is_session_expired,
 )
+
 from engine.utils.timing import get_click_jitter
 
 logger = logging.getLogger(__name__)
@@ -225,26 +227,32 @@ class TribalAccount:
         if new_csrf:
             self.csrf_token = new_csrf
 
-        # 2. Atualização de Aldeia e Jogador
+        # 2. Atualização de Aldeias e Jogador
         village, player = extract_village_and_player(html, game_data)
         if player:
             self.player = player
+
+        # Extrai todas as aldeias pertencentes à conta (suporte multi-aldeia)
+        all_vills = extract_all_villages(html, game_data)
+        for v_id, v_data in all_vills.items():
+            if v_id not in self.villages:
+                self.villages[v_id] = v_data
+            else:
+                curr_res = self.villages[v_id].resources
+                self.villages[v_id] = v_data
+                self.villages[v_id].resources = curr_res
 
         if village:
             self.current_village_id = village.id
             if village.id not in self.villages:
                 self.villages[village.id] = village
-            else:
-                # Preserva recursos anteriores e atualiza dados
-                curr_res = self.villages[village.id].resources
-                self.villages[village.id] = village
-                self.villages[village.id].resources = curr_res
 
         # 3. Atualização dos Recursos da aldeia ativa
         if self.current_village_id:
             res = extract_resources(html, game_data)
             if self.current_village_id in self.villages:
                 self.villages[self.current_village_id].resources = res
+
 
     async def get_screen(
         self,
@@ -368,3 +376,16 @@ class TribalAccount:
         if not self.current_village:
             raise ActionFailedError("Não foi possível carregar as informações da aldeia.")
         return self.current_village
+
+    async def switch_village(self, village_id: int) -> VillageData:
+        """
+        Alterna o contexto ativo para uma aldeia específica do jogador.
+        Atualiza recursos e edifícios da aldeia selecionada.
+        """
+        logger.info(f"[{self.world}] A alternar contexto ativo para aldeia {village_id}...")
+        await self.get_screen("overview", village_id=village_id, apply_jitter=True)
+        self.current_village_id = village_id
+        if village_id in self.villages:
+            return self.villages[village_id]
+        return VillageData(id=village_id, name=f"Aldeia {village_id}")
+

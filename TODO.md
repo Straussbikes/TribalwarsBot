@@ -128,10 +128,14 @@
     - [x] Recursos, aldeias e estado das filas em tempo real (`INITIAL_STATE`, `STATUS_UPDATE`).
     - [x] Disparo de alerta de captcha anti-bot para o frontend (`CAPTCHA_ALERT`).
   - [x] Suíte de testes unitários para a API Sidecar (12 testes dedicados, total de 56 testes, 100% OK).
-- [ ] **Gestor de Contas & Multi-Aldeia**
-  - [ ] Persistência segura de perfis de conta (ficheiro JSON/SQLite encriptado).
-  - [ ] Suporte a proxy dedicado ou residencial por conta (`http://user:pass@ip:port`).
-  - [ ] Alternância fluida de contexto entre múltiplas aldeias (`village_id`).
+- [x] **Gestor de Contas & Multi-Aldeia**
+  - [x] Persistência segura de perfis de conta com ofuscação/encriptação (`ProfileManager` em `profiles.json`).
+  - [x] Suporte a proxy dedicado ou residencial por conta com diagnóstico ativo (`test_proxy_connection`).
+  - [x] Extração de todas as aldeias da conta a partir do `game_data` (`extract_all_villages`).
+  - [x] Alternância fluida de contexto entre múltiplas aldeias (`account.switch_village` e `POST /api/account/switch-village`).
+  - [x] Seletor de aldeias integrado na interface gráfica (Dropdown no card da aldeia).
+  - [x] Suíte de testes unitários dedicada (9 novos testes cobrindo perfis, multi-aldeia e proxies, totalizando 75 testes 100% OK).
+
 
 
 ---

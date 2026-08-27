@@ -113,7 +113,37 @@ class SidecarApi {
   async renewSession() {
     return await this.request("/api/auth/renew", { method: "POST" });
   }
+
+  async getVillages() {
+    return await this.request("/api/account/villages");
+  }
+
+  async switchVillage(villageId) {
+    return await this.request("/api/account/switch-village", {
+      method: "POST",
+      body: JSON.stringify({ village_id: parseInt(villageId, 10) }),
+    });
+  }
+
+  async getProfiles() {
+    return await this.request("/api/profiles");
+  }
+
+  async switchProfile(profileId) {
+    return await this.request("/api/profiles/switch", {
+      method: "POST",
+      body: JSON.stringify({ profile_id: profileId }),
+    });
+  }
+
+  async testProxy(proxyUrl) {
+    return await this.request("/api/proxy/test", {
+      method: "POST",
+      body: JSON.stringify({ proxy: proxyUrl }),
+    });
+  }
 }
+
 
 // Exporta instância global
 window.api = new SidecarApi();

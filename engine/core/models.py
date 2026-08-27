@@ -78,6 +78,17 @@ class VillageData:
     def coordinates(self) -> str:
         return f"{self.x}|{self.y}"
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "coordinates": self.coordinates,
+            "x": self.x,
+            "y": self.y,
+            "points": self.points,
+        }
+
+
 
 @dataclass
 class PlayerData:

@@ -19,11 +19,24 @@ from engine.core.models import (
     TaskPriority,
     VillageData,
 )
+from engine.core.profile_manager import (
+    AccountProfile,
+    ProfileManager,
+    deobfuscate_password,
+    obfuscate_password,
+    test_proxy_connection,
+)
 from engine.core.scheduler import TaskScheduler
 
 __all__ = [
     "TribalAccount",
+    "ProfileManager",
+    "AccountProfile",
+    "obfuscate_password",
+    "deobfuscate_password",
+    "test_proxy_connection",
     "TaskScheduler",
+
 
     "Task",
     "TaskPriority",

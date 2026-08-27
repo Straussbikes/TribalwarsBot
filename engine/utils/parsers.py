@@ -190,6 +190,93 @@ def extract_village_and_player(
     return village, player
 
 
+def extract_all_villages(
+    html: str, game_data: Optional[Dict[str, Any]] = None
+) -> Dict[int, VillageData]:
+    """
+    Extrai todas as aldeias pertencentes à conta a partir do game_data e de elementos HTML.
+    Retorna um dicionário mapeado por village_id.
+    """
+    villages: Dict[int, VillageData] = {}
+
+    # 1. Extração prioritária via game_data
+    if game_data and isinstance(game_data, dict):
+        # Aldeia ativa
+        curr_v = game_data.get("village")
+        if isinstance(curr_v, dict) and curr_v.get("id"):
+            v_id = int(curr_v["id"])
+            villages[v_id] = VillageData(
+                id=v_id,
+                name=str(curr_v.get("name", "")),
+                x=int(curr_v.get("x", 0)),
+                y=int(curr_v.get("y", 0)),
+                points=int(curr_v.get("points", 0)),
+            )
+
+        # Múltiplas aldeias do jogador em game_data.player.villages
+        p = game_data.get("player")
+        if isinstance(p, dict):
+            raw_vills = p.get("villages")
+            if isinstance(raw_vills, dict):
+                for k, v in raw_vills.items():
+                    try:
+                        v_id = int(k)
+                        if isinstance(v, dict):
+                            x_val = int(v.get("x", 0))
+                            y_val = int(v.get("y", 0))
+                            if not x_val and "coord" in v:
+                                parts = str(v["coord"]).split("|")
+                                if len(parts) == 2:
+                                    x_val, y_val = int(parts[0]), int(parts[1])
+                            villages[v_id] = VillageData(
+                                id=v_id,
+                                name=str(v.get("name", "")),
+                                x=x_val,
+                                y=y_val,
+                                points=int(v.get("points", 0)),
+                            )
+                        elif isinstance(v, (str, int)):
+                            if v_id not in villages:
+                                villages[v_id] = VillageData(id=v_id, name=f"Aldeia {v_id}")
+                    except (ValueError, TypeError):
+                        continue
+            elif isinstance(raw_vills, list):
+                for item in raw_vills:
+                    if isinstance(item, dict) and "id" in item:
+                        try:
+                            v_id = int(item["id"])
+                            villages[v_id] = VillageData(
+                                id=v_id,
+                                name=str(item.get("name", "")),
+                                x=int(item.get("x", 0)),
+                                y=int(item.get("y", 0)),
+                                points=int(item.get("points", 0)),
+                            )
+                        except (ValueError, TypeError):
+                            continue
+
+    # 2. Fallback via select mobile ou links de troca de aldeia
+    if html:
+        matches = re.findall(
+            r'<option[^>]*value=["\'](\d+)["\'][^>]*>(.*?)</option>', html, re.DOTALL
+        )
+        for v_id_str, raw_label in matches:
+            try:
+                v_id = int(v_id_str)
+                coord_match = re.search(r'\((\d+)\|(\d+)\)', raw_label)
+                if coord_match:
+                    x = int(coord_match.group(1))
+                    y = int(coord_match.group(2))
+                    name = raw_label[:coord_match.start()].strip()
+                    if v_id not in villages or not villages[v_id].x:
+                        villages[v_id] = VillageData(id=v_id, name=name, x=x, y=y)
+            except (ValueError, TypeError):
+                continue
+
+    return villages
+
+
+
 def is_bot_protection_present(html: str) -> bool:
     """Verifica se a resposta HTML contém indícios inequívocos de verificação humana/captcha."""
     if not html:

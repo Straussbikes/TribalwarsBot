@@ -47,14 +47,15 @@ TribalwarsBot/
 ├── engine/                          # Python Core Engine
 │   ├── core/                        # Núcleo da automação
 │   │   ├── __init__.py              # Exporta classes e exceções principais
-│   │   ├── account.py               # TribalAccount: AsyncSession, mobile headers, parsing, CSRF
+│   │   ├── account.py               # TribalAccount: AsyncSession, mobile headers, parsing, CSRF, multi-aldeia
 │   │   ├── auth_manager.py          # TribalAuthManager: extração de cookies, login WebView2, injeção de credenciais
+│   │   ├── profile_manager.py       # ProfileManager: múltiplos perfis (profiles.json), encriptação de senhas, proxy test
 │   │   ├── scheduler.py             # TaskScheduler: PriorityQueue, delays gaussianos, preempção
 │   │   ├── models.py                # Resources, VillageData, PlayerData, TaskPriority, Task
 │   │   └── exceptions.py            # BotProtectionError, SessionExpiredError, RateLimitError, etc.
 │   ├── utils/                       # Utilitários de evasão e parsers
 │   │   ├── __init__.py
-│   │   ├── parsers.py               # Extração de game_data, CSRF, recursos, bot protect, níveis, fila, tropas, AF e treino
+│   │   ├── parsers.py               # Extração de game_data, CSRF, recursos, bot protect, níveis, fila, tropas, AF e multi-aldeia
 │   │   └── timing.py                # get_human_delay (gaussiano), get_click_jitter
 │   ├── actions/                     # Handlers por ecrã (Fase 2)
 │   │   ├── __init__.py              # Exporta MainBuildingManager, PlaceManager, FarmManager, RecruitmentManager
@@ -65,9 +66,9 @@ TribalwarsBot/
 │   ├── api/                         # Camada de comunicação Sidecar IPC com Tauri (Fase 3)
 │   │   ├── __init__.py              # Exporta EngineContext, create_app, start_sidecar_server
 │   │   ├── auth.py                  # Token efêmero criptográfico, verificação HTTP/WS e .sidecar_auth.json
-│   │   ├── context.py               # EngineContext: orquestração de estado, scheduler, ações manuais e websockets
+│   │   ├── context.py               # EngineContext: orquestração de estado, multi-aldeia, perfis, proxy e websockets
 │   │   ├── websocket.py             # WebSocketLogHandler (streaming de logs) e endpoint /ws com broadcast
-│   │   ├── routes.py                # Endpoints REST (/api/status, /api/config, /api/scheduler/*, /api/actions/*)
+│   │   ├── routes.py                # Endpoints REST (/api/status, /api/config, /api/account/*, /api/profiles/*, /api/proxy/*)
 │   │   └── server.py                # create_app (CORS tauri://localhost) e start_sidecar_server (uvicorn)
 │   ├── config/                      # Configurações e carregamento de perfis
 │   │   ├── __init__.py
@@ -76,15 +77,15 @@ TribalwarsBot/
 │   └── main.py                      # Ponto de entrada CLI, Sidecar e Desktop (--gui, --api, --port)
 │
 ├── frontend/                        # Frontend Cockpit Web & Desktop (HTML5 / Vanilla CSS / Vanilla JS)
-│   ├── index.html                   # Estrutura do dashboard, cards, tabs e modal de captcha
+│   ├── index.html                   # Estrutura do dashboard, cards, tabs, modal de captcha e seletor multi-aldeia
 │   ├── css/
 │   │   └── style.css                # Design system Glassmorphism, dark mode e micro-animações
 │   └── js/
-│       ├── api.js                   # Cliente REST assíncrono para controle e configurações
+│       ├── api.js                   # Cliente REST assíncrono para controle, multi-aldeia, perfis e proxy
 │       ├── websocket.js             # Conexão WebSocket em tempo real e sintetizador sonoro
 │       └── app.js                   # Controlador da interface, cronómetro e streaming de logs
 │
-├── tests/                           # Suíte de testes unitários automatizados (66 testes, 100% OK)
+├── tests/                           # Suíte de testes unitários automatizados (75 testes, 100% OK)
 │   ├── __init__.py
 │   ├── test_core.py                 # 10 testes cobrindo models, timing, parsers, account e scheduler
 │   ├── test_main_building.py        # 12 testes cobrindo níveis, fila mobile/desktop, templates, auto-build e cancelamento
@@ -93,7 +94,11 @@ TribalwarsBot/
 │   ├── test_farm.py                 # 6 testes cobrindo Assistente de Farm, modelos A/B, filtros e fallback
 │   ├── test_recruitment.py          # 5 testes cobrindo filas de treino, metas, lotes e reserva de população
 │   ├── test_api.py                  # 14 testes cobrindo auth, REST, WebSockets, auth-info e static files
-│   └── test_auth.py                 # 7 testes cobrindo extração de cookies, persistência e auto-login
+│   ├── test_auth.py                 # 7 testes cobrindo extração de cookies, persistência e auto-login
+│   ├── test_profiles.py             # 4 testes cobrindo persistência de perfis e ofuscação de senhas
+│   ├── test_multi_village.py        # 3 testes cobrindo extração multi-aldeia e alternância de contexto
+│   └── test_proxy.py                # 2 testes cobrindo diagnóstico ativo de proxies
+
 
 
 

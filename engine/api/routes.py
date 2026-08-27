@@ -34,7 +34,20 @@ class ActionResponse(BaseModel):
     task_id: Optional[str] = None
 
 
+class SwitchVillageRequest(BaseModel):
+    village_id: int
+
+
+class SwitchProfileRequest(BaseModel):
+    profile_id: str
+
+
+class ProxyTestRequest(BaseModel):
+    proxy: str
+
+
 def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> APIRouter:
+
     """Cria e configura o router da API REST protegido por autenticação."""
     router = APIRouter(prefix="/api", dependencies=[Depends(token_verifier.verify)])
 
@@ -106,5 +119,36 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         res = context.resume_scheduler()
         return ActionResponse(status="resumed", message="Agendador retomado após resolução de verificação anti-bot.")
 
+    @router.get("/account/villages")
+    async def get_villages():
+        """Lista todas as aldeias pertencentes à conta."""
+        villages = [v.to_dict() for v in context.account.villages.values()] if context.account else []
+        curr_id = context.account.current_village_id if context.account else None
+        return {"villages": villages, "current_village_id": curr_id}
+
+    @router.post("/account/switch-village")
+    async def switch_village(payload: SwitchVillageRequest):
+        """Alterna a aldeia ativa no bot."""
+        res = await context.switch_village(payload.village_id)
+        return res
+
+    @router.get("/profiles")
+    async def list_profiles():
+        """Lista todos os perfis de conta configurados."""
+        return {"profiles": context.list_profiles()}
+
+    @router.post("/profiles/switch")
+    async def switch_profile(payload: SwitchProfileRequest):
+        """Alterna para outro perfil de conta."""
+        res = await context.switch_profile(payload.profile_id)
+        return res
+
+    @router.post("/proxy/test")
+    async def test_proxy(payload: ProxyTestRequest):
+        """Valida a conectividade de um proxy residencial/dedicado."""
+        res = await context.test_proxy(payload.proxy)
+        return res
+
     return router
+
 

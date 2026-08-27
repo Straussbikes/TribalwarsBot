@@ -19,7 +19,9 @@ from engine.actions.recruitment import RecruitmentManager
 from engine.config.settings import BotConfig, load_config
 from engine.core.account import TribalAccount
 from engine.core.models import TaskPriority
+from engine.core.profile_manager import ProfileManager
 from engine.core.scheduler import TaskScheduler
+
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,8 @@ class EngineContext:
         self.place_manager = PlaceManager()
         self.farm_manager = FarmManager()
         self.recruitment_manager = RecruitmentManager()
+        self.profile_manager = ProfileManager()
+
 
         # Clientes WebSocket ativos
         self.active_websockets: Set[WebSocket] = set()
@@ -329,9 +333,12 @@ class EngineContext:
                 "world": self.config.world,
                 "domain": self.config.domain,
                 "has_sid": bool(self.config.sid),
+                "proxy": self.config.proxy,
                 "player": player_data,
                 "village": village_data,
+                "villages": [v.to_dict() for v in self.account.villages.values()] if self.account else [],
             },
+
             "modules": {
                 "building": {
                     "enabled": True,
@@ -394,3 +401,62 @@ class EngineContext:
                 "batch_sizes": self.config.recruitment.batch_sizes,
             },
         }
+
+    async def switch_village(self, village_id: int) -> Dict[str, Any]:
+        """Alterna a aldeia ativa no bot e notifica a interface."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        try:
+            v_data = await self.account.switch_village(village_id)
+            self.broadcast_sync("VILLAGE_SWITCHED", {
+                "village_id": village_id,
+                "village": v_data.to_dict(),
+            })
+            self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+            return {
+                "status": "success",
+                "message": f"Aldeia alterada para {v_data.name} ({v_data.coordinates}).",
+                "village": v_data.to_dict(),
+            }
+        except Exception as e:
+            logger.error(f"Erro ao alternar para aldeia {village_id}: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def list_profiles(self) -> List[Dict[str, Any]]:
+        """Lista todos os perfis guardados."""
+        return self.profile_manager.list_profiles()
+
+    async def switch_profile(self, profile_id: str) -> Dict[str, Any]:
+        """Alterna o perfil de conta ativo."""
+        target = self.profile_manager.set_active_profile(profile_id)
+        if not target:
+            return {"status": "error", "message": f"Perfil '{profile_id}' não encontrado."}
+
+        # Atualiza a configuração ativa
+        self.config.world = target.world
+        self.config.domain = target.domain
+        self.config.sid = target.sid
+        self.config.proxy = target.proxy
+        self.config.building.template = target.building_template
+        if target.username:
+            self.config.auth.username = target.username
+        if target.password:
+            self.config.auth.password = target.password
+
+        # Atualiza a conta de jogo
+        if self.account:
+            self.account.world = target.world
+            self.account.domain = target.domain
+            self.account.sid = target.sid
+            self.account.proxy = target.proxy
+            await self.account.init_session()
+
+        self.broadcast_sync("PROFILE_SWITCHED", {"profile": target.to_dict()})
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {"status": "success", "message": f"Perfil '{target.name}' ativado com sucesso.", "profile": target.to_dict()}
+
+    async def test_proxy(self, proxy_url: str) -> Dict[str, Any]:
+        """Testa conectividade de um proxy residencial/dedicado."""
+        from engine.core.profile_manager import test_proxy_connection
+        return await test_proxy_connection(proxy_url)
+
