@@ -780,3 +780,172 @@ def parse_am_farm_templates(html: str) -> Dict[str, Dict[str, int]]:
 
 
 
+# Mapeamento de nomes de unidades para identificadores canónicos
+UNIT_NAME_TO_KEY: Dict[str, str] = {
+    "lanceiro": "spear",
+    "lanceiros": "spear",
+    "spear": "spear",
+    "spearman": "spear",
+    "espadachim": "sword",
+    "espadachins": "sword",
+    "sword": "sword",
+    "swordsman": "sword",
+    "viking": "axe",
+    "vikings": "axe",
+    "bárbaro": "axe",
+    "barbaro": "axe",
+    "axe": "axe",
+    "axeman": "axe",
+    "arqueiro": "archer",
+    "arqueiros": "archer",
+    "archer": "archer",
+    "explorador": "spy",
+    "exploradores": "spy",
+    "espião": "spy",
+    "espiao": "spy",
+    "spy": "spy",
+    "scout": "spy",
+    "cavalaria leve": "light",
+    "cavalarias leves": "light",
+    "light": "light",
+    "light cavalry": "light",
+    "arqueiro a cavalo": "marcher",
+    "arqueiros a cavalo": "marcher",
+    "marcher": "marcher",
+    "mounted archer": "marcher",
+    "cavalaria pesada": "heavy",
+    "cavalarias pesadas": "heavy",
+    "heavy": "heavy",
+    "heavy cavalry": "heavy",
+    "aríete": "ram",
+    "ariete": "ram",
+    "aríetes": "ram",
+    "arietes": "ram",
+    "ram": "ram",
+    "catapulta": "catapult",
+    "catapultas": "catapult",
+    "catapult": "catapult",
+    "paladino": "knight",
+    "knight": "knight",
+    "nobre": "snob",
+    "nobres": "snob",
+    "snob": "snob",
+    "nobleman": "snob",
+}
+
+
+def parse_recruitment_page(html: str) -> Dict[str, Any]:
+    """
+    Analisa a página de recrutamento militar (screen=barracks, screen=stable ou screen=garage).
+    Extrai:
+    - available_units: mapa de {unidade: max_recrutavel}
+    - queue: lista de ordens em treino com quantidade, timer e hora de conclusão
+    - total_in_queue: mapa de {unidade: total_sendo_treinado_na_fila}
+    """
+    result: Dict[str, Any] = {
+        "available_units": {},
+        "queue": [],
+        "total_in_queue": {u: 0 for u in ALL_UNITS},
+    }
+
+    if not html:
+        return result
+
+    normalized = html.replace("&amp;", "&")
+
+    # 1. Extração de unidades desbloqueadas e quantidade máxima recrutável
+    # Padrão 1: <a id="spear_0_a" ...>(15)</a> ou >15<
+    # Padrão 2: <input id="spear_0" name="spear" ... data-max="15" ... />
+    for unit_key in ALL_UNITS:
+        # Verifica se o input da unidade existe (indica que está desbloqueada no edifício)
+        input_match = re.search(
+            rf'<input[^>]*name=["\']{unit_key}["\'][^>]*>',
+            normalized,
+            re.IGNORECASE,
+        )
+        if not input_match:
+            continue
+
+        # Procura link ou atributo com o máximo recrutável
+        max_val = 0
+        # a) <a id="spear_0_a" ...>(15)</a>
+        link_max = re.search(
+            rf'id=["\']{unit_key}_\d+_a["\'][^>]*>\s*\(?(\d+)\)?\s*<',
+            normalized,
+            re.IGNORECASE,
+        )
+        if link_max:
+            try:
+                max_val = int(link_max.group(1))
+            except ValueError:
+                pass
+        else:
+            # b) data-max="15"
+            data_max = re.search(
+                rf'name=["\']{unit_key}["\'][^>]*data-max=["\'](\d+)["\']|data-max=["\'](\d+)["\'][^>]*name=["\']{unit_key}["\']',
+                normalized,
+                re.IGNORECASE,
+            )
+            if data_max:
+                val = next(g for g in data_max.groups() if g is not None)
+                try:
+                    max_val = int(val)
+                except ValueError:
+                    pass
+
+        result["available_units"][unit_key] = max_val
+
+    # 2. Extração da fila ativa de recrutamento (#trainqueue_... ou .trainqueue ou linhas de treino)
+    # Exemplo: <td>20 Lanceiro</td> ou <td>20 Spear</td> seguido de timer e horário
+    queue_row_regex = re.compile(
+        r'<tr[^>]*class=["\'](?:lit\s+)?trainqueue_[^"\']*["\'][^>]*>(.*?)</tr>|<tr[^>]*>(.*?<span[^>]*class=["\']timer["\'][^>]*>[\d:]+</span>.*?)</tr>',
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    for row_m in queue_row_regex.finditer(normalized):
+        row_content = row_m.group(1) or row_m.group(2)
+        if not row_content:
+            continue
+
+        # Procura padrão de quantidade + nome de tropa (ex: "25 Lanceiro", "10 Cavalaria Leve")
+        unit_found = None
+        count_found = 0
+
+        # Verifica cada unidade conhecida
+        for name_key, canonic_key in UNIT_NAME_TO_KEY.items():
+            pattern = re.compile(rf'(\d+)\s+{re.escape(name_key)}\b', re.IGNORECASE)
+            m = pattern.search(row_content)
+            if m:
+                count_found = int(m.group(1))
+                unit_found = canonic_key
+                break
+
+        if not unit_found or count_found <= 0:
+            continue
+
+        # Timer
+        timer_match = re.search(r'<span[^>]*class=["\']timer["\'][^>]*>([\d:]+)</span>', row_content, re.IGNORECASE)
+        timer_str = timer_match.group(1) if timer_match else ""
+
+        # Conclusão / hora
+        finish_match = re.search(r'(?:hoje|amanhã|today|tomorrow|[0-9]{1,2}\.[0-9]{1,2}\.)\s*(?:às\s*)?[\d:]+', row_content, re.IGNORECASE)
+        finish_time = finish_match.group(0).strip() if finish_match else ""
+
+        # Link de cancelamento se existir
+        cancel_match = re.search(r'href=["\']([^"\']*[?&]action=cancel[^"\']*)["\']', row_content, re.IGNORECASE)
+        cancel_url = cancel_match.group(1) if cancel_match else None
+
+        result["queue"].append({
+            "unit": unit_found,
+            "count": count_found,
+            "timer_str": timer_str,
+            "finish_time": finish_time,
+            "cancel_url": cancel_url,
+        })
+        result["total_in_queue"][unit_found] += count_found
+
+    return result
+
+
+
+

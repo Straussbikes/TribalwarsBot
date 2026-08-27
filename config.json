@@ -114,5 +114,25 @@
       "spear": 5,
       "spy": 1
     }
+  },
+  "recruitment": {
+    "_comentario": "Metas de tropas e lotes por ciclo para Quartel, Estábulo e Oficina",
+    "enabled": false,
+    "interval_minutes": 5.0,
+    "min_free_pop": 10,
+    "targets": {
+      "spear": 100,
+      "sword": 100,
+      "axe": 200,
+      "spy": 20,
+      "light": 50
+    },
+    "batch_sizes": {
+      "spear": 10,
+      "sword": 10,
+      "axe": 15,
+      "spy": 5,
+      "light": 5
+    }
   }
 }

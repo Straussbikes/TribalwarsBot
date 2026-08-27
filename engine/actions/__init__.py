@@ -32,11 +32,19 @@ from engine.actions.farm import (
     FarmManager,
     FarmTarget,
 )
+from engine.actions.recruitment import (
+    BUILDING_UNITS,
+    UNIT_TO_BUILDING,
+    RecruitmentManager,
+    RecruitmentState,
+    TrainingOrder,
+)
 
 __all__ = [
     "BALANCED_TEMPLATE",
     "BUILDING_NAMES",
     "BUILDING_REQUIREMENTS",
+    "BUILDING_UNITS",
     "CARRY_CAPACITY",
     "CommandMovement",
     "FarmAssistantState",
@@ -52,11 +60,16 @@ __all__ = [
     "PlaceState",
     "QueueOrder",
     "RUSH_RESOURCES_TEMPLATE",
+    "RecruitmentManager",
+    "RecruitmentState",
+    "TrainingOrder",
     "UNIT_NAMES_PT",
     "UNIT_SPEED_MIN_PER_FIELD",
+    "UNIT_TO_BUILDING",
     "UnitType",
     "UnitsCount",
 ]
+
 
 
 

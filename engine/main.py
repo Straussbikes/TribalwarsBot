@@ -18,7 +18,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from engine.actions import FarmManager, MainBuildingManager
+from engine.actions import FarmManager, MainBuildingManager, RecruitmentManager
 from engine.config import load_config
 from engine.core.account import TribalAccount
 from engine.core.exceptions import BotProtectionError, SessionExpiredError
@@ -138,7 +138,23 @@ async def main():
         else:
             logger.info("Módulo de Micro-Farming desativado no config.json (enabled=false).")
 
+        # 3.3. Módulo de Recrutamento Militar (se ativado no config.json)
+        if config.recruitment.enabled:
+            recruit_manager = RecruitmentManager()
+            recruit_manager.schedule_auto_recruit(
+                scheduler=scheduler,
+                account=account,
+                recruit_config=config.recruitment,
+            )
+            logger.info(
+                f"Módulo de Recrutamento Militar ativado ({len(config.recruitment.targets)} metas, "
+                f"a cada ~{config.recruitment.interval_minutes:.1f}min, min pop: {config.recruitment.min_free_pop})."
+            )
+        else:
+            logger.info("Módulo de Recrutamento Militar desativado no config.json (enabled=false).")
+
     # 4. Inicia o loop de tarefas do agendador
+
 
     scheduler.start()
     logger.info("Motor iniciado. Pressione Ctrl+C para encerrar.")

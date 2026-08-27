@@ -81,11 +81,13 @@
 - [ ] Disparo automático com timer e agendamento para reenvio assim que as tropas regressam.
 
 ### 2.5. Recrutamento Militar (Quartel, Estábulo, Oficina)
-- [ ] Parsing do ecrã do Quartel (`screen=barracks`), Estábulo (`screen=stable`) e Oficina (`screen=garage`).
-- [ ] Leitura das filas de recrutamento ativas e tempo de conclusão.
-- [ ] Configuração de metas de exército (ex.: 1000 lanceiros, 1000 espadachins, 500 cavalarias leves).
-- [ ] Recrutamento inteligente em pequenos lotes contínuos para não esgotar recursos necessários à evolução da aldeia.
-- [ ] Validação de limite de população livre da Fazenda antes de recrutar.
+- [x] Parsing do ecrã do Quartel (`screen=barracks`), Estábulo (`screen=stable`) e Oficina (`screen=garage`).
+- [x] Leitura das filas de recrutamento ativas e tempo de conclusão.
+- [x] Configuração de metas de exército (ex.: 1000 lanceiros, 1000 espadachins, 500 cavalarias leves).
+- [x] Recrutamento inteligente em pequenos lotes contínuos para não esgotar recursos necessários à evolução da aldeia.
+- [x] Validação de limite de população livre da Fazenda antes de recrutar (`min_free_pop`).
+- [x] Suíte de testes unitários para Recrutamento Militar (5 testes dedicados, total de 44 testes, 100% OK).
+
 
 ### 2.6. Academia & Cunha de Moedas (`screen=snob`)
 - [ ] Leitura de moedas cunhadas / pacotes acumulados.

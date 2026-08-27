@@ -43,6 +43,16 @@ class FarmConfig:
 
 
 @dataclass
+class RecruitmentConfig:
+    """Configurações da rotina de Recrutamento Militar."""
+    enabled: bool = False
+    targets: Dict[str, int] = field(default_factory=lambda: {"spear": 50, "sword": 50, "axe": 50})
+    batch_sizes: Dict[str, int] = field(default_factory=lambda: {"spear": 10, "sword": 10, "axe": 10, "light": 5})
+    min_free_pop: int = 10
+    interval_minutes: float = 5.0
+
+
+@dataclass
 class BotConfig:
     """Configuração global consolidada do bot."""
     world: str = "pt117"
@@ -51,6 +61,8 @@ class BotConfig:
     proxy: Optional[str] = None
     building: BuildingConfig = field(default_factory=BuildingConfig)
     farm: FarmConfig = field(default_factory=FarmConfig)
+    recruitment: RecruitmentConfig = field(default_factory=RecruitmentConfig)
+
 
     def get_active_build_plan(self) -> List[Tuple[str, int]]:
         """
@@ -139,6 +151,30 @@ def load_config(config_file: str = "config.json") -> BotConfig:
         custom_troops=custom_troops,
     )
 
+    # 4. Carrega configurações de Recrutamento Militar
+    r_data = data.get("recruitment", {})
+    raw_r_targets = r_data.get("targets", {"spear": 50, "sword": 50, "axe": 50})
+    r_targets = (
+        {str(k): int(v) for k, v in raw_r_targets.items()}
+        if isinstance(raw_r_targets, dict)
+        else {}
+    )
+
+    raw_r_batches = r_data.get("batch_sizes", {"spear": 10, "sword": 10, "axe": 10, "light": 5})
+    r_batches = (
+        {str(k): int(v) for k, v in raw_r_batches.items()}
+        if isinstance(raw_r_batches, dict)
+        else {}
+    )
+
+    recruitment_config = RecruitmentConfig(
+        enabled=bool(r_data.get("enabled", False)),
+        targets=r_targets,
+        batch_sizes=r_batches,
+        min_free_pop=int(r_data.get("min_free_pop", 10)),
+        interval_minutes=float(r_data.get("interval_minutes", 5.0)),
+    )
+
     return BotConfig(
         world=world.strip().lower(),
         sid=sid.strip(),
@@ -146,7 +182,9 @@ def load_config(config_file: str = "config.json") -> BotConfig:
         proxy=proxy,
         building=building_config,
         farm=farm_config,
+        recruitment=recruitment_config,
     )
+
 
 
 
