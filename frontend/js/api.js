@@ -142,6 +142,78 @@ class SidecarApi {
       body: JSON.stringify({ proxy: proxyUrl }),
     });
   }
+
+  async refreshVillage() {
+    return await this.request("/api/account/refresh", { method: "POST" });
+  }
+
+  async claimAllQuests() {
+    return await this.request("/api/quest/claim-all", { method: "POST" });
+  }
+
+  async getQuestStatus() {
+    return await this.request("/api/quest/status");
+  }
+
+  async getMapGrid(x, y, radius = 15) {
+    const params = new URLSearchParams();
+    if (x !== undefined && x !== null) params.set("x", x);
+    if (y !== undefined && y !== null) params.set("y", y);
+    if (radius) params.set("radius", radius);
+    return await this.request(`/api/map/grid?${params.toString()}`);
+  }
+
+  async getMapBarbarians(radius = 15, useCache = true) {
+    const params = new URLSearchParams({ radius, use_cache: useCache });
+    return await this.request(`/api/map/barbarians?${params.toString()}`);
+  }
+
+  async scanMap(radius = 15) {
+    return await this.request(`/api/map/scan?radius=${radius}`, { method: "POST" });
+  }
+
+  async triggerMapFarm() {
+    return await this.request("/api/map/farm", { method: "POST" });
+  }
+
+  // --- Multi-Mundo Simultâneo ---
+  async getWorlds() {
+    return await this.request("/api/worlds");
+  }
+
+  async registerWorld(world, sid, domain = "tribalwars.com.pt", proxy = null) {
+    return await this.request("/api/worlds/register", {
+      method: "POST",
+      body: JSON.stringify({ world, sid, domain, proxy }),
+    });
+  }
+
+  async switchWorld(world) {
+    return await this.request("/api/worlds/switch", {
+      method: "POST",
+      body: JSON.stringify({ world }),
+    });
+  }
+
+  // --- Multi-Aldeia & Categorização ---
+  async getAccountVillages() {
+    return await this.request("/api/account/villages");
+  }
+
+  async setVillageCategory(villageId, category) {
+    return await this.request("/api/account/village/category", {
+      method: "POST",
+      body: JSON.stringify({ village_id: parseInt(villageId, 10), category }),
+    });
+  }
+
+  async triggerAllVillagesCycle() {
+    return await this.request("/api/account/villages/cycle", { method: "POST" });
+  }
+
+  async getVillageBalance() {
+    return await this.request("/api/account/villages/balance");
+  }
 }
 
 

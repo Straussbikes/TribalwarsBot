@@ -57,8 +57,13 @@ class FarmManager:
     Fornece rotinas de saque em massa via Assistente de Farm ou Praça de Reunião.
     """
 
-    def __init__(self, place_manager: Optional[PlaceManager] = None):
+    def __init__(
+        self,
+        place_manager: Optional[PlaceManager] = None,
+        map_manager: Optional[Any] = None,
+    ):
         self.place_manager = place_manager or PlaceManager()
+        self.map_manager = map_manager
 
     async def get_am_farm_state(
         self, account: TribalAccount, village_id: Optional[int] = None
@@ -280,12 +285,28 @@ class FarmManager:
                     targets = getattr(farm_config, "custom_targets", [])
                     raw_troops = getattr(farm_config, "custom_troops", {})
                     troops = UnitsCount.from_dict(raw_troops) if isinstance(raw_troops, dict) else UnitsCount(spear=5, spy=1)
-                    await self.run_place_farm_wave(
-                        account=account,
-                        targets=targets,
-                        troops=troops,
-                        village_id=village_id,
-                    )
+
+                    # Se não houver alvos manuais, usa o Scanner de Bárbaras do mapa
+                    if not targets and getattr(farm_config, "use_map_scanner", True):
+                        if not self.map_manager:
+                            from engine.actions.map import MapManager
+                            self.map_manager = MapManager()
+
+                        scan_radius = getattr(farm_config, "map_scan_radius", 15.0)
+                        await self.map_manager.run_map_farm_wave(
+                            account=account,
+                            farm_manager=self,
+                            troops=troops,
+                            radius=scan_radius,
+                            village_id=village_id,
+                        )
+                    else:
+                        await self.run_place_farm_wave(
+                            account=account,
+                            targets=targets,
+                            troops=troops,
+                            village_id=village_id,
+                        )
                 else:
                     template = getattr(farm_config, "template", "A")
                     max_dist = getattr(farm_config, "max_distance", 15.0)

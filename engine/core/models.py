@@ -4,7 +4,7 @@ Estruturas de dados fortemente tipadas para representar recursos, aldeias, jogad
 """
 
 from dataclasses import dataclass, field
-from enum import IntEnum
+from enum import Enum, IntEnum
 import time
 from typing import Any, Callable, Coroutine, Dict, Optional
 
@@ -21,6 +21,7 @@ class TaskPriority(IntEnum):
     SCAVENGE = 30    # Envio de coletas (Scavenging)
     BUILD = 40       # Construção de edifícios (Edifício Principal)
     RECRUIT = 50     # Recrutamento de tropas (Quartel/Estábulo/Oficina)
+    QUEST = 60       # Missões, bónus diário e inventário
     REFRESH = 90     # Atualização periódica de recursos / estado
     IDLE = 100       # Tarefas de manutenção em segundo plano
     BACKGROUND = 100 # Tarefas de fundo / keep-alive da sessão
@@ -63,6 +64,44 @@ class Resources:
         )
 
 
+class VillageCategory(str, Enum):
+    """Categorias de especialização tática de aldeias."""
+    ATTACK = "attack"      # Aldeia ofensiva (Machados, Leves, Aríetes)
+    DEFENSE = "defense"    # Aldeia defensiva (Lanças, Espadas, Pesadas, Muralha)
+    BALANCED = "balanced"  # Aldeia equilibrada / mista / inicial (Recursos e misto de tropas)
+
+
+# Arquétipos padrão de templates de construção por categoria
+CATEGORY_BUILDING_TEMPLATES = {
+    VillageCategory.ATTACK: "military_rush",
+    VillageCategory.DEFENSE: "wall_focus",
+    VillageCategory.BALANCED: "balanced",
+}
+
+# Arquétipos padrão de metas de recrutamento por categoria
+CATEGORY_RECRUITMENT_TARGETS = {
+    VillageCategory.ATTACK: {
+        "axe": 500,
+        "light": 250,
+        "ram": 30,
+        "spy": 25,
+    },
+    VillageCategory.DEFENSE: {
+        "spear": 400,
+        "sword": 400,
+        "heavy": 100,
+        "spy": 25,
+    },
+    VillageCategory.BALANCED: {
+        "spear": 150,
+        "sword": 150,
+        "axe": 150,
+        "light": 75,
+        "spy": 20,
+    },
+}
+
+
 @dataclass
 class VillageData:
     """Representação de uma aldeia associada à conta."""
@@ -72,13 +111,16 @@ class VillageData:
     x: int = 0
     y: int = 0
     points: int = 0
+    category: VillageCategory = VillageCategory.BALANCED
     resources: Resources = field(default_factory=Resources)
+    troops: Dict[str, int] = field(default_factory=dict)
 
     @property
     def coordinates(self) -> str:
         return f"{self.x}|{self.y}"
 
     def to_dict(self) -> Dict[str, Any]:
+        cat_val = self.category.value if isinstance(self.category, VillageCategory) else str(self.category)
         return {
             "id": self.id,
             "name": self.name,
@@ -86,6 +128,17 @@ class VillageData:
             "x": self.x,
             "y": self.y,
             "points": self.points,
+            "category": cat_val,
+            "resources": {
+                "wood": self.resources.wood,
+                "stone": self.resources.stone,
+                "iron": self.resources.iron,
+                "storage_max": self.resources.storage_max,
+                "pop": self.resources.pop,
+                "pop_max": self.resources.pop_max,
+                "free_pop": self.resources.free_pop,
+            },
+            "troops": self.troops,
         }
 
 

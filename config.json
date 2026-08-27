@@ -1,11 +1,11 @@
 {
-  "world": "pt117",
-  "sid": "0%3Af11f634daacab72c0aeb7310b12ca0df013f09fbc314442d3624d3af974d15df0cd2e37cf48c76bc5a1ed367e84efe87e8bdc5707ee3071509231f0872c774a9",
+  "world": "pt114",
+  "sid": "0%3A979ee57344ed84c1b5e74964ea9b5247288d547348619af663569aeeede220a35ea6084083a9a8fe6b51316247c67793821ab91755b1e951a693eb27d1fa5fff",
   "building": {
-    "_comentario": "Templates disponíveis: 'rush_resources' (recursos), 'balanced' (balanceado), 'military_rush' (tropas/cavalaria) ou 'custom'",
-    "template": "rush_resources",
+    "_comentario": "Templates dispon\u00edveis: 'rush_resources' (recursos), 'balanced' (balanceado), 'military_rush' (tropas/cavalaria) ou 'custom'",
+    "template": "custom",
     "max_queue": 2,
-    "interval_seconds": 75.0,
+    "interval_seconds": 75,
     "custom_plan": [
       [
         "wood",
@@ -20,6 +20,22 @@
         1
       ],
       [
+        "wood",
+        2
+      ],
+      [
+        "stone",
+        2
+      ],
+      [
+        "wood",
+        3
+      ],
+      [
+        "stone",
+        3
+      ],
+      [
         "main",
         2
       ],
@@ -33,14 +49,14 @@
       ],
       [
         "wood",
-        2
+        4
       ],
       [
         "stone",
-        2
+        4
       ],
       [
-        "storage",
+        "iron",
         2
       ],
       [
@@ -49,15 +65,35 @@
       ],
       [
         "wood",
-        3
+        5
       ],
       [
         "stone",
-        3
+        5
       ],
       [
         "iron",
+        3
+      ],
+      [
+        "storage",
         2
+      ],
+      [
+        "wood",
+        6
+      ],
+      [
+        "stone",
+        6
+      ],
+      [
+        "iron",
+        4
+      ],
+      [
+        "farm",
+        3
       ],
       [
         "main",
@@ -68,8 +104,8 @@
         5
       ],
       [
-        "barracks",
-        2
+        "storage",
+        3
       ],
       [
         "smith",
@@ -77,35 +113,183 @@
       ],
       [
         "wood",
-        4
+        7
       ],
       [
         "stone",
-        4
+        7
       ],
       [
         "iron",
-        3
+        5
       ],
       [
         "storage",
+        4
+      ],
+      [
+        "farm",
+        4
+      ],
+      [
+        "wood",
+        8
+      ],
+      [
+        "stone",
+        8
+      ],
+      [
+        "wood",
+        9
+      ],
+      [
+        "stone",
+        9
+      ],
+      [
+        "iron",
+        6
+      ],
+      [
+        "storage",
+        5
+      ],
+      [
+        "main",
+        6
+      ],
+      [
+        "main",
+        7
+      ],
+      [
+        "main",
+        8
+      ],
+      [
+        "smith",
+        2
+      ],
+      [
+        "smith",
         3
       ],
       [
-        "wall",
+        "farm",
+        5
+      ],
+      [
+        "storage",
+        6
+      ],
+      [
+        "main",
+        9
+      ],
+      [
+        "main",
+        10
+      ],
+      [
+        "smith",
+        4
+      ],
+      [
+        "smith",
+        5
+      ],
+      [
+        "storage",
+        7
+      ],
+      [
+        "stable",
+        1
+      ],
+      [
+        "stable",
         2
+      ],
+      [
+        "stable",
+        3
+      ],
+      [
+        "farm",
+        6
+      ],
+      [
+        "storage",
+        8
+      ],
+      [
+        "barracks",
+        2
+      ],
+      [
+        "barracks",
+        3
+      ],
+      [
+        "barracks",
+        4
+      ],
+      [
+        "barracks",
+        5
+      ],
+      [
+        "farm",
+        7
+      ],
+      [
+        "storage",
+        9
+      ],
+      [
+        "storage",
+        10
+      ],
+      [
+        "farm",
+        8
+      ],
+      [
+        "stable",
+        4
+      ],
+      [
+        "stable",
+        5
+      ],
+      [
+        "farm",
+        9
+      ],
+      [
+        "farm",
+        10
+      ],
+      [
+        "storage",
+        11
+      ],
+      [
+        "storage",
+        12
       ]
     ]
   },
   "farm": {
-    "_comentario": "Modos: 'am_farm' (Assistente de Farm) ou 'place' (direto via Praça)",
+    "_comentario": "Modos: 'am_farm' (Assistente de Farm) ou 'place' (direto via Pra\u00e7a)",
     "enabled": false,
     "mode": "am_farm",
     "template": "A",
     "max_distance": 15.0,
     "skip_losses": true,
     "skip_wall": true,
-    "interval_minutes": 10.0,
+    "interval_minutes": 10,
     "custom_targets": [
       [
         452,
@@ -118,20 +302,23 @@
     ],
     "custom_troops": {
       "spear": 5,
-      "spy": 1
-    }
+      "spy": 0
+    },
+    "use_map_scanner": true,
+    "map_scan_radius": 15.0,
+    "map_cache_ttl_hours": 12.0
   },
   "recruitment": {
-    "_comentario": "Metas de tropas e lotes por ciclo para Quartel, Estábulo e Oficina",
+    "_comentario": "Metas de tropas e lotes por ciclo para Quartel, Est\u00e1bulo e Oficina",
     "enabled": false,
     "interval_minutes": 5.0,
     "min_free_pop": 10,
     "targets": {
-      "spear": 100,
-      "sword": 100,
+      "spear": 0,
+      "sword": 0,
       "axe": 200,
       "spy": 20,
-      "light": 50
+      "light": 200
     },
     "batch_sizes": {
       "spear": 10,
@@ -139,6 +326,19 @@
       "axe": 15,
       "spy": 5,
       "light": 5
+    }
+  },
+  "quest": {
+    "_comentario": "Miss\u00f5es, b\u00f3nus di\u00e1rio e invent\u00e1rio (itens do invent\u00e1rio s\u00f3 s\u00e3o usados manualmente)",
+    "enabled": true,
+    "auto_claim_quests": true,
+    "auto_daily_bonus": true,
+    "safe_storage_margin": 0.95,
+    "interval_minutes": 30.0
+  },
+  "villages": {
+    "6810": {
+      "category": "attack"
     }
   }
 }

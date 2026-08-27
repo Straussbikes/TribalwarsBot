@@ -82,23 +82,36 @@ body {
   overflow: hidden;
 }
 
-/* Top Navigation Bar */
+/* Top Navigation Bar (Layout em 3 Colunas com Centro Alinhado) */
 .top-nav {
-  height: 64px;
+  height: 60px;
+  min-height: 60px;
   background: var(--bg-glass);
   backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border-glass);
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
+  padding: 0 16px;
+  gap: 12px;
   z-index: 50;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .brand-section {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.top-nav-center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
 }
 
 .brand-logo {
@@ -140,21 +153,23 @@ body {
 .nav-indicators {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 .badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 5px;
+  padding: 4px 10px;
   border-radius: 20px;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 600;
   font-family: var(--font-mono);
   background: var(--bg-card);
   border: 1px solid var(--border-glass);
   letter-spacing: 0.2px;
+  white-space: nowrap;
 }
 
 .badge-world {
@@ -234,7 +249,32 @@ body {
 .quick-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 0.76rem;
+  gap: 5px;
+}
+
+.btn-group {
+  display: inline-flex;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-glass);
+}
+
+.btn-group .btn {
+  border-radius: 0;
+  border: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.btn-group .btn:last-child {
+  border-right: none;
 }
 
 .btn {
@@ -304,6 +344,7 @@ body {
 .main-workspace {
   display: flex;
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -576,31 +617,64 @@ body {
 /* Army Units Matrix */
 .army-matrix {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 10px;
   margin-top: 8px;
+}
+
+@media (max-width: 900px) {
+  .army-matrix {
+    grid-template-columns: repeat(4, 1fr);
+  }
 }
 
 .army-cell {
   background: rgba(15, 23, 42, 0.5);
   border: 1px solid var(--border-glass);
   border-radius: var(--radius-sm);
-  padding: 10px;
+  padding: 8px 6px;
   text-align: center;
+  transition: var(--transition-smooth);
+}
+
+.army-cell:hover {
+  border-color: var(--border-glass-highlight);
+  background: rgba(30, 41, 59, 0.6);
+  transform: translateY(-2px);
+}
+
+.army-cell-icon {
+  font-size: 1rem;
+  margin-bottom: 2px;
 }
 
 .army-cell-name {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .army-cell-count {
   font-family: var(--font-mono);
-  font-size: 1.15rem;
+  font-size: 1.1rem;
   font-weight: 700;
-  color: var(--text-main);
-  margin-top: 4px;
+  color: var(--neon-cyan);
+  margin-top: 2px;
+}
+
+/* Tactical Map Component */
+.map-canvas-wrapper {
+  background: radial-gradient(circle at center, #0f172a 0%, #020617 100%);
+  border: 1px solid var(--border-glass);
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.8);
+}
+
+.map-tooltip {
+  transition: opacity 0.15s ease;
+  pointer-events: none;
 }
 
 /* Terminal & Log Viewer Component */
@@ -837,3 +911,251 @@ body {
   from { transform: translateY(0); }
   to { transform: translateY(-8px); }
 }
+
+/* Tactical Map Container & Navigator */
+.map-canvas-wrapper {
+  position: relative;
+  width: 100%;
+  height: 520px;
+  background: #040810;
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 0 40px rgba(0, 0, 0, 0.6);
+  user-select: none;
+}
+
+.map-nav-hud {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: rgba(11, 17, 32, 0.88);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.65);
+  z-index: 20;
+}
+
+.map-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 28px);
+  grid-template-rows: repeat(3, 28px);
+  gap: 4px;
+}
+
+.map-nav-btn {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-main);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.map-nav-btn:hover {
+  background: var(--neon-cyan);
+  color: #000;
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.4);
+}
+
+.map-nav-btn:active {
+  transform: scale(0.92);
+}
+
+.map-zoom-controls {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  margin-top: 2px;
+}
+
+.map-zoom-controls .map-nav-btn {
+  flex: 1;
+  height: 26px;
+  font-weight: bold;
+}
+
+/* Selected Village Tactical Card */
+.selected-village-card {
+  margin-top: 14px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--neon-cyan);
+  border-radius: 10px;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  box-shadow: 0 4px 20px rgba(6, 182, 212, 0.15);
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Multi-World Orchestrator Chips */
+.world-chip {
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border-radius: 6px;
+  cursor: pointer;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid var(--border-glass);
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.world-chip:hover {
+  border-color: var(--neon-cyan);
+  color: #fff;
+  background: rgba(51, 65, 85, 0.8);
+}
+
+.world-chip.active {
+  background: rgba(6, 182, 212, 0.2);
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.25);
+}
+
+/* Badges de Categoria de Aldeia */
+.badge-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-cat-attack {
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #f87171;
+}
+
+.badge-cat-defense {
+  background: rgba(59, 130, 246, 0.18);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  color: #60a5fa;
+}
+
+.badge-cat-balanced {
+  background: rgba(16, 185, 129, 0.18);
+  border: 1px solid rgba(16, 185, 129, 0.5);
+  color: #34d399;
+}
+
+/* Troop Recruitment Cards & Progress HUD */
+.unit-rec-card {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: var(--transition-smooth);
+}
+
+.unit-rec-card:hover {
+  border-color: rgba(6, 182, 212, 0.4);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.unit-rec-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.unit-rec-icon {
+  font-size: 1.35rem;
+}
+
+.unit-rec-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.unit-rec-pop {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.unit-rec-curr {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--border-glass);
+  color: var(--neon-cyan);
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+.unit-rec-progress-wrap {
+  width: 100%;
+  height: 5px;
+  background: rgba(15, 23, 42, 0.8);
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.unit-rec-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #0284c7, var(--neon-cyan));
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.unit-rec-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.unit-rec-inputs label {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 2px;
+  font-weight: 600;
+}
+
+.rec-input {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  text-align: center;
+  background: rgba(15, 23, 42, 0.9);
+  box-sizing: border-box;
+}
+

@@ -320,6 +320,32 @@ class TestPlaceAsyncActions(unittest.IsolatedAsyncioTestCase):
         # Não deve fazer nenhuma chamada de rede para enviar comando
         account.post_action.assert_not_called()
 
+    async def test_send_command_adapts_when_spies_missing(self):
+        from engine.core.account import TribalAccount
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.current_village_id = 12345
+        # Retorna SAMPLE_PLACE_HTML onde há 120 lanças mas 0 espiões (ou spy é ausente/adaptado)
+        # Modifica HTML para ter 0 spy
+        html_zero_spy = SAMPLE_PLACE_HTML.replace('data-all-count="20"', 'data-all-count="0"')
+        account.get_screen = AsyncMock(return_value=html_zero_spy)
+        account.post_action = AsyncMock(return_value="""<input type="hidden" name="ch" value="test_ch" />""")
+
+        manager = PlaceManager()
+        manager.confirm_command = AsyncMock(return_value=True)
+
+        # Pede 5 lanceiros e 1 espião (modelo padrão de farm)
+        requested = UnitsCount(spear=5, spy=1)
+
+        success = await manager.send_command(
+            account=account,
+            target_coords=(455, 555),
+            units=requested,
+            is_attack=True,
+            allow_partial=False,
+        )
+        self.assertTrue(success)
+
 
 if __name__ == "__main__":
     unittest.main()

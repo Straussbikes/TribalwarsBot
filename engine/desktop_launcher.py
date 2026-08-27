@@ -15,15 +15,12 @@ from pathlib import Path
 
 import webview
 
-# Garante que navegações e links no WebView2 abrem dentro da mesma janela e não no browser externo
-webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
-
-
 # Garante que a raiz do projeto está no sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from engine.platforms import get_platform_adapter
 from engine.config import load_config
 from engine.core.account import TribalAccount
 from engine.core.scheduler import TaskScheduler
@@ -43,16 +40,23 @@ logger = logging.getLogger("TribalDesktop")
 
 
 class DesktopJsApi:
-    """API Python exposta de forma segura ao JavaScript da janela Edge WebView2."""
+    """API Python exposta de forma segura ao JavaScript da janela Edge WebView2 / WebKit."""
 
-    def __init__(self, on_finish_callback=None):
+    def __init__(self, on_finish_callback=None, on_reload_callback=None):
         self._on_finish_callback = on_finish_callback
+        self._on_reload_callback = on_reload_callback
 
     def finish_login(self):
         """Disparado pelo botão do banner quando o utilizador conclui o login."""
         logger.info("Botão 'Concluir Login' acionado no banner.")
         if self._on_finish_callback:
             self._on_finish_callback()
+
+    def reload_login(self):
+        """Disparado pelo botão de recarregar caso o utilizador encontre problemas de captcha."""
+        logger.info("Botão 'Recarregar' acionado no banner.")
+        if self._on_reload_callback:
+            self._on_reload_callback()
 
 
 
@@ -63,6 +67,7 @@ class DesktopApp:
     def __init__(self, host: str = "127.0.0.1", port: int = 8000):
         self.host = host
         self.port = port
+        self.platform = get_platform_adapter()
         self.loop: asyncio.AbstractEventLoop = None
         self.engine_thread: threading.Thread = None
         self.server = None
@@ -200,6 +205,9 @@ class DesktopApp:
         target_url = f"https://www.{self.context.config.domain}/"
         logger.info(f"A navegar janela desktop para login: {target_url}")
         self.is_logging_in = True
+        if self.context and self.context.scheduler:
+            self.context.scheduler.pause()
+            logger.info("Motor de agendamento pausado temporariamente durante o login.")
         try:
             self.window.load_url(target_url)
         except Exception as e:
@@ -217,6 +225,14 @@ class DesktopApp:
         except Exception:
             return default
 
+    def reload_login_page(self):
+        """Recarrega a página de login do Tribal Wars caso haja erro de navegação."""
+        if not self.window:
+            return
+        target_url = f"https://www.{self.context.config.domain}/"
+        logger.info(f"A recarregar página de login: {target_url}")
+        self.platform.reload_url(self.window, target_url)
+
     def _inject_login_banner(self):
         """Injeta um banner flutuante no topo do ecrã de login com instruções para o utilizador."""
         banner_js = """
@@ -224,14 +240,24 @@ class DesktopApp:
             if (document.getElementById('tw-bot-banner')) return;
             var d = document.createElement('div');
             d.id = 'tw-bot-banner';
-            d.style.cssText = 'position:fixed;top:0;left:0;right:0;background:linear-gradient(135deg,#0d1117,#161b22);color:#58a6ff;padding:10px 20px;z-index:2147483647;text-align:center;font-family:Arial,sans-serif;font-size:14px;box-shadow:0 2px 12px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;gap:15px;border-bottom:2px solid #58a6ff;';
-            d.innerHTML = '<span>&#128273; <b>TribalWars Bot:</b> Faca login e entre no mundo.</span> <button id="tw-bot-finish-btn" style="background:#238636;color:#fff;border:none;border-radius:4px;padding:4px 12px;font-weight:bold;cursor:pointer;">Entrei no Jogo &rarr;</button>';
-            document.body.prepend(d);
-            var btn = document.getElementById('tw-bot-finish-btn');
-            if (btn) {
-                btn.onclick = function() {
+            d.style.cssText = 'position:fixed;top:0;left:0;right:0;background:linear-gradient(135deg,#0d1117,#161b22);color:#58a6ff;padding:8px 16px;z-index:2147483647;text-align:center;font-family:Arial,sans-serif;font-size:13px;box-shadow:0 2px 12px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;gap:12px;border-bottom:2px solid #58a6ff;';
+            d.innerHTML = '<span>&#128273; <b>TribalWars Bot:</b> Faca login (resolva o captcha se pedido) e <u>clique no seu Mundo</u>.</span> <button id="tw-bot-reload-btn" style="background:#30363d;color:#c9d1d9;border:1px solid #8b949e;border-radius:4px;padding:3px 8px;cursor:pointer;font-size:12px;">&#8634; Recarregar</button> <button id="tw-bot-finish-btn" style="background:#238636;color:#fff;border:none;border-radius:4px;padding:4px 12px;font-weight:bold;cursor:pointer;">Entrei no Jogo &rarr;</button>';
+            if (document.body) {
+                document.body.prepend(d);
+            }
+            var btnFinish = document.getElementById('tw-bot-finish-btn');
+            if (btnFinish) {
+                btnFinish.onclick = function() {
                     if (window.pywebview && window.pywebview.api && window.pywebview.api.finish_login) {
                         window.pywebview.api.finish_login();
+                    }
+                };
+            }
+            var btnReload = document.getElementById('tw-bot-reload-btn');
+            if (btnReload) {
+                btnReload.onclick = function() {
+                    if (window.pywebview && window.pywebview.api && window.pywebview.api.reload_login) {
+                        window.pywebview.api.reload_login();
                     }
                 };
             }
@@ -255,9 +281,15 @@ class DesktopApp:
         while time.time() - start_t < 300 and self.is_logging_in and self.is_running:
             time.sleep(1.5)
 
-            # evaluate_js() é o ÚNICO método WebView2 seguro de chamar fora da UI thread.
-            # get_current_url() e get_cookies() causam crash (E_NOINTERFACE / UI thread only).
-            curr_url = self._js_safe("window.location.href")
+            # evaluate_js() é o ÚNICO método WebView seguro de chamar fora da UI thread em todas as plataformas.
+            curr_url = self.platform.get_safe_url(self.window)
+
+            # Se a janela foi indevidamente redirecionada para assets isolados do captcha, restaura o ecrã do jogo
+            if self.platform.is_captcha_or_asset_hijack(curr_url):
+                logger.warning(f"[Login] Redirecionamento indevido detetado para {curr_url[:60]}... A restaurar ecrã de login.")
+                self.reload_login_page()
+                time.sleep(2.0)
+                continue
 
             # Loga mudanças de URL para diagnóstico
             if curr_url and curr_url != last_url:
@@ -278,15 +310,25 @@ class DesktopApp:
 
             logger.info(f"[Login] Entrada no jogo detetada! URL: {curr_url[:80]}")
 
-            # Aguarda estabilização dos cookies
-            time.sleep(2.0)
+            # Deteta automaticamente o mundo onde o utilizador entrou (ex: pt117 ou pt114)
+            import re
+            m = re.search(r"https?://([a-zA-Z0-9]+)\.tribalwars\.", curr_url)
+            if m:
+                logged_world = m.group(1).lower()
+                if logged_world != self.context.config.world:
+                    logger.info(f"[Login] Mundo detetado na URL: '{logged_world}'. A atualizar configuração.")
+                    self.context.config.world = logged_world
+                    self.context.update_config_and_save({"world": logged_world})
 
-            # Captura o SID via API nativa de cookies WebView2 e fallbacks
+            # Aguarda estabilização dos cookies
+            time.sleep(1.5)
+
+            # Captura o SID via API nativa de cookies WebView2, WKHTTPCookieStore e fallbacks
             sid = self._extract_sid()
 
             if not sid:
-                logger.warning("[Login] Entrada no jogo detetada mas SID não encontrado. A tentar novamente em 3s...")
-                time.sleep(3.0)
+                logger.warning("[Login] Entrada no jogo detetada mas SID não encontrado. A tentar novamente em 2s...")
+                time.sleep(2.0)
                 continue
 
             # SID capturado com sucesso!
@@ -307,14 +349,14 @@ class DesktopApp:
             logger.info(f"[Login] SID capturado via intercetor de rede: {self.captured_sid[:12]}...")
             return self.captured_sid
 
-        # 2. Método WebView2 Nativo: get_cookies() (suporta HttpOnly)
+        # 2. Método Nativo da Plataforma: extract_cookies() (suporta HttpOnly)
         try:
-            cookies = self.window.get_cookies()
+            cookies = self.platform.extract_cookies(self.window)
             if cookies:
                 from engine.core.auth_manager import extract_sid_from_cookies
                 sid = extract_sid_from_cookies(cookies)
                 if sid and len(sid) > 10:
-                    logger.info(f"[Login] SID HttpOnly capturado via get_cookies(): {sid[:12]}...")
+                    logger.info(f"[Login] SID HttpOnly capturado via {self.platform.gui_backend}: {sid[:12]}...")
                     return sid
         except Exception as e:
             logger.debug(f"[Login] Falha ao ler cookies nativos: {e}")
@@ -354,6 +396,12 @@ class DesktopApp:
 
         from engine.config.settings import save_config_sid
         save_config_sid(sid)
+        self.context.config.sid = sid
+        if hasattr(self.context, "world_manager") and self.context.world_manager:
+            inst = self.context.world_manager.get_instance(self.context.config.world)
+            if inst:
+                inst.account.sid = sid
+                inst.config.sid = sid
 
         if self.context.account:
             try:
@@ -388,6 +436,9 @@ class DesktopApp:
                 logger.warning(f"Erro ao inicializar nova conta: {e}")
 
         self.is_logging_in = False
+        if self.context and self.context.scheduler:
+            self.context.scheduler.resume()
+            logger.info("Motor de agendamento retomado com nova sessão.")
         time.sleep(1.5)
         cockpit_url = f"http://{self.host}:{self.port}/"
         logger.info(f"A regressar ao Cockpit: {cockpit_url}")
@@ -425,10 +476,16 @@ class DesktopApp:
             except Exception:
                 time.sleep(0.15)
 
-        window_url = f"http://{self.host}:{self.port}/"
-        logger.info(f"A abrir janela desktop nativa: {window_url}")
+        # Configura as definições globais apropriadas para o SO atual
+        self.platform.configure_webview_settings()
 
-        self.js_api = DesktopJsApi(on_finish_callback=self.on_login_finished)
+        window_url = f"http://{self.host}:{self.port}/"
+        logger.info(f"A abrir janela desktop nativa ({self.platform.platform_name}/{self.platform.gui_backend}): {window_url}")
+
+        self.js_api = DesktopJsApi(
+            on_finish_callback=self.on_login_finished,
+            on_reload_callback=self.reload_login_page,
+        )
         self.window = webview.create_window(
             title="TribalWars Bot Cockpit - v2.0",
             url=window_url,
@@ -440,20 +497,11 @@ class DesktopApp:
             js_api=self.js_api,
         )
 
-        def on_request_sent(request):
-            headers = getattr(request, "headers", {}) or {}
-            for k, v in headers.items():
-                if str(k).lower() == "cookie" and "sid=" in str(v):
-                    self._handle_raw_cookie_header(str(v))
-
-        def on_response_received(response):
-            headers = getattr(response, "headers", {}) or {}
-            for k, v in headers.items():
-                if str(k).lower() == "set-cookie" and "sid=" in str(v):
-                    self._handle_raw_cookie_header(str(v))
-
-        self.window.events.request_sent += on_request_sent
-        self.window.events.response_received += on_response_received
+        # Regista interceptação de tráfego de rede específica da plataforma (ex.: Windows Edge WebView2)
+        self.platform.setup_network_interception(
+            self.window,
+            self._handle_raw_cookie_header,
+        )
 
         def on_closed():
             logger.info("Janela desktop fechada. A encerrar motor...")

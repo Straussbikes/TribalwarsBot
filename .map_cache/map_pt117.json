@@ -1,0 +1,31 @@
+{
+  "timestamp": 1787872573.797993,
+  "world": "pt117",
+  "count": 2,
+  "villages": [
+    {
+      "id": 101,
+      "x": 571,
+      "y": 486,
+      "name": "B\u00e1rbara 1",
+      "points": 100,
+      "player_id": 0,
+      "player_name": "",
+      "tribe_id": 0,
+      "tribe_tag": "",
+      "bonus_id": 0
+    },
+    {
+      "id": 102,
+      "x": 575,
+      "y": 485,
+      "name": "Jogador 1",
+      "points": 2000,
+      "player_id": 55,
+      "player_name": "",
+      "tribe_id": 0,
+      "tribe_tag": "",
+      "bonus_id": 0
+    }
+  ]
+}

@@ -25,6 +25,8 @@ class ConfigUpdateRequest(BaseModel):
     building: Optional[Dict[str, Any]] = None
     farm: Optional[Dict[str, Any]] = None
     recruitment: Optional[Dict[str, Any]] = None
+    quest: Optional[Dict[str, Any]] = None
+    villages: Optional[Dict[str, Any]] = None
 
 
 class ActionResponse(BaseModel):
@@ -32,6 +34,7 @@ class ActionResponse(BaseModel):
     status: str
     message: Optional[str] = None
     task_id: Optional[str] = None
+    barbarians_count: Optional[int] = None
 
 
 class SwitchVillageRequest(BaseModel):
@@ -44,6 +47,22 @@ class SwitchProfileRequest(BaseModel):
 
 class ProxyTestRequest(BaseModel):
     proxy: str
+
+
+class WorldRegisterRequest(BaseModel):
+    world: str
+    sid: str
+    domain: Optional[str] = "tribalwars.com.pt"
+    proxy: Optional[str] = None
+
+
+class WorldSwitchRequest(BaseModel):
+    world: str
+
+
+class VillageCategoryRequest(BaseModel):
+    village_id: int
+    category: str
 
 
 def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> APIRouter:
@@ -103,6 +122,105 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         res = await context.trigger_recruit_cycle()
         return ActionResponse(status=res["status"], message=res.get("message"), task_id=res.get("task_id"))
 
+    @router.post("/actions/quest/trigger", response_model=ActionResponse)
+    async def trigger_quest():
+        """Dispara um ciclo imediato de missões e bónus diário (sem uso de inventário)."""
+        res = await context.trigger_quest_cycle()
+        return ActionResponse(status=res["status"], message=res.get("message"), task_id=res.get("task_id"))
+
+    @router.get("/quest/status")
+    async def get_quest_status():
+        """Consulta o estado das missões, bónus diário e inventário."""
+        if not context.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        try:
+            q_state = await context.quest_manager.get_quest_state(context.account)
+            d_state = await context.quest_manager.get_daily_bonus_state(context.account)
+            inv_state = await context.quest_manager.get_inventory_state(context.account)
+            return {
+                "quests": [
+                    {
+                        "id": q.id,
+                        "title": q.title,
+                        "description": q.description,
+                        "finishable": q.finishable,
+                        "rewards": {
+                            "wood": q.rewards.wood,
+                            "stone": q.rewards.stone,
+                            "iron": q.rewards.iron,
+                            "pop": q.rewards.pop,
+                        },
+                    }
+                    for q in q_state.quests
+                ],
+                "finishable_count": q_state.finishable_count,
+                "daily_bonus": {
+                    "can_open": d_state.can_open,
+                    "is_opened_today": d_state.is_opened_today,
+                },
+                "inventory": [
+                    {
+                        "id": item.id,
+                        "name": item.name,
+                        "count": item.count,
+                        "description": item.description,
+                        "can_use": item.can_use,
+                    }
+                    for item in inv_state.items
+                ],
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    @router.post("/quest/claim/{quest_id}", response_model=ActionResponse)
+    async def claim_quest_manual(quest_id: str):
+        """Resgata manualmente uma missão concluída."""
+        if not context.account:
+            return ActionResponse(status="error", message="Conta não inicializada.")
+        try:
+            q_state = await context.quest_manager.get_quest_state(context.account)
+            target = next((q for q in q_state.quests if q.id == quest_id), None)
+            if not target:
+                return ActionResponse(status="error", message=f"Missão '{quest_id}' não encontrada.")
+            success = await context.quest_manager.claim_quest(context.account, target, safe_mode=True)
+            if success:
+                return ActionResponse(status="success", message=f"Recompensa da missão '{target.title}' resgatada.")
+            return ActionResponse(status="error", message="Não foi possível resgatar a missão (limite de armazém/população ou erro HTTP).")
+        except Exception as e:
+            return ActionResponse(status="error", message=str(e))
+
+    @router.post("/quest/claim-all")
+    async def claim_all_quests():
+        """Resgata todas as missões concluídas respeitando limites de armazém e população."""
+        res = await context.claim_all_quests_safe()
+        return res
+
+    @router.post("/quest/daily-bonus/open", response_model=ActionResponse)
+    async def open_daily_bonus_manual():
+        """Abre manualmente o baú de bónus diário."""
+        if not context.account:
+            return ActionResponse(status="error", message="Conta não inicializada.")
+        try:
+            success = await context.quest_manager.open_daily_bonus(context.account)
+            if success:
+                return ActionResponse(status="success", message="Baú diário aberto com sucesso.")
+            return ActionResponse(status="error", message="Baú diário não disponível ou já recolhido hoje.")
+        except Exception as e:
+            return ActionResponse(status="error", message=str(e))
+
+    @router.post("/quest/inventory/use/{item_id}", response_model=ActionResponse)
+    async def use_inventory_item_manual(item_id: str):
+        """Utiliza manualmente um item do inventário."""
+        if not context.account:
+            return ActionResponse(status="error", message="Conta não inicializada.")
+        try:
+            success = await context.quest_manager.use_inventory_item(context.account, item_id)
+            if success:
+                return ActionResponse(status="success", message=f"Item '{item_id}' utilizado com sucesso.")
+            return ActionResponse(status="error", message=f"Falha ao utilizar item '{item_id}'.")
+        except Exception as e:
+            return ActionResponse(status="error", message=str(e))
+
     @router.post("/auth/renew", response_model=ActionResponse)
     async def renew_session():
         """Força a renovação do cookie 'sid' via WebView2 nativo."""
@@ -132,6 +250,12 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         res = await context.switch_village(payload.village_id)
         return res
 
+    @router.post("/account/refresh")
+    async def refresh_village():
+        """Atualiza ativamente recursos, capacidade de armazém e tropas disponíveis."""
+        res = await context.refresh_village_data()
+        return res
+
     @router.get("/profiles")
     async def list_profiles():
         """Lista todos os perfis de conta configurados."""
@@ -143,11 +267,147 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         res = await context.switch_profile(payload.profile_id)
         return res
 
-    @router.post("/proxy/test")
-    async def test_proxy(payload: ProxyTestRequest):
-        """Valida a conectividade de um proxy residencial/dedicado."""
-        res = await context.test_proxy(payload.proxy)
-        return res
+    @router.get("/map/grid")
+    async def get_map_grid(x: Optional[int] = None, y: Optional[int] = None, radius: float = 15.0, use_cache: bool = True):
+        """Consulta as aldeias visíveis na grelha do mapa em torno de (x|y) ou da aldeia ativa."""
+        if not context.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        curr_v = context.account.current_village
+        cx = x if x is not None else (curr_v.x if curr_v else 500)
+        cy = y if y is not None else (curr_v.y if curr_v else 500)
+        try:
+            villages = []
+            if use_cache:
+                # 1. Tenta carregar da cache local para resposta imediata
+                cached_villages, ts = context.map_manager.load_cache(context.account.world)
+                if cached_villages:
+                    for v in cached_villages:
+                        v.distance = context.map_manager.calculate_distance(cx, cy, v.x, v.y)
+                    villages = [v for v in cached_villages if v.distance <= radius + 5]
+
+            # 2. Se a cache estiver vazia ou use_cache=False, consulta ativamente a rede
+            if not villages:
+                villages = await context.map_manager.fetch_map_data(
+                    account=context.account,
+                    center_x=cx,
+                    center_y=cy,
+                    radius=radius,
+                )
+                if villages and use_cache:
+                    context.map_manager.save_cache(context.account.world, villages)
+
+            return {
+                "center": {"x": cx, "y": cy},
+                "radius": radius,
+                "count": len(villages),
+                "villages": [v.to_dict() for v in villages],
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    @router.get("/map/barbarians")
+    async def get_map_barbarians(radius: float = 15.0, use_cache: bool = True):
+        """Lista as aldeias bárbaras mais próximas ordenadas por distância euclidiana."""
+        if not context.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        curr_v = context.account.current_village
+        if not curr_v:
+            return {"status": "error", "message": "Nenhuma aldeia ativa selecionada."}
+        try:
+            barbarians = await context.map_manager.scan_nearby_barbarians(
+                account=context.account,
+                center_x=curr_v.x,
+                center_y=curr_v.y,
+                radius=radius,
+                use_cache=use_cache,
+            )
+            return {
+                "center": {"x": curr_v.x, "y": curr_v.y},
+                "radius": radius,
+                "count": len(barbarians),
+                "barbarians": [b.to_dict() for b in barbarians],
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    @router.post("/map/scan", response_model=ActionResponse)
+    async def force_map_scan(radius: float = 15.0):
+        """Força uma varredura ativa do mapa ignorando a cache local."""
+        if not context.account:
+            return ActionResponse(status="error", message="Conta não inicializada.")
+        curr_v = context.account.current_village
+        if not curr_v:
+            return ActionResponse(status="error", message="Nenhuma aldeia ativa selecionada.")
+        try:
+            barbarians = await context.map_manager.scan_nearby_barbarians(
+                account=context.account,
+                center_x=curr_v.x,
+                center_y=curr_v.y,
+                radius=radius,
+                use_cache=False,
+            )
+            return ActionResponse(
+                status="success",
+                message=f"Varredura concluída: {len(barbarians)} bárbaras encontradas.",
+                barbarians_count=len(barbarians),
+            )
+        except Exception as e:
+            return ActionResponse(status="error", message=str(e))
+
+    @router.post("/map/farm", response_model=ActionResponse)
+    async def trigger_map_farm():
+        """Dispara uma onda de farming baseada na varredura das bárbaras mais próximas."""
+        res = await context.trigger_map_farm_wave()
+        return ActionResponse(status=res["status"], message=res.get("message"), task_id=res.get("task_id"))
+
+    # --- Rotas Multi-Mundo Simultâneo ---
+
+    @router.get("/worlds")
+    def get_worlds():
+        """Lista todos os mundos sob gestão concorrente do orquestrador."""
+        return {"worlds": context.list_worlds()}
+
+    @router.post("/worlds/register", response_model=ActionResponse)
+    async def register_world(payload: WorldRegisterRequest):
+        """Regista e inicializa um novo mundo em paralelo."""
+        res = await context.register_world(
+            world=payload.world,
+            sid=payload.sid,
+            domain=payload.domain or "tribalwars.com.pt",
+            proxy=payload.proxy,
+        )
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    @router.post("/worlds/switch", response_model=ActionResponse)
+    async def switch_world(payload: WorldSwitchRequest):
+        """Alterna o foco do dashboard para outro mundo em execução."""
+        res = await context.switch_world(payload.world)
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    # --- Rotas Multi-Aldeia & Categorização ---
+
+    @router.get("/account/villages")
+    async def get_account_villages():
+        """Lista detalhada de todas as aldeias com recursos, população e categorias."""
+        return await context.sync_and_get_all_villages()
+
+    @router.post("/account/village/category", response_model=ActionResponse)
+    def set_village_category(payload: VillageCategoryRequest):
+        """Define a categoria tática (Ataque, Defesa, Balanceado) para uma aldeia."""
+        res = context.set_village_category(payload.village_id, payload.category)
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    @router.post("/account/villages/cycle")
+    async def run_all_villages_cycle():
+        """Dispara um ciclo coordenado para todas as aldeias da conta ativa."""
+        return await context.trigger_all_villages_cycle()
+
+    @router.get("/account/villages/balance")
+    def get_village_resource_balance():
+        """Calcula o balanceamento e desvios de recursos entre todas as aldeias."""
+        if not context.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        return context.village_coordinator.calculate_resource_balance(context.account)
 
     return router
 
