@@ -212,7 +212,7 @@ class DesktopApp:
             var d = document.createElement('div');
             d.id = 'tw-bot-banner';
             d.style.cssText = 'position:fixed;top:0;left:0;right:0;background:linear-gradient(135deg,#0d1117,#161b22);color:#58a6ff;padding:10px 20px;z-index:2147483647;text-align:center;font-family:Arial,sans-serif;font-size:14px;box-shadow:0 2px 12px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;gap:15px;border-bottom:2px solid #58a6ff;';
-            d.innerHTML = '<span>\uD83D\uDD11 <b>TribalWars Bot:</b> Fa\u00E7a login e entre no mundo.</span> <button id="tw-bot-finish-btn" style="background:#238636;color:#fff;border:none;border-radius:4px;padding:4px 12px;font-weight:bold;cursor:pointer;">Entrei no Jogo \u2192</button>';
+            d.innerHTML = '<span>&#128273; <b>TribalWars Bot:</b> Faca login e entre no mundo.</span> <button id="tw-bot-finish-btn" style="background:#238636;color:#fff;border:none;border-radius:4px;padding:4px 12px;font-weight:bold;cursor:pointer;">Entrei no Jogo &rarr;</button>';
             document.body.prepend(d);
             var btn = document.getElementById('tw-bot-finish-btn');
             if (btn) {
