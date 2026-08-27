@@ -592,9 +592,6 @@ class MainBuildingManager:
         village_id: Optional[int] = None,
         interval_seconds: float = 60.0,
     ) -> None:
-        """
-        Agenda no TaskScheduler uma rotina periódica human-like para evolução contínua da aldeia.
-        """
         async def auto_build_task():
             try:
                 # Atualiza recursos antes de tentar construir
@@ -607,13 +604,24 @@ class MainBuildingManager:
                 )
             except Exception as e:
                 logger.warning(f"Erro no ciclo de auto-build: {e}")
+            finally:
+                # Reagenda continuamente para o próximo ciclo
+                if scheduler.is_running and not scheduler.is_paused:
+                    scheduler.schedule_human_like(
+                        name=f"AutoBuild-Village-{village_id or 'active'}",
+                        priority=TaskPriority.BUILD,
+                        action=auto_build_task,
+                        base_seconds=interval_seconds,
+                        std_dev=interval_seconds * 0.2,
+                        min_seconds=max(15.0, interval_seconds * 0.6),
+                        max_seconds=interval_seconds * 1.5,
+                    )
 
-        scheduler.schedule_human_like(
+        # Agenda a primeira execução com pequeno atraso inicial de arranque
+        scheduler.schedule(
             name=f"AutoBuild-Village-{village_id or 'active'}",
             priority=TaskPriority.BUILD,
             action=auto_build_task,
-            base_seconds=interval_seconds,
-            std_dev=interval_seconds * 0.2,
-            min_seconds=max(15.0, interval_seconds * 0.6),
-            max_seconds=interval_seconds * 1.5,
+            delay_seconds=5.0,
         )
+

@@ -7,8 +7,11 @@ import asyncio
 import logging
 import os
 import sys
+import warnings
 
-# Configuração do Event Loop específico para Windows e curl_cffi
+# Suprime avisos de depreciação do event loop no Python 3.14/Windows
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 if sys.platform == "win32":
     try:
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -70,24 +73,34 @@ async def main():
                 village = await account.refresh_state()
                 res = village.resources
                 logger.info(
-                    f"[{world}] Recursos atualizados: Madeira: {res.wood} | Argila: {res.stone} | "
+                    f"[{world}] Aldeia: '{village.name}' ({village.coordinates}) | "
+                    f"Madeira: {res.wood} | Argila: {res.stone} | "
                     f"Ferro: {res.iron} | Armazém: {res.storage_max} | Pop Livre: {res.free_pop}"
                 )
             except Exception as e:
                 logger.error(f"Falha ao atualizar recursos: {e}")
+            finally:
+                # Reagenda periodicamente para o próximo ciclo
+                if scheduler.is_running and not scheduler.is_paused:
+                    scheduler.schedule_human_like(
+                        name="Poll Recursos",
+                        priority=TaskPriority.REFRESH,
+                        action=poll_resources,
+                        base_seconds=60.0,
+                        std_dev=10.0,
+                        min_seconds=45.0,
+                        max_seconds=90.0,
+                    )
 
-        # Agenda a cada ~60s com delay gaussiano humano
-        scheduler.schedule_human_like(
-            name="Poll Recursos",
+        # 1ª Execução de Recursos logo no arranque (após 2s)
+        scheduler.schedule(
+            name="Poll Recursos Inicial",
             priority=TaskPriority.REFRESH,
             action=poll_resources,
-            base_seconds=60.0,
-            std_dev=10.0,
-            min_seconds=45.0,
-            max_seconds=90.0,
+            delay_seconds=2.0,
         )
 
-        # Gestor do Edifício Principal com auto-construção (máx 2 na fila)
+        # Gestor do Edifício Principal com auto-construção (máx 2 na fila, 1ª verificação aos 5s)
         main_manager = MainBuildingManager(default_max_queue=2)
         main_manager.schedule_auto_build(
             scheduler=scheduler,
