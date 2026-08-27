@@ -15,6 +15,10 @@ from pathlib import Path
 
 import webview
 
+# Garante que navegações e links no WebView2 abrem dentro da mesma janela e não no browser externo
+webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
+
+
 # Garante que a raiz do projeto está no sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -38,8 +42,21 @@ logging.basicConfig(
 logger = logging.getLogger("TribalDesktop")
 
 
+class DesktopJsApi:
+    """API Python exposta ao JavaScript da janela Edge WebView2."""
+
+    def __init__(self, app: "DesktopApp"):
+        self.app = app
+
+    def finish_login(self):
+        """Disparado pelo botão do banner superior quando o utilizador conclui o login."""
+        logger.info("Botão 'Concluir Login' acionado no banner.")
+        self.app.on_login_finished()
+
+
 class DesktopApp:
     """Orquestrador do motor em background e da janela nativa WebView2."""
+
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8000):
         self.host = host
@@ -174,54 +191,157 @@ class DesktopApp:
             logger.error(f"Erro ao carregar URL de login: {e}")
         threading.Thread(target=self._monitor_login_success, daemon=True).start()
 
+    def _inject_login_banner(self):
+        """Injeta um banner flutuante no topo do ecrã de login com instruções para o utilizador."""
+        banner_js = """
+        (function() {
+            if (document.getElementById('tw-bot-banner')) return;
+            var d = document.createElement('div');
+            d.id = 'tw-bot-banner';
+            d.style.cssText = 'position:fixed;top:0;left:0;right:0;background:linear-gradient(135deg,#0d1117,#161b22);color:#58a6ff;padding:10px 20px;z-index:2147483647;text-align:center;font-family:Arial,sans-serif;font-size:14px;box-shadow:0 2px 12px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;gap:10px;border-bottom:2px solid #58a6ff;';
+            d.innerHTML = '🔑 <b>TribalWars Bot:</b> Faça login normalmente e entre no seu mundo. A sessão será capturada automaticamente.';
+            document.body.prepend(d);
+        })();
+        """
+        try:
+            self.window.evaluate_js(banner_js)
+        except Exception:
+            pass
+
     def _monitor_login_success(self):
         """
         Monitoriza a sessão enquanto o utilizador efetua o login manualmente no ecrã.
         Assim que a entrada no jogo (game.php) é detetada, captura o cookie 'sid' e regressa ao Cockpit.
         """
         logger.info("Aguardando login manual do utilizador no ecrã do Tribal Wars...")
-        start_t = time.time()
-        while time.time() - start_t < 300 and self.is_logging_in and self.is_running:
-            time.sleep(1.0)
-            try:
-                curr_url = self.window.get_url() or ""
-                cookies = self.window.get_cookies()
-                from engine.core.auth_manager import extract_sid_from_cookies
-                sid = extract_sid_from_cookies(cookies)
 
-                # Se o utilizador já acedeu a game.php ou entrou no mundo
-                if "game.php" in curr_url or (sid and ("page/play" in curr_url or "screen=" in curr_url)):
-                    if not sid:
-                        # Fallback: tenta ler via JavaScript document.cookie se o container Edge ainda não sincronizou
+        # Aguarda a página de login carregar antes de injetar o banner
+        time.sleep(3.0)
+        self._inject_login_banner()
+
+        start_t = time.time()
+        last_url = ""
+        while time.time() - start_t < 300 and self.is_logging_in and self.is_running:
+            time.sleep(1.5)
+            try:
+                # NOTA: O método correto do pywebview é get_current_url(), NÃO get_url()
+                curr_url = self.window.get_current_url() or ""
+
+                # Loga mudanças de URL para diagnóstico
+                if curr_url != last_url:
+                    logger.info(f"[Login] Navegação detetada: {curr_url[:80]}")
+                    last_url = curr_url
+                    # Re-injeta o banner após cada navegação
+                    time.sleep(0.5)
+                    self._inject_login_banner()
+
+                # Deteção: o utilizador entrou no jogo
+                is_in_game = (
+                    "game.php" in curr_url
+                    or "page/play" in curr_url
+                    or ("/game" in curr_url and "screen=" in curr_url)
+                )
+
+                if not is_in_game:
+                    continue
+
+                logger.info(f"[Login] Entrada no jogo detetada! URL: {curr_url[:80]}")
+
+                # Aguarda estabilização dos cookies após login
+                time.sleep(2.0)
+
+                # Tenta capturar o SID pelos cookies do WebView2 (inclui HttpOnly)
+                sid = None
+                try:
+                    cookies = self.window.get_cookies()
+                    from engine.core.auth_manager import extract_sid_from_cookies
+                    sid = extract_sid_from_cookies(cookies)
+                    if sid:
+                        logger.info(f"[Login] SID capturado via get_cookies(): {sid[:12]}...")
+                except Exception as e:
+                    logger.warning(f"[Login] Falha ao ler cookies via get_cookies: {e}")
+
+                # Fallback: tenta via document.cookie (não lê HttpOnly, mas vale tentar)
+                if not sid:
+                    try:
                         raw_cookie = self.window.evaluate_js("document.cookie") or ""
                         for part in raw_cookie.split(";"):
-                            if "sid=" in part:
-                                sid = part.split("sid=")[-1].strip()
+                            kv = part.strip()
+                            if kv.startswith("sid="):
+                                sid = kv[4:].strip()
+                                if sid:
+                                    logger.info(f"[Login] SID capturado via document.cookie: {sid[:12]}...")
                                 break
+                    except Exception as e:
+                        logger.warning(f"[Login] Fallback document.cookie falhou: {e}")
 
-                    if sid:
-                        logger.info(f"✅ Login manual concluído com sucesso! Novo SID capturado: {sid[:12]}...")
-                        from engine.config.settings import save_config_sid
-                        save_config_sid(sid)
+                if not sid:
+                    logger.warning("[Login] Entrada no jogo detetada mas SID não encontrado. A tentar novamente em 3s...")
+                    time.sleep(3.0)
+                    continue
 
-                        if self.context.account:
-                            self.context.account.sid = sid
-                            asyncio.run_coroutine_threadsafe(
-                                self.context.account.init_session(), self.loop
-                            )
-                            # Atualiza dados da aldeia imediatamente
-                            asyncio.run_coroutine_threadsafe(
-                                self.context.account.refresh_state(), self.loop
-                            )
+                # SID capturado com sucesso!
+                self._finalize_login(sid)
+                break
 
-                        self.is_logging_in = False
-                        time.sleep(1.2)
-                        cockpit_url = f"http://{self.host}:{self.port}/"
-                        logger.info(f"A regressar ao Cockpit: {cockpit_url}")
-                        self.window.load_url(cockpit_url)
-                        break
             except Exception as e:
-                logger.debug(f"Erro no monitor de login: {e}")
+                logger.warning(f"[Login] Erro no monitor: {e}")
+
+        if self.is_logging_in:
+            logger.warning("[Login] Tempo limite de 5 minutos atingido sem detetar login.")
+            self.is_logging_in = False
+
+    def _finalize_login(self, sid: str):
+        """Grava o SID capturado, re-inicializa a conta e regressa ao Cockpit."""
+        logger.info(f"✅ Login manual concluído com sucesso! SID: {sid[:12]}...")
+
+        from engine.config.settings import save_config_sid
+        save_config_sid(sid)
+
+        if self.context.account:
+            self.context.account.sid = sid
+            asyncio.run_coroutine_threadsafe(
+                self.context.account.init_session(), self.loop
+            )
+            asyncio.run_coroutine_threadsafe(
+                self.context.account.refresh_state(), self.loop
+            )
+        else:
+            # Cria a conta pela primeira vez se ainda não existia
+            cfg = self.context.config
+            account = TribalAccount(
+                world=cfg.world,
+                sid=sid,
+                domain=cfg.domain,
+                proxy=cfg.proxy,
+            )
+            self.context.account = account
+            asyncio.run_coroutine_threadsafe(
+                account.init_session(), self.loop
+            )
+
+        self.is_logging_in = False
+        time.sleep(1.5)
+        cockpit_url = f"http://{self.host}:{self.port}/"
+        logger.info(f"A regressar ao Cockpit: {cockpit_url}")
+        self.window.load_url(cockpit_url)
+
+    def on_login_finished(self):
+        """Chamado pela DesktopJsApi quando o utilizador clica no botão do banner."""
+        if not self.is_logging_in:
+            return
+        threading.Thread(target=self._manual_capture_and_finalize, daemon=True).start()
+
+    def _manual_capture_and_finalize(self):
+        """Captura o SID e finaliza o login quando disparado manualmente pelo botão do banner."""
+        try:
+            cookies = self.window.get_cookies()
+            from engine.core.auth_manager import extract_sid_from_cookies
+            sid = extract_sid_from_cookies(cookies)
+            if sid:
+                self._finalize_login(sid)
+            else:
+                logger.warning("[Login] Botão acionado mas SID não encontrado nos cookies.")
 
 
     def run(self):
@@ -243,6 +363,7 @@ class DesktopApp:
         window_url = f"http://{self.host}:{self.port}/"
         logger.info(f"A abrir janela desktop nativa: {window_url}")
 
+        self.js_api = DesktopJsApi(self)
         self.window = webview.create_window(
             title="TribalWars Bot Cockpit - v2.0",
             url=window_url,
@@ -251,7 +372,9 @@ class DesktopApp:
             min_size=(960, 600),
             background_color="#090d16",
             text_select=True,
+            js_api=self.js_api,
         )
+
 
         def on_closed():
             logger.info("Janela desktop fechada. A encerrar motor...")
