@@ -3,7 +3,7 @@
 > **Propósito deste ficheiro:** Manter o histórico de progresso, decisões arquiteturais, mapa de ficheiros e diretrizes de desenvolvimento para que qualquer sessão de IA recupere o contexto instantaneamente com consumo mínimo de tokens e sem perda de continuidade.
 
 **Última Atualização:** 2026-08-27  
-**Estado Geral:** Fase 1 Concluída | Pronto para Fase 2  
+**Estado Geral:** Fase 2 em Progresso (Edifício Principal Concluído)  
 **Ambiente Validado:** Windows 11 / Python 3.14 / `curl_cffi` 0.16.2 / Node.js v25.8.1
 
 ---
@@ -25,7 +25,7 @@
 | Fase | Descrição | Status | Detalhes |
 |---|---|---|---|
 | **Fase 1** | **Fundação do Core & Rede** | ✅ Concluída | Estrutura modular, `TribalAccount`, `TaskScheduler`, parsers e 10 testes unitários. |
-| **Fase 2** | **Módulos de Ações (`game.php`)** | ⏳ Próxima | Handlers especializados: `main`, `place` (farm), `barracks`, `scavenge`. |
+| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (Edifício Principal & Auto-Build) concluído com 11 testes adicionais (21 no total). Próximos: `place` (farm), `scavenge`, `barracks`. |
 | **Fase 3** | **Camada Sidecar IPC & Sessões** | 📋 Pendente | Servidor local FastAPI/WebSocket, autenticação local, persistência multi-conta. |
 | **Fase 4** | **Frontend Tauri & Integração** | 📋 Pendente | Shell desktop Tauri v2, interface de logs, controlos e WebView de captcha. |
 
@@ -49,18 +49,20 @@ TribalwarsBot/
 │   │   └── exceptions.py            # BotProtectionError, SessionExpiredError, RateLimitError, etc.
 │   ├── utils/                       # Utilitários de evasão e parsers
 │   │   ├── __init__.py
-│   │   ├── parsers.py               # Extração de game_data, token 'h', recursos e deteção de bot
+│   │   ├── parsers.py               # Extração de game_data, CSRF, recursos, bot protect, níveis e fila de construção
 │   │   └── timing.py                # get_human_delay (gaussiano), get_click_jitter
-│   ├── actions/                     # Handlers por ecrã (a implementar na Fase 2)
-│   │   └── __init__.py
+│   ├── actions/                     # Handlers por ecrã (Fase 2)
+│   │   ├── __init__.py              # Exporta MainBuildingManager, templates e tipos de edifícios
+│   │   └── main_building.py         # MainBuildingManager: leitura, níveis virtuais, auto-build, cancelamento
 │   ├── api/                         # Camada de comunicação IPC com Tauri (Fase 3)
 │   │   └── __init__.py
 │   ├── config/                      # Configurações e perfis de contas
-│   └── main.py                      # Ponto de entrada CLI com graceful shutdown
+│   └── main.py                      # Ponto de entrada CLI com graceful shutdown e auto-build integrado
 │
-├── tests/                           # Suíte de testes unitários automatizados
+├── tests/                           # Suíte de testes unitários automatizados (21 testes, 100% OK)
 │   ├── __init__.py
-│   └── test_core.py                 # 10 testes cobrindo models, timing, parsers, account e scheduler
+│   ├── test_core.py                 # 10 testes cobrindo models, timing, parsers, account e scheduler
+│   └── test_main_building.py        # 11 testes cobrindo níveis, fila, templates, auto-build e cancelamento
 │
 └── mdfiles/
     └── contexto1.md                 # Contexto inicial da PoC

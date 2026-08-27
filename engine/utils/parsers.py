@@ -187,3 +187,229 @@ def is_session_expired(html: str, current_url: str = "") -> bool:
         return False
     # Se contém formulário de login explícito
     return any(p.search(html) is not None for p in SESSION_EXPIRED_PATTERNS)
+
+
+# Regex para edifícios e fila de construção (screen=main)
+BUILD_QUEUE_ROW_REGEX = re.compile(
+    r'(?:<tr[^>]*class=["\'](?:lit\s+)?buildorder_([a-z_]+)[^>]*>|<tr[^>]*>).*?'
+    r'([A-Za-zÀ-ÿ\s]+)\s*(?:\(Nível\s+(\d+)\)|\(Level\s+(\d+)\)).*?'
+    r'(?:<span[^>]*class=["\']timer["\'][^>]*>([\d:]+)</span>|data-endtime=["\'](\d+)["\'])?.*?'
+    r'<a[^>]*href=["\']([^"\']*(?:action=cancel[^"\']*[?&]id=(\d+)|[?&]id=(\d+)[^"\']*action=cancel)[^"\']*)["\']',
+    re.DOTALL | re.IGNORECASE,
+)
+
+BUILDING_ROW_REGEX = re.compile(
+    r'<tr[^>]*id=["\']main_buildrow_([a-z_]+)["\'][^>]*>(.*?)</tr>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+BUILD_COST_REGEX = {
+    "wood": re.compile(r'(?:cost_wood|icon header wood)[^>]*>.*?([\d\.]+)', re.IGNORECASE | re.DOTALL),
+    "stone": re.compile(r'(?:cost_stone|icon header stone)[^>]*>.*?([\d\.]+)', re.IGNORECASE | re.DOTALL),
+    "iron": re.compile(r'(?:cost_iron|icon header iron)[^>]*>.*?([\d\.]+)', re.IGNORECASE | re.DOTALL),
+    "pop": re.compile(r'(?:cost_pop|icon header pop)[^>]*>.*?([\d\.]+)', re.IGNORECASE | re.DOTALL),
+}
+
+
+def parse_building_levels(html: str, game_data: Optional[Dict[str, Any]] = None) -> Dict[str, int]:
+    """
+    Extrai o nível atual de cada edifício da aldeia.
+    Prioriza o game_data.village.buildings; caso ausente, efetua fallback via HTML.
+    """
+    levels: Dict[str, int] = {}
+
+    if game_data and "village" in game_data and isinstance(game_data["village"], dict):
+        buildings = game_data["village"].get("buildings")
+        if isinstance(buildings, dict):
+            for b_name, b_level in buildings.items():
+                try:
+                    levels[str(b_name).lower()] = int(b_level)
+                except (ValueError, TypeError):
+                    continue
+            if levels:
+                return levels
+
+    # Fallback no HTML buscando por main_buildrow_<building>
+    for match in BUILDING_ROW_REGEX.finditer(html):
+        b_name = match.group(1).lower()
+        row_content = match.group(2)
+        lvl_match = re.search(
+            r'<span[^>]*class=["\']level["\'][^>]*>(\d+)</span>|'
+            r'(?:Nível|Level)\s*<span[^>]*class=["\']level["\'][^>]*>(\d+)</span>|'
+            r'\(Nível\s+(\d+)\)|\(Level\s+(\d+)\)|data-level=["\'](\d+)["\']',
+            row_content,
+            re.IGNORECASE,
+        )
+        if lvl_match:
+            val = next(g for g in lvl_match.groups() if g is not None)
+            try:
+                levels[b_name] = int(val)
+            except ValueError:
+                levels[b_name] = 0
+        else:
+            levels[b_name] = 0
+
+    return levels
+
+
+def parse_build_queue(html: str) -> List[Dict[str, Any]]:
+    """
+    Extrai as ordens ativas na fila de construção do Edifício Principal.
+    Retorna uma lista de dicionários com: order_id, building_raw, target_level, timer_str, cancel_url.
+    """
+    queue: List[Dict[str, Any]] = []
+    if not html:
+        return queue
+
+    # Normaliza entidades HTML comuns em URLs
+    normalized_html = html.replace("&amp;", "&")
+
+    # Busca a tabela ou seção do buildqueue
+    queue_section_match = re.search(
+        r'<table[^>]*id=["\']buildqueue["\'][^>]*>(.*?)</table>',
+        normalized_html,
+        re.DOTALL | re.IGNORECASE,
+    )
+    search_scope = queue_section_match.group(1) if queue_section_match else normalized_html
+
+    # Localiza todas as ordens com cancel link
+    cancel_links = list(re.finditer(
+        r'<a[^>]*href=["\']([^"\']*[?&]action=cancel[^"\']*)["\'][^>]*>(.*?)</a>',
+        search_scope,
+        re.DOTALL | re.IGNORECASE,
+    ))
+
+    # Para cada link de cancelamento, busca o contexto anterior da linha da tabela
+    for link_match in cancel_links:
+        full_cancel_url = link_match.group(1)
+        id_match = re.search(r'[?&]id=(\d+)', full_cancel_url)
+        order_id = id_match.group(1) if id_match else ""
+
+        # Obter o bloco precedente que contém o nome do edifício e nível
+        start_pos = max(0, link_match.start() - 600)
+        preceding_text = search_scope[start_pos:link_match.start()]
+
+        name_match = re.search(
+            r'([A-Za-zÀ-ÿ\s]+?)\s*(?:\(Nível\s+(\d+)\)|\(Level\s+(\d+)\)|Nível\s+(\d+))',
+            preceding_text,
+            re.IGNORECASE,
+        )
+
+        b_name_raw = ""
+        target_lvl = 1
+        if name_match:
+            b_name_raw = name_match.group(1).strip()
+            # Limpa tags HTML residuais
+            b_name_raw = re.sub(r'<[^>]+>', '', b_name_raw).strip()
+            lvl_val = next((g for g in name_match.groups()[1:] if g is not None), "1")
+            try:
+                target_lvl = int(lvl_val)
+            except ValueError:
+                target_lvl = 1
+
+        # Timer
+        timer_match = re.search(r'<span[^>]*class=["\']timer["\'][^>]*>([\d:]+)</span>', preceding_text, re.IGNORECASE)
+        timer_str = timer_match.group(1) if timer_match else ""
+
+        queue.append({
+            "order_id": order_id,
+            "building_raw": b_name_raw,
+            "target_level": target_lvl,
+            "timer_str": timer_str,
+            "cancel_url": full_cancel_url,
+        })
+
+    return queue
+
+
+def parse_building_upgrades(html: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Extrai os custos de melhoria, requisitos e estado de elegibilidade de cada edifício.
+    """
+    upgrades: Dict[str, Dict[str, Any]] = {}
+    if not html:
+        return upgrades
+
+    normalized_html = html.replace("&amp;", "&")
+
+    for match in BUILDING_ROW_REGEX.finditer(normalized_html):
+        b_name = match.group(1).lower()
+        content = match.group(2)
+
+        # Custos
+        def parse_cost(cost_type: str) -> int:
+            rgx = BUILD_COST_REGEX.get(cost_type)
+            if not rgx:
+                return 0
+            m = rgx.search(content)
+            if m:
+                clean = m.group(1).replace(".", "").strip()
+                try:
+                    return int(clean)
+                except ValueError:
+                    return 0
+            return 0
+
+        wood = parse_cost("wood")
+        stone = parse_cost("stone")
+        iron = parse_cost("iron")
+        pop = parse_cost("pop")
+
+        # Nível atual
+        lvl_match = re.search(
+            r'<span[^>]*class=["\']level["\'][^>]*>(\d+)</span>|'
+            r'(?:Nível|Level)\s*<span[^>]*class=["\']level["\'][^>]*>(\d+)</span>|'
+            r'\(Nível\s+(\d+)\)|\(Level\s+(\d+)\)|data-level=["\'](\d+)["\']',
+            content,
+            re.IGNORECASE,
+        )
+        current_lvl = 0
+        if lvl_match:
+            val = next((g for g in lvl_match.groups() if g is not None), "0")
+            try:
+                current_lvl = int(val)
+            except ValueError:
+                current_lvl = 0
+
+        # Link de construção
+        build_link_match = re.search(
+            r'<a[^>]*href=["\']([^"\']*[?&]action=build[^"\']*)["\'][^>]*>',
+            content,
+            re.IGNORECASE,
+        )
+        can_build = build_link_match is not None
+        build_url = build_link_match.group(1) if build_link_match else None
+
+        # Identificação de motivo de indisponibilidade
+        error_reason = None
+        if not can_build:
+            if "Armazém muito pequeno" in content or "warehouse too small" in content.lower():
+                error_reason = "storage_too_small"
+            elif "População máxima" in content or "farm too small" in content.lower():
+                error_reason = "insufficient_pop"
+            elif "Recursos insuficientes" in content or "not enough resources" in content.lower():
+                error_reason = "insufficient_resources"
+            elif "Edifício totalmente construído" in content or "fully constructed" in content.lower():
+                error_reason = "max_level"
+            elif "Requisitos não preenchidos" in content or "requirements not met" in content.lower():
+                error_reason = "requirements_not_met"
+            elif "Fila de construção cheia" in content or "queue full" in content.lower():
+                error_reason = "queue_full"
+            else:
+                error_reason = "unknown_lock"
+
+        upgrades[b_name] = {
+            "building": b_name,
+            "current_level": current_lvl,
+            "target_level": current_lvl + 1,
+            "wood": wood,
+            "stone": stone,
+            "iron": iron,
+            "pop": pop,
+            "can_build": can_build,
+            "error_reason": error_reason,
+            "build_url": build_url,
+        }
+
+    return upgrades
+

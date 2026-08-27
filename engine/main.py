@@ -15,6 +15,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+from engine.actions import MainBuildingManager, RUSH_RESOURCES_TEMPLATE
 from engine.core.account import TribalAccount
 from engine.core.exceptions import BotProtectionError, SessionExpiredError
 from engine.core.models import TaskPriority
@@ -85,6 +86,17 @@ async def main():
             min_seconds=45.0,
             max_seconds=90.0,
         )
+
+        # Gestor do Edifício Principal com auto-construção (máx 2 na fila)
+        main_manager = MainBuildingManager(default_max_queue=2)
+        main_manager.schedule_auto_build(
+            scheduler=scheduler,
+            account=account,
+            plan=RUSH_RESOURCES_TEMPLATE,
+            max_queue=2,
+            interval_seconds=75.0,
+        )
+        logger.info("Módulo do Edifício Principal ativado (Template: RUSH_RESOURCES).")
 
     # 4. Inicia o loop de tarefas do agendador
     scheduler.start()
