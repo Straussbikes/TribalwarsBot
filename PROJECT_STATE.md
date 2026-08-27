@@ -71,15 +71,16 @@ TribalwarsBot/
 │   │   └── settings.py              # BotConfig, BuildingConfig, FarmConfig, RecruitmentConfig, load_config
 │   └── main.py                      # Ponto de entrada CLI e Sidecar (--api, --port, --host)
 │
-├── tests/                           # Suíte de testes unitários automatizados (56 testes, 100% OK)
+├── tests/                           # Suíte de testes unitários automatizados (57 testes, 100% OK)
 │   ├── __init__.py
 │   ├── test_core.py                 # 10 testes cobrindo models, timing, parsers, account e scheduler
-│   ├── test_main_building.py        # 11 testes cobrindo níveis, fila, templates, auto-build e cancelamento
+│   ├── test_main_building.py        # 12 testes cobrindo níveis, fila mobile/desktop, templates, auto-build e cancelamento
 │   ├── test_config.py               # 2 testes cobrindo parsing de config.json e seleção de templates
 │   ├── test_place.py                # 10 testes cobrindo tropas, capacidade de carga, comandos e envio em 2 etapas
 │   ├── test_farm.py                 # 6 testes cobrindo Assistente de Farm, modelos A/B, filtros e fallback
 │   ├── test_recruitment.py          # 5 testes cobrindo filas de treino, metas, lotes e reserva de população
 │   └── test_api.py                  # 12 testes cobrindo autenticação, REST endpoints, pausa/retoma e WebSockets
+
 │
 └── mdfiles/
     └── contexto1.md                 # Contexto inicial da PoC
