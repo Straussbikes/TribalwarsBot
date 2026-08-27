@@ -70,6 +70,19 @@ class DesktopApp:
         self.window = None
         self.is_logging_in = False
         self.is_running = True
+        self.captured_sid: Optional[str] = None
+
+    def _handle_raw_cookie_header(self, header_str: str):
+        """Interceta headers HTTP de cookies em tempo real e extrai o SID."""
+        for part in header_str.split(";"):
+            part = part.strip()
+            if part.startswith("sid="):
+                sid_val = part[4:].strip()
+                if sid_val and len(sid_val) > 10:
+                    if sid_val != self.captured_sid:
+                        logger.info(f"[AuthInterceptor] Novo SID detetado no tráfego HTTP: {sid_val[:12]}...")
+                        self.captured_sid = sid_val
+
 
 
     def start_background_engine(self):
@@ -286,10 +299,15 @@ class DesktopApp:
 
     def _extract_sid(self) -> str:
         """
-        Extrai o cookie 'sid' (mesmo HttpOnly) através da API nativa do WebView2
-        e com fallback para JavaScript.
+        Extrai o cookie 'sid' (mesmo HttpOnly) através da interceção de tráfego HTTP,
+        API nativa do WebView2 e fallback para JavaScript.
         """
-        # 1. Método Principal: Extração nativa de cookies WebView2 (suporta HttpOnly)
+        # 1. Prioridade Máxima: SID capturado em tempo real do tráfego de rede HTTP
+        if self.captured_sid and len(self.captured_sid) > 10:
+            logger.info(f"[Login] SID capturado via intercetor de rede: {self.captured_sid[:12]}...")
+            return self.captured_sid
+
+        # 2. Método WebView2 Nativo: get_cookies() (suporta HttpOnly)
         try:
             cookies = self.window.get_cookies()
             if cookies:
@@ -301,13 +319,13 @@ class DesktopApp:
         except Exception as e:
             logger.debug(f"[Login] Falha ao ler cookies nativos: {e}")
 
-        # 2. Fallback: localStorage
+        # 3. Fallback: localStorage
         sid = self._js_safe("window.localStorage ? (window.localStorage.getItem('sid') || '') : ''")
         if sid and len(sid) > 10:
             logger.info(f"[Login] SID capturado via localStorage: {sid[:12]}...")
             return sid
 
-        # 3. Fallback: document.cookie
+        # 4. Fallback: document.cookie
         raw_cookie = self._js_safe("document.cookie")
         if raw_cookie:
             for part in raw_cookie.split(";"):
@@ -318,7 +336,7 @@ class DesktopApp:
                         logger.info(f"[Login] SID capturado via document.cookie: {sid[:12]}...")
                         return sid
 
-        # 4. Fallback: URL params
+        # 5. Fallback: URL params
         curr_url = self._js_safe("window.location.href")
         if "sid=" in curr_url:
             for part in curr_url.split("&"):
@@ -412,6 +430,20 @@ class DesktopApp:
             js_api=self.js_api,
         )
 
+        def on_request_sent(request):
+            headers = getattr(request, "headers", {}) or {}
+            for k, v in headers.items():
+                if str(k).lower() == "cookie" and "sid=" in str(v):
+                    self._handle_raw_cookie_header(str(v))
+
+        def on_response_received(response):
+            headers = getattr(response, "headers", {}) or {}
+            for k, v in headers.items():
+                if str(k).lower() == "set-cookie" and "sid=" in str(v):
+                    self._handle_raw_cookie_header(str(v))
+
+        self.window.events.request_sent += on_request_sent
+        self.window.events.response_received += on_response_received
 
         def on_closed():
             logger.info("Janela desktop fechada. A encerrar motor...")
