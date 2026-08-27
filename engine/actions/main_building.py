@@ -603,8 +603,11 @@ class MainBuildingManager:
                 return candidate.building
         return None
 
+    # Alias para compatibilidade de API
+    run_build_cycle = run_auto_build_cycle
 
     def schedule_auto_build(
+
         self,
         scheduler: TaskScheduler,
         account: TribalAccount,

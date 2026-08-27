@@ -225,8 +225,29 @@ class EngineContext:
         )
         return {"status": "scheduled", "task_id": task_id}
 
+    async def trigger_renew_session(self) -> Dict[str, Any]:
+        """Dispara a renovação do cookie 'sid' via WebView2 nativo."""
+        from engine.core.auth_manager import TribalAuthManager
+        auth_mgr = TribalAuthManager(self.config_path)
+
+        if not self.account:
+            from engine.core.account import TribalAccount
+            self.account = TribalAccount(
+                world=self.config.world,
+                sid=self.config.sid,
+                domain=self.config.domain,
+                proxy=self.config.proxy,
+            )
+
+        success = await auth_mgr.auto_renew_session(self.account, self.config)
+        if success:
+            self.config.sid = self.account.sid
+            self.broadcast_sync("SESSION_RENEWED", {"world": self.account.world, "sid": self.account.sid[:12] + "..."})
+            return {"status": "success", "message": "Sessão renovada e gravada com sucesso!"}
+        return {"status": "error", "message": "Não foi possível capturar o cookie de sessão 'sid'."}
 
     def update_config_and_save(self, new_data: Dict[str, Any]) -> Dict[str, Any]:
+
         """
         Atualiza as configurações do bot em memória e grava as alterações no config.json.
         """
@@ -334,7 +355,16 @@ class EngineContext:
         return {
             "world": self.config.world,
             "domain": self.config.domain,
+            "sid": self.config.sid[:12] + "..." if self.config.sid else "",
+            "auth": {
+                "username": self.config.auth.username,
+                "has_password": bool(self.config.auth.password),
+                "auto_login": self.config.auth.auto_login,
+                "keep_alive": self.config.auth.keep_alive,
+                "keep_alive_interval_minutes": self.config.auth.keep_alive_interval_minutes,
+            },
             "building": {
+
                 "template": self.config.building.template,
                 "max_queue": self.config.building.max_queue,
                 "interval_seconds": self.config.building.interval_seconds,

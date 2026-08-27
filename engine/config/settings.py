@@ -53,15 +53,27 @@ class RecruitmentConfig:
 
 
 @dataclass
+class AuthConfig:
+    """Configurações de autenticação automática e renovação de sessão."""
+    username: str = ""
+    password: str = ""
+    auto_login: bool = False
+    keep_alive: bool = True
+    keep_alive_interval_minutes: float = 15.0
+
+
+@dataclass
 class BotConfig:
     """Configuração global consolidada do bot."""
     world: str = "pt117"
     sid: str = ""
     domain: str = "tribalwars.com.pt"
     proxy: Optional[str] = None
+    auth: AuthConfig = field(default_factory=AuthConfig)
     building: BuildingConfig = field(default_factory=BuildingConfig)
     farm: FarmConfig = field(default_factory=FarmConfig)
     recruitment: RecruitmentConfig = field(default_factory=RecruitmentConfig)
+
 
 
     def get_active_build_plan(self) -> List[Tuple[str, int]]:
@@ -180,15 +192,45 @@ def load_config(config_file: str = "config.json") -> BotConfig:
         interval_minutes=float(r_data.get("interval_minutes", 5.0)),
     )
 
+    # 5. Carrega configurações de Autenticação Automática
+    a_data = data.get("auth", {})
+    auth_config = AuthConfig(
+        username=str(a_data.get("username", os.environ.get("TW_USERNAME", ""))).strip(),
+        password=str(a_data.get("password", os.environ.get("TW_PASSWORD", ""))).strip(),
+        auto_login=bool(a_data.get("auto_login", False)),
+        keep_alive=bool(a_data.get("keep_alive", True)),
+        keep_alive_interval_minutes=float(a_data.get("keep_alive_interval_minutes", 15.0)),
+    )
+
     return BotConfig(
         world=world.strip().lower(),
         sid=sid.strip(),
         domain=domain.strip().lower(),
         proxy=proxy,
+        auth=auth_config,
         building=building_config,
         farm=farm_config,
         recruitment=recruitment_config,
     )
+
+
+def save_config_sid(sid: str, config_path: Optional[Path] = None) -> bool:
+    """Atualiza atomicamente o cookie 'sid' no ficheiro config.json."""
+    path = config_path or Path("config.json")
+    if not path.exists():
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data["sid"] = sid.strip()
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        logger.info(f"Cookie 'sid' atualizado e persistido com sucesso em '{path.name}'.")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao persistir novo 'sid' em '{path.name}': {e}")
+        return False
+
 
 
 

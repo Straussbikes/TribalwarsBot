@@ -90,6 +90,12 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         res = await context.trigger_recruit_cycle()
         return ActionResponse(status=res["status"], message=res.get("message"), task_id=res.get("task_id"))
 
+    @router.post("/auth/renew", response_model=ActionResponse)
+    async def renew_session():
+        """Força a renovação do cookie 'sid' via WebView2 nativo."""
+        res = await context.trigger_renew_session()
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
     @router.post("/bot-protect/resume", response_model=ActionResponse)
     async def resume_after_captcha():
         """
@@ -101,3 +107,4 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         return ActionResponse(status="resumed", message="Agendador retomado após resolução de verificação anti-bot.")
 
     return router
+

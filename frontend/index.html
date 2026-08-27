@@ -35,6 +35,9 @@
       </div>
 
       <div class="quick-actions">
+        <button class="btn btn-secondary" id="btn-renew-session" title="Abre a janela de login para renovar a sessão automaticamente">
+          <span>🔑</span> Renovar Sessão
+        </button>
         <button class="btn btn-warning" id="btn-toggle-scheduler">
           <span>⏸</span> Pausar
         </button>
@@ -49,6 +52,7 @@
         </button>
       </div>
     </header>
+
 
     <!-- Main Workspace -->
     <div class="main-workspace">
@@ -287,8 +291,25 @@
                   <label for="cfg-sid">Cookie de Sessão (sid)</label>
                   <input type="password" id="cfg-sid" class="form-control" placeholder="Cole o cookie sid aqui...">
                 </div>
+                <div class="form-group">
+                  <label for="cfg-username">Utilizador Tribal Wars</label>
+                  <input type="text" id="cfg-username" class="form-control" placeholder="Opcional para auto-login">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-password">Password</label>
+                  <input type="password" id="cfg-password" class="form-control" placeholder="Opcional para auto-login">
+                </div>
+                <div class="form-group" style="display: flex; align-items: center; gap: 8px; margin-top: 15px">
+                  <input type="checkbox" id="cfg-auto-login" style="accent-color: var(--neon-cyan)">
+                  <label for="cfg-auto-login" style="margin: 0; cursor: pointer">Ativar Auto-Login ao expirar</label>
+                </div>
+                <div class="form-group" style="display: flex; align-items: center; gap: 8px; margin-top: 15px">
+                  <input type="checkbox" id="cfg-keep-alive" checked style="accent-color: var(--neon-emerald)">
+                  <label for="cfg-keep-alive" style="margin: 0; cursor: pointer">Manter Sessão Ativa (Keep-Alive)</label>
+                </div>
               </div>
             </div>
+
 
             <div class="settings-section">
               <h3>Edifício Principal (Auto-Build)</h3>

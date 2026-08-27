@@ -48,6 +48,7 @@ TribalwarsBot/
 │   ├── core/                        # Núcleo da automação
 │   │   ├── __init__.py              # Exporta classes e exceções principais
 │   │   ├── account.py               # TribalAccount: AsyncSession, mobile headers, parsing, CSRF
+│   │   ├── auth_manager.py          # TribalAuthManager: extração de cookies, login WebView2, injeção de credenciais
 │   │   ├── scheduler.py             # TaskScheduler: PriorityQueue, delays gaussianos, preempção
 │   │   ├── models.py                # Resources, VillageData, PlayerData, TaskPriority, Task
 │   │   └── exceptions.py            # BotProtectionError, SessionExpiredError, RateLimitError, etc.
@@ -70,7 +71,7 @@ TribalwarsBot/
 │   │   └── server.py                # create_app (CORS tauri://localhost) e start_sidecar_server (uvicorn)
 │   ├── config/                      # Configurações e carregamento de perfis
 │   │   ├── __init__.py
-│   │   ├── settings.py              # BotConfig, BuildingConfig, FarmConfig, RecruitmentConfig, load_config
+│   │   ├── settings.py              # BotConfig, BuildingConfig, FarmConfig, RecruitmentConfig, AuthConfig, load_config
 │   ├── desktop_launcher.py          # Desktop Launcher: janela nativa Edge WebView2 (pywebview)
 │   └── main.py                      # Ponto de entrada CLI, Sidecar e Desktop (--gui, --api, --port)
 │
@@ -83,7 +84,7 @@ TribalwarsBot/
 │       ├── websocket.js             # Conexão WebSocket em tempo real e sintetizador sonoro
 │       └── app.js                   # Controlador da interface, cronómetro e streaming de logs
 │
-├── tests/                           # Suíte de testes unitários automatizados (59 testes, 100% OK)
+├── tests/                           # Suíte de testes unitários automatizados (66 testes, 100% OK)
 │   ├── __init__.py
 │   ├── test_core.py                 # 10 testes cobrindo models, timing, parsers, account e scheduler
 │   ├── test_main_building.py        # 12 testes cobrindo níveis, fila mobile/desktop, templates, auto-build e cancelamento
@@ -91,7 +92,9 @@ TribalwarsBot/
 │   ├── test_place.py                # 10 testes cobrindo tropas, capacidade de carga, comandos e envio em 2 etapas
 │   ├── test_farm.py                 # 6 testes cobrindo Assistente de Farm, modelos A/B, filtros e fallback
 │   ├── test_recruitment.py          # 5 testes cobrindo filas de treino, metas, lotes e reserva de população
-│   └── test_api.py                  # 14 testes cobrindo auth, REST, WebSockets, auth-info e static files
+│   ├── test_api.py                  # 14 testes cobrindo auth, REST, WebSockets, auth-info e static files
+│   └── test_auth.py                 # 7 testes cobrindo extração de cookies, persistência e auto-login
+
 
 
 │

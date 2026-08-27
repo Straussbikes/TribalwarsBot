@@ -2,8 +2,25 @@
 Tribal Wars Mobile Automation Engine - Config Package
 """
 
-from engine.config.settings import BotConfig, BuildingConfig, FarmConfig, RecruitmentConfig, load_config
+from engine.config.settings import (
+    AuthConfig,
+    BotConfig,
+    BuildingConfig,
+    FarmConfig,
+    RecruitmentConfig,
+    load_config,
+    save_config_sid,
+)
 
-__all__ = ["BotConfig", "BuildingConfig", "FarmConfig", "RecruitmentConfig", "load_config"]
+__all__ = [
+    "AuthConfig",
+    "BotConfig",
+    "BuildingConfig",
+    "FarmConfig",
+    "RecruitmentConfig",
+    "load_config",
+    "save_config_sid",
+]
+
 
 

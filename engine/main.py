@@ -167,6 +167,36 @@ async def main():
         else:
             logger.info("Módulo de Recrutamento Militar desativado no config.json (enabled=false).")
 
+        # 3.4. Módulo de Manutenção de Sessão (Keep-Alive)
+        if config.auth.keep_alive:
+            async def keep_alive_task():
+                try:
+                    if account and account.sid:
+                        await account.refresh_state()
+                        logger.debug(f"[{world}] Pulso de Keep-Alive executado com sucesso.")
+                except Exception as e:
+                    logger.debug(f"[{world}] Aviso no pulso de Keep-Alive: {e}")
+                finally:
+                    scheduler.schedule_human_like(
+                        name="SessionKeepAlive",
+                        priority=TaskPriority.BACKGROUND,
+                        action=keep_alive_task,
+                        base_delay=config.auth.keep_alive_interval_minutes * 60.0,
+                        jitter_sigma=30.0,
+                    )
+
+            scheduler.schedule(
+                name="SessionKeepAlive",
+                priority=TaskPriority.BACKGROUND,
+                action=keep_alive_task,
+                delay_seconds=config.auth.keep_alive_interval_minutes * 60.0,
+            )
+            logger.info(
+                f"Módulo de Manutenção de Sessão (Keep-Alive) ativado "
+                f"(a cada ~{config.auth.keep_alive_interval_minutes:.0f}min)."
+            )
+
+
     # 4. Inicializa o Contexto da API Sidecar
     api_server = None
     server_task = None

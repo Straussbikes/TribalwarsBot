@@ -27,9 +27,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     badgeStatus: document.getElementById("badge-status"),
     statusText: document.getElementById("status-text"),
     btnToggleScheduler: document.getElementById("btn-toggle-scheduler"),
+    btnRenewSession: document.getElementById("btn-renew-session"),
     btnBuildNow: document.getElementById("btn-build-now"),
     btnFarmNow: document.getElementById("btn-farm-now"),
     btnRecruitNow: document.getElementById("btn-recruit-now"),
+
     // Village Card
     villageName: document.getElementById("village-name"),
     villageCoords: document.getElementById("village-coords"),
@@ -371,6 +373,27 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  elements.btnRenewSession?.addEventListener("click", async () => {
+    try {
+      addLogEntry("INFO", "auth", "A iniciar renovação de sessão via WebView2...");
+      elements.btnRenewSession.disabled = true;
+      elements.btnRenewSession.textContent = "A renovar...";
+      const res = await window.api.renewSession();
+      if (res.status === "success" || res.status === "ok") {
+        addLogEntry("SUCCESS", "auth", res.message || "Sessão renovada com sucesso!");
+        await loadSettingsIntoForm();
+        refreshStatus();
+      } else {
+        addLogEntry("WARNING", "auth", res.message || "Não foi possível capturar o 'sid'.");
+      }
+    } catch (e) {
+      addLogEntry("CRITICAL", "auth", `Erro ao solicitar renovação: ${e.message}`);
+    } finally {
+      elements.btnRenewSession.disabled = false;
+      elements.btnRenewSession.innerHTML = "<span>🔑</span> Renovar Sessão";
+    }
+  });
+
   elements.btnBuildNow.addEventListener("click", async () => {
     try {
       addLogEntry("INFO", "app", "Disparo manual: A iniciar ciclo de construção...");
@@ -427,6 +450,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       document.getElementById("cfg-world").value = config.world || "pt117";
       document.getElementById("cfg-sid").value = config.sid || "";
+      if (config.auth) {
+        document.getElementById("cfg-username").value = config.auth.username || "";
+        document.getElementById("cfg-auto-login").checked = !!config.auth.auto_login;
+        document.getElementById("cfg-keep-alive").checked = config.auth.keep_alive !== false;
+      }
       if (config.building) {
         document.getElementById("cfg-building-template").value = config.building.template || "rush_resources";
         document.getElementById("cfg-max-queue").value = config.building.max_queue || 2;
@@ -444,9 +472,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   elements.btnSaveSettings.addEventListener("click", async (e) => {
     e.preventDefault();
     try {
+      const pwdVal = document.getElementById("cfg-password").value.trim();
       const payload = {
         world: document.getElementById("cfg-world").value.trim(),
         sid: document.getElementById("cfg-sid").value.trim(),
+        auth: {
+          username: document.getElementById("cfg-username").value.trim(),
+          auto_login: document.getElementById("cfg-auto-login").checked,
+          keep_alive: document.getElementById("cfg-keep-alive").checked,
+        },
         building: {
           template: document.getElementById("cfg-building-template").value,
           max_queue: parseInt(document.getElementById("cfg-max-queue").value, 10),
@@ -458,6 +492,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         },
       };
 
+      if (pwdVal) {
+        payload.auth.password = pwdVal;
+      }
+
       await window.api.updateConfig(payload);
       addLogEntry("SUCCESS", "settings", "Configurações gravadas com sucesso no config.json.");
       alert("Configurações atualizadas com sucesso!");
@@ -465,6 +503,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       alert(`Falha ao gravar configurações: ${err.message}`);
     }
   });
+
 
   async function refreshStatus() {
     try {

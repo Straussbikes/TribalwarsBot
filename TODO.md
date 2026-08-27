@@ -18,7 +18,16 @@
 - [x] **Deteção de Anti-Bot & Gestão de Sessão**
   - [x] Interceção de marcadores anti-bot (`id="bot_protect"`, `name="bot_check"`) disparando `BotProtectionError`.
   - [x] Deteção de expiração de sessão / ecrã de boas-vindas disparando `SessionExpiredError`.
+  - [x] **Autenticação Automática & Gestão de Sessão (`sid`)**
+    - [x] Extração e decodificação automática de cookies `sid` de sessões WebView2 (`extract_sid_from_cookies`).
+    - [x] Gestor de renovação `TribalAuthManager` com injeção de credenciais e modo interativo via Edge WebView2.
+    - [x] Auto-persistência atómica do cookie `sid` no `config.json` perante rotação do servidor (`save_config_sid`).
+    - [x] Rotina periódica suave de **Keep-Alive** no `TaskScheduler` (~15 min) para impedir expiração por inatividade.
+    - [x] Botão rápido "🔑 Renovar Sessão" no Cockpit e formulário de credenciais/auto-login nas Definições.
+    - [x] Endpoint `POST /api/auth/renew` integrado no Sidecar.
+    - [x] Suíte de testes unitários dedicada (`tests/test_auth.py` com 7 testes, totalizando 66 testes 100% OK).
 - [x] **Temporização Humana & Micro-Jitters**
+
   - [x] Gerador de atrasos gaussianos truncados (`get_human_delay`).
   - [x] Micro-jitters mecânicos de toque em ecrã (`get_click_jitter`: 120ms a 380ms).
 - [x] **Agendador de Tarefas com Fila de Prioridade**

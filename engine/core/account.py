@@ -198,12 +198,21 @@ class TribalAccount:
                 f"Sessão expirada para o mundo {self.world}. É necessário renovar o cookie 'sid'."
             )
 
+        # 5. Verifica se o servidor rotacionou o cookie 'sid' na sessão
+        if self._session is not None:
+            jar_sid = self._session.cookies.get("sid")
+            if jar_sid and jar_sid != self.sid:
+                logger.info(f"[{self.world}] Cookie 'sid' rotacionado pelo servidor. A atualizar...")
+                self.sid = jar_sid
+                from engine.config.settings import save_config_sid
+                save_config_sid(jar_sid)
 
-        # 5. Validação de status code padrão
+        # 6. Validação de status code padrão
         if response.status_code >= 400:
             raise TribalWarsException(
                 f"Erro HTTP {response.status_code} ao aceder ao endpoint do jogo: {response.text[:200]}"
             )
+
 
     def _update_state_from_html(self, html: str, url: str = "") -> None:
         """Extrai game_data, atualiza CSRF, recursos e informações de aldeia."""

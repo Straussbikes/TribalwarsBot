@@ -102,8 +102,37 @@ class DesktopApp:
                     recruit_config=cfg.recruitment,
                 )
 
+            # Agendamento do Keep-Alive para manter a sessão sempre ativa
+            if account and cfg.auth.keep_alive:
+                from engine.core.models import TaskPriority
+
+                async def keep_alive_task():
+                    try:
+                        if account and account.sid:
+                            await account.refresh_state()
+                            logger.debug(f"[{cfg.world}] Pulso de Keep-Alive executado com sucesso.")
+                    except Exception as e:
+                        logger.debug(f"[{cfg.world}] Aviso no pulso de Keep-Alive: {e}")
+                    finally:
+                        scheduler.schedule_human_like(
+                            name="SessionKeepAlive",
+                            priority=TaskPriority.BACKGROUND,
+                            action=keep_alive_task,
+                            base_delay=cfg.auth.keep_alive_interval_minutes * 60.0,
+                            jitter_sigma=30.0,
+                        )
+
+                scheduler.schedule(
+                    name="SessionKeepAlive",
+                    priority=TaskPriority.BACKGROUND,
+                    action=keep_alive_task,
+                    delay_seconds=cfg.auth.keep_alive_interval_minutes * 60.0,
+                )
+                logger.info(f"Keep-Alive de sessão ativado a cada ~{cfg.auth.keep_alive_interval_minutes:.0f}min.")
+
             # Inicia scheduler
             scheduler.start()
+
 
             # Cria Contexto Sidecar
             self.context = EngineContext(

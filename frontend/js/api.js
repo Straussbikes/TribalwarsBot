@@ -109,6 +109,10 @@ class SidecarApi {
   async resumeBotProtection() {
     return await this.request("/api/bot-protect/resume", { method: "POST" });
   }
+
+  async renewSession() {
+    return await this.request("/api/auth/renew", { method: "POST" });
+  }
 }
 
 // Exporta instância global
