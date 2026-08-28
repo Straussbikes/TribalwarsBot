@@ -85,7 +85,20 @@ class RecruitmentConfig:
         }
     )
     targets: Dict[str, int] = field(default_factory=lambda: {"spear": 50, "sword": 50, "axe": 50})
-    batch_sizes: Dict[str, int] = field(default_factory=lambda: {"spear": 10, "sword": 10, "axe": 10, "light": 5, "heavy": 5, "ram": 2, "catapult": 2})
+    batch_sizes: Dict[str, int] = field(
+        default_factory=lambda: {
+            "spear": 5,
+            "sword": 5,
+            "axe": 5,
+            "archer": 5,
+            "spy": 5,
+            "light": 5,
+            "marcher": 5,
+            "heavy": 5,
+            "ram": 5,
+            "catapult": 5,
+        }
+    )
     min_free_pop: int = 10
     interval_minutes: float = 5.0
 

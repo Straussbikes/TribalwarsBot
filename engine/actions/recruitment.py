@@ -65,6 +65,24 @@ UNIT_POP_COST: Dict[str, int] = {
     "catapult": 8,
 }
 
+# Custos canónicos de recursos por unidade (Madeira, Argila, Ferro)
+UNIT_RESOURCE_COSTS: Dict[str, Dict[str, int]] = {
+    "spear": {"wood": 50, "stone": 30, "iron": 10},       # Total: 90
+    "spy": {"wood": 50, "stone": 50, "iron": 20},         # Total: 120
+    "sword": {"wood": 30, "stone": 30, "iron": 70},       # Total: 130
+    "axe": {"wood": 60, "stone": 30, "iron": 40},         # Total: 130
+    "archer": {"wood": 100, "stone": 30, "iron": 60},     # Total: 190
+    "light": {"wood": 125, "stone": 100, "iron": 250},    # Total: 475
+    "marcher": {"wood": 250, "stone": 100, "iron": 150},  # Total: 500
+    "ram": {"wood": 300, "stone": 200, "iron": 200},      # Total: 700
+    "catapult": {"wood": 320, "stone": 400, "iron": 100}, # Total: 820
+    "heavy": {"wood": 200, "stone": 150, "iron": 600},    # Total: 950
+}
+
+UNIT_TOTAL_COST: Dict[str, int] = {
+    u: sum(costs.values()) for u, costs in UNIT_RESOURCE_COSTS.items()
+}
+
 
 @dataclass
 class TrainingOrder:
@@ -170,14 +188,41 @@ class RecruitmentManager:
             post_data["h"] = account.csrf_token
 
         try:
-            await account.post_action(
+            html = await account.post_action(
                 screen=building,
                 action="train",
                 data=post_data,
                 village_id=v_id,
+                extra_params={"mode": "train"},
                 apply_jitter=True,
             )
-            logger.info(f"[{account.world}] ✅ Recrutamento iniciado com sucesso: {order_summary}")
+
+            # 1. Inspeciona se o jogo reportou erro (ex.: falta de recursos, unidade bloqueada)
+            if isinstance(html, str):
+                import re
+                error_m = re.search(
+                    r'<div[^>]*class=["\'][^"\']*(?:error_box|info_box\s+error|error_message)[^"\']*["\'][^>]*>(.*?)</div>|<span[^>]*class=["\']error["\'][^>]*>(.*?)</span>',
+                    html,
+                    re.DOTALL | re.IGNORECASE,
+                )
+                if error_m:
+                    raw_err = error_m.group(1) or error_m.group(2) or ""
+                    clean_err = re.sub(r'<[^>]+>', ' ', raw_err).strip()
+                    if clean_err:
+                        logger.warning(f"[{account.world}] ⚠️ Aviso do jogo ao recrutar no {building}: {clean_err}")
+                        return False
+
+                # 2. Confirma se a fila de treino foi atualizada
+                parsed_res = parse_recruitment_page(html)
+                active_q = parsed_res.get("queue", [])
+                total_in_q = sum(parsed_res.get("total_in_queue", {}).values())
+
+                logger.info(
+                    f"[{account.world}] ✅ Recrutamento processado no {building.capitalize()}: {order_summary} "
+                    f"({len(active_q)} ordens ativas na fila, {total_in_q} tropas em treino)."
+                )
+            else:
+                logger.info(f"[{account.world}] ✅ Recrutamento processado no {building.capitalize()}: {order_summary}")
             return True
         except Exception as e:
             logger.error(f"[{account.world}] Falha ao recrutar no {building}: {e}")
@@ -216,6 +261,17 @@ class RecruitmentManager:
 
         # Orçamento de população disponível para este ciclo
         pop_budget = max(0, free_pop - min_free_pop) if min_free_pop > 0 else free_pop
+
+        # Recursos disponíveis na aldeia (acompanhados e deduzidos dinamicamente)
+        avail_wood = village.resources.wood if village else 0
+        avail_stone = village.resources.stone if village else 0
+        avail_iron = village.resources.iron if village else 0
+
+        logger.info(
+            f"[{account.world}] 🛡️⚔️ Ciclo de Recrutamento (Aldeia {v_id}): "
+            f"Recursos: {avail_wood}M, {avail_stone}A, {avail_iron}F | Pop Livre: {free_pop} (Orçamento: {pop_budget}) | "
+            f"Metas: {', '.join(f'{k}:{v}' for k, v in targets.items() if v > 0) or 'Nenhuma'}"
+        )
 
         # 2. Leitura de tropas existentes na aldeia ativa
         try:
@@ -270,7 +326,13 @@ class RecruitmentManager:
 
             orders_for_building: Dict[str, int] = {}
 
-            for unit in BUILDING_UNITS.get(building, []):
+            # Prioriza o recrutamento das unidades com menor custo total de recursos
+            candidate_units = sorted(
+                BUILDING_UNITS.get(building, []),
+                key=lambda u: UNIT_TOTAL_COST.get(u, 9999),
+            )
+
+            for unit in candidate_units:
                 target_count = targets.get(unit, 0)
                 if target_count <= 0:
                     continue
@@ -306,25 +368,47 @@ class RecruitmentManager:
                     logger.debug(f"Meta de {unit} atingida ({home_count} na aldeia + {in_queue_count} na fila >= {target_count}).")
                     continue
 
-                # Quantidade máxima que os recursos da aldeia permitem treinar no momento
-                max_recruitable = b_state.available_units.get(unit, 0)
+                # Verificação prévia de recursos disponíveis na aldeia
+                cost = UNIT_RESOURCE_COSTS.get(unit, {"wood": 50, "stone": 30, "iron": 10})
+                max_by_res = min(
+                    avail_wood // cost["wood"] if cost["wood"] > 0 else 9999,
+                    avail_stone // cost["stone"] if cost["stone"] > 0 else 9999,
+                    avail_iron // cost["iron"] if cost["iron"] > 0 else 9999,
+                )
+
+                # Limite da página web/mobile se existir
+                server_max = b_state.available_units.get(unit, 999)
+                max_recruitable = min(max_by_res, server_max)
+
                 if max_recruitable <= 0:
-                    logger.debug(f"Recursos insuficientes no momento para recrutar {unit}.")
+                    logger.info(
+                        f"[{account.world}] Recursos insuficientes para recrutar {unit.capitalize()} "
+                        f"(Disponível: {avail_wood}M, {avail_stone}A, {avail_iron}F | Custo unid: {cost['wood']}M, {cost['stone']}A, {cost['iron']}F)."
+                    )
                     continue
 
                 # Limita pela população livre disponível
                 pop_per_unit = UNIT_POP_COST.get(unit, 1)
                 max_by_pop = pop_budget // pop_per_unit if pop_per_unit > 0 else needed
                 if max_by_pop <= 0:
+                    logger.info(f"[{account.world}] População livre insuficiente para treinar {unit.capitalize()}.")
                     continue
 
-                # Lote configurado (padrão de 10 unidades por ciclo)
-                batch_limit = batch_sizes.get(unit, 10)
-                to_recruit = min(needed, batch_limit, max_recruitable, max_by_pop)
+                # Lote dinâmico em porções de 5 (ou conforme batch_sizes configurado)
+                portion = batch_sizes.get(unit, 5) if batch_sizes else 5
+                to_recruit = min(needed, portion, max_recruitable, max_by_pop)
 
                 if to_recruit > 0:
                     orders_for_building[unit] = to_recruit
                     pop_budget -= to_recruit * pop_per_unit
+                    avail_wood -= to_recruit * cost["wood"]
+                    avail_stone -= to_recruit * cost["stone"]
+                    avail_iron -= to_recruit * cost["iron"]
+                    logger.info(
+                        f"[{account.world}] 🏹 Lote dinâmico planeado: {to_recruit}x {unit.capitalize()} "
+                        f"(Custo: {to_recruit * cost['wood']}M, {to_recruit * cost['stone']}A, {to_recruit * cost['iron']}F | "
+                        f"Recursos restantes: {avail_wood}M, {avail_stone}A, {avail_iron}F)."
+                    )
 
             if orders_for_building:
                 success = await self.train_units(
@@ -345,6 +429,7 @@ class RecruitmentManager:
         recruit_config: Any,
         village_id: Optional[int] = None,
         enabled_check: Optional[Callable[[], bool]] = None,
+        bot_config: Optional[Any] = None,
     ) -> None:
         """
         Agenda no TaskScheduler a rotina periódica contínua de Recrutamento Militar.
@@ -357,7 +442,14 @@ class RecruitmentManager:
                 return
 
             try:
-                targets = getattr(recruit_config, "targets", {})
+                v_id = village_id or account.current_village_id
+                if bot_config and hasattr(bot_config, "get_village_recruitment_targets"):
+                    targets = bot_config.get_village_recruitment_targets(v_id)
+                elif hasattr(recruit_config, "models") and isinstance(recruit_config.models, dict):
+                    targets = recruit_config.models.get("attack", {}) or getattr(recruit_config, "targets", {})
+                else:
+                    targets = getattr(recruit_config, "targets", {})
+
                 batch_sizes = getattr(recruit_config, "batch_sizes", {})
                 min_free_pop = getattr(recruit_config, "min_free_pop", 10)
 

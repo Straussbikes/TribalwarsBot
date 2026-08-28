@@ -3,7 +3,7 @@
 > **Propósito deste ficheiro:** Manter o histórico de progresso, decisões arquiteturais, mapa de ficheiros e diretrizes de desenvolvimento para que qualquer sessão de IA recupere o contexto instantaneamente com consumo mínimo de tokens e sem perda de continuidade.
 
 **Última Atualização:** 2026-08-28  
-**Estado Geral:** Fases 1, 3 e 4 Concluídas | Modelos Dinâmicos de Recrutamento (Ataque, Defesa e Customizados com Persistência em config.json), Sincronização e Persistência de Categorias Multi-Aldeias, Conexão Dinâmica de min_transfer_amount no Mercado, Conclusão Gratuita de Edifícios (< 3 min), Módulo de Pesquisas Tecnológicas no Ferreiro (SmithManager), Telemetria de Rede | 198 Testes Unitários Automatizados (100% OK)  
+**Estado Geral:** Fases 1, 3 e 4 Concluídas | Modelos Dinâmicos de Recrutamento (Ataque, Defesa e Customizados com Persistência em config.json), Verificação Dinâmica de Recursos e Recrutamento Prioritário por Menor Custo em Lotes de 5 Tropas, Sincronização em Tempo Real de Tropas da Praça de Reunião no Painel Principal, Sincronização e Persistência de Categorias Multi-Aldeias, Conexão Dinâmica de min_transfer_amount no Mercado, Conclusão Gratuita de Edifícios (< 3 min), Módulo de Pesquisas Tecnológicas no Ferreiro (SmithManager), Telemetria de Rede | 199 Testes Unitários Automatizados (100% OK)  
 **Ambiente Validado:** macOS 12+ / Windows 11 / Python 3.11-3.14 / `curl_cffi` 0.16.2 / `fastapi` 0.141.1 / `uvicorn` 0.52.4 / `pywebview` 6.2 (Edge WebView2 & Cocoa WebKit) / Git Branch: `main`
 
 ---
@@ -24,6 +24,11 @@
   * Controles dedicados de ativação/desativação de **Construção Automática**, **Recrutamento Automático** e **Arbitragem Económica** integrados nas respetivas abas com parâmetros de intervalo dinâmicos.
   * **Filosofia "Fila Sempre Ativa" (Item 2.12):** Diagnóstico das 4 filas (Edifício Principal, Quartel, Estábulo, Oficina) com projeção de fluxo de caixa em tempo real, priorização de emergência e micro-lotes para evitar qualquer segundo ocioso sem canibalizar recursos do próximo edifício planeado.
   * **Radar de Bárbaras & Saque Recorrente (Item 2.3):** Varredura contínua de aldeias bárbaras vizinhas via grelha de mapa com alocação dinâmica de micro-esquadrões de tropas disponíveis.
+* **Recrutamento Militar Dinâmico e Eficiente:**
+  * Avaliação prévia e rigorosa de recursos disponíveis na aldeia antes de submeter ordens de treino militar.
+  * Ordenação e priorização de unidades por **menor custo total de recursos** (`Lanceiro` -> `Espião` -> `Espadachim/Bárbaro` -> `Arqueiro` -> `Cavalaria Leve` -> `Aríete` -> `Catapulta` -> `Cavalaria Pesada`).
+  * Treino gradual e balanceado em **porções de 5 unidades** para todas as tropas.
+  * Sincronização imediata de tropas da Praça de Reunião no Painel Principal (`InitialStateSync`) e nos ciclos de polling periódico.
 * **HUD Timer de Ultra-Alta Precisão:** Relógio digital no topo da aplicação exibindo horas, minutos, segundos e microssegundos (`HH:MM:SS.uuuuuu`) a 60 FPS com `requestAnimationFrame` e `performance.now()`.
 
 ---
@@ -33,9 +38,9 @@
 | Fase | Descrição | Status | Detalhes |
 |---|---|---|---|
 | **Fase 1** | **Fundação do Core & Rede** | ✅ Concluída | Estrutura modular, `TribalAccount`, `TaskScheduler`, parsers, anti-bot e 10 testes unitários. |
-| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (auto-build + filas), `place`, `farm` (Radar de Bárbaras e Assistente de Farm), `recruitment` (auto-recruit + filas ativas), `quest`, `map`, `market` (balanceamento) e `economic_arbitrage` (Fila Sempre Ativa) concluídos. Scavenging, Snob e Defesa/Dodge planeados. |
+| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (auto-build + filas), `place`, `farm` (Radar de Bárbaras e Assistente de Farm), `recruitment` (auto-recruit em lotes de 5 por custo + filas ativas), `quest`, `map`, `market` (balanceamento) e `economic_arbitrage` (Fila Sempre Ativa) concluídos. Scavenging, Snob e Defesa/Dodge planeados. |
 | **Fase 3** | **Camada Sidecar IPC, Multi-Aldeia & Perfis** | ✅ Concluída | FastAPI REST, WebSockets, autenticação efêmera, proxies, perfis, `MultiWorldManager` (orquestrador concorrente paralelo) e `MultiVillageCoordinator` (gestão de múltiplas aldeias com categorização Ataque/Defesa/Balanceado e balanceamento de recursos). |
-| **Fase 4** | **Shell Desktop & Frontend Nativo** | 🔄 Em Expansão | Cockpit Dark Glassmorphism, HUD timer, réplica interativa do mapa 2D, seletor de mundos na barra superior, monitor de filas ativas e controlos modulares nas abas de domínio. |
+| **Fase 4** | **Shell Desktop & Frontend Nativo** | 🔄 Em Expansão | Cockpit Dark Glassmorphism, HUD timer, réplica interativa do mapa 2D, seletor de mundos na barra superior, monitor de tropas e filas ativas e controlos modulares nas abas de domínio. |
 | **Fase 5** | **Empacotamento & Release** | 📋 Pendente | Empacotamento executável com PyInstaller e instalador desktop. |
 
 ---
@@ -104,14 +109,14 @@ TribalwarsBot/
 │       ├── websocket.js             # Conexão WebSocket em tempo real e sintetizador sonoro de alertas
 │       └── app.js                   # Controlador da interface, cronómetro de alta resolução e streaming de logs
 │
-├── tests/                           # Suíte de testes unitários automatizados (178 testes, 100% OK)
+├── tests/                           # Suíte de testes unitários automatizados (199 testes, 100% OK)
 │   ├── __init__.py
 │   ├── test_core.py                 # 10 testes cobrindo models, timing, parsers, account e scheduler
 │   ├── test_main_building.py        # 12 testes cobrindo níveis, fila mobile/desktop, templates, auto-build e cancelamento
 │   ├── test_config.py               # 2 testes cobrindo parsing de config.json e seleção de templates
 │   ├── test_place.py                # 10 testes cobrindo tropas, capacidade de carga, comandos e envio em 2 etapas
 │   ├── test_farm.py                 # 11 testes cobrindo Assistente de Farm, modelos A/B, filtros, alocação de esquadrões e radar contínuo
-│   ├── test_recruitment.py          # 5 testes cobrindo filas de treino, metas, lotes e reserva de população
+│   ├── test_recruitment.py          # 11 testes cobrindo filas de treino, metas, modelos, lotes dinâmicos e ordenação por custo
 │   ├── test_arbitrage.py            # 7 testes cobrindo temporizadores, projeção de fluxo de caixa, concorrência e micro-lotes
 │   ├── test_api.py                  # 22 testes cobrindo auth, REST, WebSockets, building/recruitment toggles, quest, map e arbitragem
 │   ├── test_auth.py                 # 7 testes cobrindo extração de cookies, persistência e auto-login
@@ -119,11 +124,12 @@ TribalwarsBot/
 │   ├── test_profiles.py             # 4 testes cobrindo persistência de perfis e ofuscação de senhas
 │   ├── test_multi_village.py        # 3 testes cobrindo extração multi-aldeia e alternância de contexto
 │   ├── test_multi_world.py          # 2 testes cobrindo orquestração multi-mundo paralela
-│   ├── test_village_coordinator.py  # 5 testes cobrindo categorização de aldeias e balanceamento de recursos
+│   ├── test_village_coordinator.py  # 6 testes cobrindo categorização de aldeias e balanceamento de recursos
 │   ├── test_market.py               # 12 testes cobrindo mercado, ofertas e rotinas de balanceamento
 │   ├── test_stats.py                # 11 testes cobrindo histórico de farm, comandos, KPIs e persistência
 │   ├── test_proxy.py                # 2 testes cobrindo diagnóstico ativo de proxies
 │   ├── test_quest.py                # 13 testes cobrindo missões, segurança de armazém/pop, baú diário e inventário manual
+│   ├── test_smith.py                # 4 testes cobrindo auto-pesquisa de tropas no Ferreiro
 │   └── test_map.py                  # 8 testes cobrindo parsing de mapa, distância euclidiana, bárbaras/bónus, cache e farm
 ```
 
@@ -150,11 +156,11 @@ TribalwarsBot/
 
 ## 5. Como Validar o Estado Atual
 
-Para rodar a suíte completa de 184 testes automatizados:
+Para rodar a suíte completa de 199 testes automatizados:
 ```powershell
 python -m unittest discover tests -v
 ```
-*Status esperado:* `Ran 184 tests in ~3.8s - OK`.
+*Status esperado:* `Ran 199 tests in ~4.5s - OK`.
 
 Para iniciar a aplicação desktop completa com interface gráfica nativa:
 ```powershell

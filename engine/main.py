@@ -159,6 +159,7 @@ async def main():
                 scheduler=scheduler,
                 account=account,
                 recruit_config=config.recruitment,
+                bot_config=config,
             )
             logger.info(
                 f"Módulo de Recrutamento Militar ativado ({len(config.recruitment.targets)} metas, "

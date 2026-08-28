@@ -77,15 +77,23 @@ def setup_world_routines(instance: WorldInstance) -> None:
     if not account or not account.sid:
         return
 
-    # 1. Polling de Recursos da Aldeia Ativa
+    # 1. Polling de Recursos e Tropas da Aldeia Ativa
     async def poll_resources():
         try:
             village = await account.refresh_state()
             res = village.resources
+            try:
+                place_mgr = PlaceManager()
+                await place_mgr.get_state(account, village_id=village.id)
+            except Exception:
+                pass
+
+            troops_summary = ", ".join(f"{k}:{v}" for k, v in (village.troops or {}).items() if v > 0)
             logger.info(
                 f"[{world}] Aldeia: '{village.name}' ({village.coordinates}) | "
                 f"Madeira: {res.wood} | Argila: {res.stone} | "
                 f"Ferro: {res.iron} | Armazém: {res.storage_max} | Pop Livre: {res.free_pop}"
+                f"{f' | Tropas: {troops_summary}' if troops_summary else ''}"
             )
         except Exception as e:
             logger.debug(f"[{world}] Falha suave ao atualizar recursos: {e}")

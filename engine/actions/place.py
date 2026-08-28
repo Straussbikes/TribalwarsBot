@@ -226,6 +226,10 @@ class PlaceManager:
         # 1. Parsing das tropas disponíveis
         raw_units = parse_available_units(html)
         units = UnitsCount.from_dict(raw_units)
+        if v_id in account.villages:
+            account.villages[v_id].troops = raw_units
+        elif account.current_village:
+            account.current_village.troops = raw_units
 
         # 2. Parsing de movimentos em curso
         raw_commands = parse_place_commands(html)

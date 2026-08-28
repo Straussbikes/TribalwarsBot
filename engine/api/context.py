@@ -713,12 +713,40 @@ class EngineContext:
         return {"status": "success", "message": f"Mundo '{world}' registado e ativo.", "world": inst.to_dict()}
 
     async def switch_world(self, world: str) -> Dict[str, Any]:
-        """Alterna o foco do dashboard para outro mundo em execução, auto-registando se necessário."""
+        """Alterna o foco do dashboard para outro mundo em execução, auto-registando apenas se a conta tiver acesso válido."""
         world_key = world.strip().lower()
         inst = self.world_manager.get_instance(world_key)
         if not inst:
             if self.config.sid:
-                logger.info(f"A inicializar automaticamente nova instância para o mundo '{world_key}'...")
+                logger.info(f"A verificar se a conta possui aldeia/acesso no mundo '{world_key}'...")
+                test_account = TribalAccount(
+                    world=world_key,
+                    sid=self.config.sid,
+                    domain=self.config.domain,
+                    proxy=self.config.proxy,
+                )
+                try:
+                    await test_account.init_session()
+                    await test_account.refresh_state()
+                    if not test_account.current_village_id and not test_account.villages:
+                        await test_account.close()
+                        return {
+                            "status": "error",
+                            "message": f"A tua conta não possui aldeias no mundo '{world_key.upper()}'. Verifica se estás registado nesse mundo."
+                        }
+                    await test_account.close()
+                except Exception as e:
+                    try:
+                        await test_account.close()
+                    except Exception:
+                        pass
+                    logger.warning(f"Falha ao validar conta no mundo '{world_key}': {e}")
+                    return {
+                        "status": "error",
+                        "message": f"Sem acesso ao mundo '{world_key.upper()}': {e}. Certifica-te de que a conta existe e tem acesso ativo a este mundo."
+                    }
+
+                logger.info(f"Acesso validado! A inicializar instância multi-mundo para '{world_key}'...")
                 inst = await self.world_manager.register_world(
                     world=world_key,
                     sid=self.config.sid,
@@ -1192,7 +1220,8 @@ class EngineContext:
             })
             village_cat = "defense"
             if self.village_coordinator:
-                village_cat = self.village_coordinator.get_village_category(self.account, self.config, v_id).value
+                cat_obj = self.village_coordinator.get_village_category(self.account, self.config, v_id)
+                village_cat = cat_obj.value if hasattr(cat_obj, "value") else str(cat_obj)
 
             buildings_data = {}
             total_in_queue_all: Dict[str, int] = {}
@@ -1346,6 +1375,7 @@ class EngineContext:
                 account=self.account,
                 recruit_config=self.config.recruitment,
                 enabled_check=lambda: self.config.recruitment.enabled,
+                bot_config=self.config,
             )
         self.broadcast_sync("MODULE_TOGGLED", {"module": "recruitment", "enabled": self.config.recruitment.enabled})
         self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())

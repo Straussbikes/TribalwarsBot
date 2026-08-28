@@ -141,6 +141,7 @@ class DesktopApp:
                     scheduler=scheduler,
                     account=account,
                     recruit_config=cfg.recruitment,
+                    bot_config=cfg,
                 )
 
             # Agendamento do Keep-Alive para manter a sessão sempre ativa
@@ -170,6 +171,24 @@ class DesktopApp:
                     delay_seconds=cfg.auth.keep_alive_interval_minutes * 60.0,
                 )
                 logger.info(f"Keep-Alive de sessão ativado a cada ~{cfg.auth.keep_alive_interval_minutes:.0f}min.")
+
+            # Sincronização inicial de tropas e recursos
+            if account and account.sid:
+                async def initial_sync_task():
+                    try:
+                        v = await account.refresh_state()
+                        p_mgr = PlaceManager()
+                        await p_mgr.get_state(account, village_id=v.id)
+                        logger.info(f"[{cfg.world}] Sincronização inicial de tropas e recursos concluída com sucesso.")
+                    except Exception as e:
+                        logger.debug(f"[{cfg.world}] Falha suave na sincronização inicial: {e}")
+
+                scheduler.schedule(
+                    name="InitialStateSync",
+                    priority=TaskPriority.REFRESH,
+                    action=initial_sync_task,
+                    delay_seconds=1.0,
+                )
 
             # Inicia scheduler
             scheduler.start()

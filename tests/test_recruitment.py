@@ -274,6 +274,55 @@ class TestRecruitmentActions(unittest.IsolatedAsyncioTestCase):
         # get_building_state só deve ter sido chamado para 'barracks' (nunca para stable ou garage a nível 0)
         manager.get_building_state.assert_called_once_with(account, "barracks", village_id=12345)
 
+    async def test_dynamic_resource_checking_and_cheapest_first_priority(self):
+        from engine.core.account import TribalAccount
+        from engine.actions.place import PlaceState
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.current_village_id = 12345
+
+        # Aldeia com recursos suficientes apenas para lanceiros (Madeira: 300, Argila: 180, Ferro: 60)
+        # 5 lanceiros = 250M, 150A, 50F (resta: 50M, 30A, 10F)
+        # Bárbaro requer 60M, 30A, 40F (Ferro insuficiente para bárbaros após lanceiros)
+        account.refresh_state = AsyncMock(return_value=VillageData(
+            id=12345,
+            name="Aldeia Recursos Limitados",
+            x=450,
+            y=550,
+            resources=Resources(wood=300, stone=180, iron=60, storage_max=10000, pop=20, pop_max=100),
+            buildings={"main": 5, "barracks": 5, "smith": 5},
+        ))
+
+        mock_place = AsyncMock()
+        mock_place.get_state.return_value = PlaceState(village_id=12345, units=UnitsCount(spear=0, axe=0))
+        manager = RecruitmentManager(place_manager=mock_place)
+
+        manager.get_building_state = AsyncMock()
+        manager.get_building_state.return_value = RecruitmentState(
+            building="barracks",
+            available_units={"spear": 50, "axe": 50},
+            queue=[],
+            total_in_queue={"spear": 0, "axe": 0},
+        )
+
+        account.post_action = AsyncMock(return_value="<html></html>")
+
+        # Metas para lanceiro e bárbaro
+        recruited = await manager.run_recruitment_cycle(
+            account=account,
+            targets={"spear": 20, "axe": 20},
+            batch_sizes={"spear": 5, "axe": 5},
+            min_free_pop=2,
+        )
+
+        # Lanceiro é o mais barato (custo 90 vs 130 do bárbaro), portanto treina 5 lanceiros primeiro
+        self.assertEqual(recruited.get("spear"), 5)
+        # Bárbaro não pôde ser treinado por falta de recursos restantes
+        self.assertNotIn("axe", recruited)
+        account.post_action.assert_called_once()
+        call_kwargs = account.post_action.call_args.kwargs
+        self.assertEqual(call_kwargs["data"]["spear"], "5")
+
 
 class TestRecruitmentConfig(unittest.TestCase):
     def test_recruitment_config_defaults(self):

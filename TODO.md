@@ -89,13 +89,16 @@
 ### 2.5. Recrutamento Militar (Quartel, Estábulo, Oficina)
 - [x] Parsing do ecrã do Quartel (`screen=barracks`), Estábulo (`screen=stable`) e Oficina (`screen=garage`).
 - [x] Leitura das filas de recrutamento ativas e tempo de conclusão.
-- [x] Configuração de metas de exército (ex.: lanceiros, espadachins, cavalaria leve).
-- [x] Recrutamento inteligente em pequenos lotes contínuos para preservação de recursos.
+- [x] Configuração de metas de exército (modelos dinâmicos de Ataque, Defesa e Customizados).
+- [x] Recrutamento inteligente em lotes dinâmicos de 5 tropas com verificação prévia de recursos disponíveis.
+- [x] Priorização de treino por menor custo total de recursos (`Lanceiro` -> `Espião` -> `Espadachim/Bárbaro` -> `Arqueiro` -> `Cavalaria Leve` -> `Aríete` -> `Catapulta` -> `Cavalaria Pesada`).
 - [x] Validação de limite de população livre da Fazenda antes de recrutar (`min_free_pop`).
+- [x] Auto-pesquisa no Ferreiro (`SmithManager`) para tropas requeridas com pré-requisitos cumpridos.
 - [x] **Controlo Modular de Auto-Recrutamento:** Switch LIGADO/DESLIGADO, ajuste dinâmico de intervalo em minutos e limites de população via REST e UI.
 - [x] Monitorização em tempo real das **Filas Ativas de Treino** (Quartel, Estábulo, Oficina) com quantidade de tropas, hora de conclusão e cronómetro decrescente.
+- [x] Sincronização em tempo real das tropas da aldeia no Painel Principal (`screen=place`).
 - [x] Templates táticos de recrutamento 1-clique (Ataque Nuke, Defesa Bunker, Rush Farm, Equilibrado, Limpar).
-- [x] Suíte de testes unitários para Recrutamento Militar (5 testes dedicados).
+- [x] Suíte de testes unitários para Recrutamento Militar (11 testes dedicados).
 
 ### 2.6. Academia & Cunha de Moedas (`screen=snob`)
 - [ ] Leitura de moedas cunhadas / pacotes acumulados.

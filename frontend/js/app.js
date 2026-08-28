@@ -726,20 +726,22 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!elements.worldDropdownList) return;
     const currentW = (activeWorld || "pt117").toLowerCase();
 
-    // Combina mundos registrados com mundos comuns (pt114, pt115, etc.)
-    const registeredWorldKeys = (worlds || []).map(w => (w.world || "").toLowerCase());
-    const allWorldKeys = Array.from(new Set([...registeredWorldKeys, ...COMMON_WORLDS]));
+    // Apenas lista mundos registados/conectados e o mundo ativo
+    const registeredWorldKeys = (worlds || []).map(w => (w.world || "").toLowerCase()).filter(Boolean);
+    if (!registeredWorldKeys.includes(currentW)) {
+      registeredWorldKeys.unshift(currentW);
+    }
+    const allWorldKeys = Array.from(new Set(registeredWorldKeys));
 
     elements.worldDropdownList.innerHTML = allWorldKeys.map(w => {
       const isCurrent = w === currentW;
-      const isReg = registeredWorldKeys.includes(w);
       return `
         <div class="dropdown-world-item ${isCurrent ? 'active' : ''}" data-world="${w}" style="padding: 8px 14px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; font-size: 0.82rem; transition: background 0.15s ease; color: ${isCurrent ? 'var(--neon-cyan)' : 'var(--text-main)'}; font-weight: ${isCurrent ? '700' : '500'}; background: ${isCurrent ? 'rgba(6,182,212,0.15)' : 'transparent'}; border-left: ${isCurrent ? '3px solid var(--neon-cyan)' : '3px solid transparent'};">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span>🌐</span>
             <span>${w.toUpperCase()}</span>
           </div>
-          ${isCurrent ? '<span style="font-size: 0.65rem; background: var(--neon-cyan); color: #000; padding: 1px 6px; border-radius: 10px; font-weight: 700;">ATIVO</span>' : (isReg ? '<span style="font-size: 0.68rem; color: var(--neon-emerald); font-weight: 600;">Ligado</span>' : '<span style="font-size: 0.68rem; color: var(--text-muted);">Disponível</span>')}
+          ${isCurrent ? '<span style="font-size: 0.65rem; background: var(--neon-cyan); color: #000; padding: 1px 6px; border-radius: 10px; font-weight: 700;">ATIVO</span>' : '<span style="font-size: 0.68rem; color: var(--neon-emerald); font-weight: 600;">Ligado</span>'}
         </div>
       `;
     }).join("");
@@ -756,14 +758,21 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (elements.worldDropdownMenu) elements.worldDropdownMenu.style.display = "none";
         if (targetWorld && targetWorld !== currentW) {
           try {
-            addLogEntry("INFO", "orchestrator", `A mudar para o mundo ${targetWorld.toUpperCase()}...`);
-            if (elements.badgeWorldText) elements.badgeWorldText.textContent = targetWorld.toUpperCase();
+            addLogEntry("INFO", "orchestrator", `A verificar e mudar para o mundo ${targetWorld.toUpperCase()}...`);
             const res = await window.api.switchWorld(targetWorld);
-            addLogEntry("SUCCESS", "orchestrator", res.message || `Mundo ${targetWorld.toUpperCase()} ativado.`);
-            const status = await window.api.getStatus();
-            updateDashboard(status);
+            if (res && res.status === "success") {
+              if (elements.badgeWorldText) elements.badgeWorldText.textContent = targetWorld.toUpperCase();
+              addLogEntry("SUCCESS", "orchestrator", res.message || `Mundo ${targetWorld.toUpperCase()} ativado.`);
+              const status = await window.api.getStatus();
+              updateDashboard(status);
+            } else {
+              const errMsg = (res && res.message) ? res.message : `Falha ao mudar para o mundo ${targetWorld}`;
+              addLogEntry("ERROR", "orchestrator", errMsg);
+              alert(errMsg);
+            }
           } catch (err) {
             addLogEntry("ERROR", "orchestrator", `Falha ao mudar para o mundo ${targetWorld}: ${err.message}`);
+            alert(`Falha ao mudar para o mundo ${targetWorld}: ${err.message}`);
           }
         }
       });
@@ -3109,9 +3118,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     const activeModel = state.recruitmentModels[activeKey] || {};
 
     gridContainer.innerHTML = REC_UNITS_METADATA.map(u => {
-      const val = activeModel[u.id] ?? 0;
+      const val = activeModel[u.id] !== undefined ? activeModel[u.id] : 0;
       return `
-        <div class="unit-model-card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; transition: border-color 0.2s ease;">
+        <div class="unit-model-card" style="flex: 1 1 200px; max-width: 320px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; transition: border-color 0.2s ease;">
           <div style="display: flex; justify-content: space-between; align-items: center;">
             <div style="display: flex; align-items: center; gap: 8px;">
               <span style="font-size: 1.3rem;">${u.icon}</span>
