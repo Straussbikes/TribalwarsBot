@@ -3,6 +3,7 @@ Tribal Wars Mobile Automation Engine - Authentication & Session Renewal Manager
 Gerencia a autenticação automática e renovação de cookies 'sid' via Edge WebView2 (pywebview).
 Suporta extração transparente de cookies, injeção de credenciais e modo interativo com 1-clique.
 """
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -97,7 +98,11 @@ class TribalAuthManager:
         found_sid = None
         start_time = time.time()
 
-        logger.info(f"A iniciar autenticação via WebView2 ({target_url})...")
+        from engine.platforms import get_platform_adapter
+        platform = get_platform_adapter()
+        platform.configure_webview_settings()
+
+        logger.info(f"A iniciar autenticação via {platform.platform_name}/{platform.gui_backend} ({target_url})...")
 
         def _monitor_auth(window):
             nonlocal found_sid
@@ -129,15 +134,14 @@ class TribalAuthManager:
             while time.time() - start_time < timeout_seconds:
                 time.sleep(1.0)
                 try:
-                    current_cookies = window.get_cookies()
+                    current_cookies = platform.extract_cookies(window)
                     sid = extract_sid_from_cookies(current_cookies)
                     if sid:
-                        logger.info("✅ Cookie 'sid' capturado com sucesso a partir da sessão WebView2!")
+                        logger.info("✅ Cookie 'sid' capturado com sucesso a partir da sessão WebView!")
                         found_sid = sid
                         from engine.config.settings import save_config_sid
                         save_config_sid(sid, self.config_path)
                         # Dá um breve instante para o cookie consolidar e fecha
-
                         time.sleep(0.8)
                         window.destroy()
                         break
@@ -145,7 +149,7 @@ class TribalAuthManager:
                     logger.debug(f"Erro na leitura periódica de cookies: {e}")
 
             if not found_sid:
-                logger.warning("Tempo limite excedido na autenticação via WebView2 sem captura de 'sid'.")
+                logger.warning(f"Tempo limite excedido na autenticação via {platform.gui_backend} sem captura de 'sid'.")
                 try:
                     window.destroy()
                 except Exception:

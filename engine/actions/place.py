@@ -131,6 +131,11 @@ class UnitsCount:
             for u in POP_COST
         )
 
+    def to_summary_str(self) -> str:
+        """Representação textual descritiva das tropas presentes (> 0)."""
+        parts = [f"{getattr(self, u)} {u}" for u in CARRY_CAPACITY if getattr(self, u, 0) > 0]
+        return ", ".join(parts) if parts else "0 tropas"
+
     def has_units(self, required: "UnitsCount") -> bool:
         """Verifica se existem tropas suficientes para satisfazer o pedido."""
         for u in CARRY_CAPACITY:
@@ -365,13 +370,33 @@ class PlaceManager:
                 )
                 return False
         else:
-            if not state.units.has_units(units):
+            missing = []
+            for u in CARRY_CAPACITY:
+                wanted = getattr(units, u, 0)
+                avail = getattr(state.units, u, 0)
+                if avail < wanted:
+                    missing.append(f"{wanted - avail} {u}")
+
+            troops_to_send = units
+            # Se a única unidade em falta for espião (early game) e a aldeia tiver tropas de ataque, adapta
+            if missing == [f"{units.spy} spy"] and (state.units.spear > 0 or state.units.axe > 0 or state.units.light > 0):
+                adapted_dict = units.to_dict()
+                adapted_dict["spy"] = 0
+                adapted_units = UnitsCount.from_dict(adapted_dict)
+                if state.units.has_units(adapted_units) and adapted_units.total_units() > 0:
+                    logger.info(
+                        f"[{account.world}] Aldeia sem espiões (spy=0). A adaptar envio de tropas para ({target_x}|{target_y}): {adapted_units.to_summary_str()}."
+                    )
+                    troops_to_send = adapted_units
+                    missing = []
+
+            if missing:
                 logger.warning(
                     f"[{account.world}] Tropas insuficientes para ({target_x}|{target_y}). "
-                    f"Requeridas: {units.total_units()}, Disponíveis: {state.units.total_units()}."
+                    f"Em falta: {', '.join(missing)}! "
+                    f"[Requerido: {units.to_summary_str()} | Disponível na aldeia: {state.units.to_summary_str()}]."
                 )
                 return False
-            troops_to_send = units
 
         # 2. Etapa 1 - Preparação
         prep = await self.prepare_command(

@@ -6,7 +6,8 @@ Extração resiliente de 'game_data', tokens CSRF, recursos e deteção de bot p
 import json
 import logging
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+import urllib.parse
 
 from engine.core.models import Resources, VillageData, PlayerData
 
@@ -1132,6 +1133,683 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
         result["total_in_queue"][unit_found] += count_found
 
     return result
+
+
+def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Extrai o estado das missões a partir do HTML de 'screen=quest' e/ou do 'game_data.quest'.
+    Identifica missões ativas, concluídas (prontas para resgate), recompensas em recursos,
+    tropas/população, itens e URLs de claim com CSRF.
+    """
+    normalized = html.replace("&amp;", "&")
+    normalized = re.sub(r'<!--.*?-->', '', normalized, flags=re.DOTALL)
+    quests: List[Dict[str, Any]] = []
+    seen_ids = set()
+
+    # 1. Extração via game_data se disponível
+    if game_data and isinstance(game_data, dict):
+        q_data = game_data.get("quest") or game_data.get("quests")
+        if isinstance(q_data, dict):
+            raw_list = q_data.get("quests") or q_data.get("list") or q_data
+            if isinstance(raw_list, dict):
+                raw_list = list(raw_list.values())
+            if isinstance(raw_list, list):
+                for item in raw_list:
+                    if isinstance(item, dict):
+                        q_id = str(item.get("id", "")).strip()
+                        if not q_id or q_id in seen_ids:
+                            continue
+                        title = str(item.get("title") or item.get("name") or f"Missão #{q_id}").strip()
+                        desc = str(item.get("description") or "").strip()
+                        finishable = bool(item.get("finishable") or item.get("completed") or item.get("finished"))
+                        claim_url = item.get("claim_url") or item.get("url")
+                        rewards = item.get("rewards") or item.get("reward") or {}
+
+                        wood = int(rewards.get("wood", 0) or 0)
+                        stone = int(rewards.get("stone", 0) or 0)
+                        iron = int(rewards.get("iron", 0) or 0)
+                        pop = int(rewards.get("pop", 0) or 0)
+
+                        seen_ids.add(q_id)
+                        quests.append({
+                            "id": q_id,
+                            "title": title,
+                            "description": desc,
+                            "finishable": finishable,
+                            "claim_url": claim_url,
+                            "rewards": {
+                                "wood": wood,
+                                "stone": stone,
+                                "iron": iron,
+                                "pop": pop,
+                                "flags": rewards.get("flags", []),
+                                "items": rewards.get("items", []),
+                                "description": str(rewards.get("description", "")),
+                            },
+                        })
+
+    # 2. Localização e fatiamento robusto de blocos de missões no HTML
+    raw_starts = [
+        m
+        for m in re.finditer(
+            r'<(?:div|tr|li)[^>]*?(?:class=["\'][^"\']*\b(?:quest_item|quest-item|quest_container)\b[^"\']*["\']|data-quest-id=["\']\d+["\'])',
+            normalized,
+            re.IGNORECASE,
+        )
+    ]
+    # Fallback para class com \bquest\b isolado se não encontrar classes específicas
+    if not raw_starts:
+        raw_starts = [
+            m
+            for m in re.finditer(
+                r'<(?:div|tr|li)[^>]*?class=["\'][^"\']*\bquest\b[^"\']*["\']',
+                normalized,
+                re.IGNORECASE,
+            )
+        ]
+    block_starts = [m.start() for m in raw_starts]
+
+    claim_btn_regex = re.compile(
+        r'<a[^>]*href=["\']([^"\']*[?&]action=(?:claim_reward|claim|reward)[^"\']*)["\'][^>]*>(.*?)</a>',
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    for i, start_pos in enumerate(block_starts):
+        end_pos = block_starts[i + 1] if i + 1 < len(block_starts) else start_pos + 3000
+        content = normalized[start_pos:end_pos]
+
+        # Extração de ID
+        q_id = None
+        id_m = re.search(r'(?:data-quest-id|data-id)=["\'](\d+)["\']', content, re.IGNORECASE)
+        if id_m:
+            q_id = id_m.group(1)
+
+        claim_match = claim_btn_regex.search(content)
+        claim_url = claim_match.group(1) if claim_match else None
+        if not q_id and claim_url:
+            url_id_m = re.search(r'[?&](?:quest_id|quest|id)=(\d+)', claim_url, re.IGNORECASE)
+            if url_id_m:
+                q_id = url_id_m.group(1)
+
+        if not q_id:
+            # Fallback numérico
+            q_id = str(len(quests) + 1)
+
+        if q_id in seen_ids:
+            continue
+
+        title_m = re.search(
+            r'<(?:h\d|b|strong|span)[^>]*class=["\']?[^"\']*(?:title|name|quest_name)[^"\']*["\']?[^>]*>(.*?)</(?:h\d|b|strong|span)>',
+            content,
+            re.IGNORECASE,
+        )
+        title = title_m.group(1).strip() if title_m else f"Missão #{q_id}"
+        title = re.sub(r'<[^>]+>', '', title).strip()
+
+        wood_m = re.search(r'(?:icon header wood|wood)[^>]*>.*?([\d\.]+)', content, re.IGNORECASE)
+        stone_m = re.search(r'(?:icon header stone|stone)[^>]*>.*?([\d\.]+)', content, re.IGNORECASE)
+        iron_m = re.search(r'(?:icon header iron|iron)[^>]*>.*?([\d\.]+)', content, re.IGNORECASE)
+        pop_m = re.search(r'(?:icon header pop|pop|população)[^>]*>.*?([\d\.]+)', content, re.IGNORECASE)
+
+        def clean_val(m):
+            if not m:
+                return 0
+            val_str = m.group(1).replace(".", "").strip()
+            return int(val_str) if val_str.isdigit() else 0
+
+        wood = clean_val(wood_m)
+        stone = clean_val(stone_m)
+        iron = clean_val(iron_m)
+        pop = clean_val(pop_m)
+
+        finishable = bool(claim_url) or bool(
+            re.search(
+                r'class=["\'][^"\']*\b(?:quest_complete|quest_finished|btn-confirm-yes|claim)\b|<a[^>]*>(?:Receber|Resgatar|Claim|Reclamar)\b',
+                content,
+                re.IGNORECASE,
+            )
+        )
+
+        seen_ids.add(q_id)
+        quests.append({
+            "id": q_id,
+            "title": title,
+            "description": "",
+            "finishable": finishable,
+            "claim_url": claim_url,
+            "rewards": {
+                "wood": wood,
+                "stone": stone,
+                "iron": iron,
+                "pop": pop,
+                "flags": [],
+                "items": [],
+                "description": "",
+            },
+        })
+
+    # 3. Se houver botões de claim isolados no HTML
+    if not quests:
+        for c_match in claim_btn_regex.finditer(normalized):
+            url = c_match.group(1)
+            id_m = re.search(r'[?&](?:quest_id|quest|id)=(\d+)', url, re.IGNORECASE)
+            q_id = id_m.group(1) if id_m else str(len(quests) + 1)
+            if q_id in seen_ids:
+                continue
+            seen_ids.add(q_id)
+            quests.append({
+                "id": q_id,
+                "title": f"Missão #{q_id}",
+                "description": "",
+                "finishable": True,
+                "claim_url": url,
+                "rewards": {
+                    "wood": 0,
+                    "stone": 0,
+                    "iron": 0,
+                    "pop": 0,
+                    "flags": [],
+                    "items": [],
+                    "description": "",
+                },
+            })
+
+    finishable_count = sum(1 for q in quests if q["finishable"])
+    return {
+        "quests": quests,
+        "finishable_count": finishable_count,
+    }
+
+
+def parse_daily_bonus_screen(html: str) -> Dict[str, Any]:
+    """
+    Extrai o estado do Bónus Diário / Baús de Login (screen=daily_bonus).
+    Verifica se há baú gratuito disponível para abertura ou se já foi recolhido hoje.
+    """
+    normalized = html.replace("&amp;", "&")
+
+    open_match = re.search(
+        r'<a[^>]*href=["\']([^"\']*[?&]action=(?:open_chest|open|claim|unlock_chest)[^"\']*)["\'][^>]*>(.*?)</a>',
+        normalized,
+        re.IGNORECASE,
+    )
+    open_url = open_match.group(1) if open_match else None
+
+    is_opened_today = bool(re.search(
+        r'(?:já\s+recolheste|já\s+aberto|já\s+recolhido|volta\s+amanhã|come\s+back\s+tomorrow|already\s+opened|chest_opened)',
+        normalized,
+        re.IGNORECASE,
+    ))
+
+    can_open = bool(open_url) and not is_opened_today
+
+    chests = []
+    chest_matches = re.finditer(
+        r'<(?:div|a)[^>]*class=["\'][^"\']*(?:chest|daily_bonus)[^"\']*["\'][^>]*>(.*?)</(?:div|a)>',
+        normalized,
+        re.DOTALL | re.IGNORECASE,
+    )
+    for idx, c in enumerate(chest_matches, start=1):
+        chests.append({
+            "id": idx,
+            "raw": c.group(1)[:100],
+        })
+
+    return {
+        "can_open": can_open,
+        "open_url": open_url,
+        "is_opened_today": is_opened_today,
+        "chests": chests,
+    }
+
+
+def parse_inventory_screen(html: str) -> Dict[str, Any]:
+    """
+    Extrai a lista de itens presentes no Inventário do jogador (screen=inventory).
+    Identifica itens disponíveis, quantidade, descrição e URL de uso manual.
+    """
+    normalized = html.replace("&amp;", "&")
+    items: List[Dict[str, Any]] = []
+    seen_ids = set()
+
+    item_starts = [
+        m.start()
+        for m in re.finditer(
+            r'<(?:div|tr|li)[^>]*class=["\'][^"\']*(?:inventory_item|item_container|item)[^"\']*["\']',
+            normalized,
+            re.IGNORECASE,
+        )
+    ]
+
+    for i, start_pos in enumerate(item_starts):
+        end_pos = item_starts[i + 1] if i + 1 < len(item_starts) else start_pos + 3000
+        content = normalized[start_pos:end_pos]
+
+        id_m = re.search(r'(?:data-item-id|data-id)=["\']([^"\']+)["\']', content, re.IGNORECASE)
+        use_m = re.search(
+            r'<a[^>]*href=["\']([^"\']*[?&]action=(?:use_item|use)[^"\']*)["\'][^>]*>(.*?)</a>',
+            content,
+            re.IGNORECASE,
+        )
+        use_url = use_m.group(1) if use_m else None
+
+        item_id = id_m.group(1) if id_m else None
+        if not item_id and use_url:
+            url_id_m = re.search(r'[?&](?:item_id|item|id)=([^&"\']+)', use_url, re.IGNORECASE)
+            if url_id_m:
+                item_id = url_id_m.group(1)
+
+        if not item_id or item_id in seen_ids:
+            continue
+
+        seen_ids.add(item_id)
+
+        name_m = re.search(
+            r'<(?:h\d|b|strong|span)[^>]*class=["\']?[^"\']*(?:item_name|title|name)[^"\']*["\']?[^>]*>(.*?)</(?:h\d|b|strong|span)>',
+            content,
+            re.IGNORECASE,
+        )
+        name = name_m.group(1).strip() if name_m else item_id
+        name = re.sub(r'<[^>]+>', '', name).strip()
+
+        count_m = re.search(r'(?:count|qtd|quantidade|badge)[^>]*>.*?(\d+)|(\d+)\s*x', content, re.IGNORECASE)
+        count = 1
+        if count_m:
+            c_val = count_m.group(1) or count_m.group(2)
+            if c_val and c_val.isdigit():
+                count = int(c_val)
+
+        desc_m = re.search(
+            r'<(?:p|span|div)[^>]*class=["\']?[^"\']*(?:desc|description)[^"\']*["\']?[^>]*>(.*?)</(?:p|span|div)>',
+            content,
+            re.IGNORECASE,
+        )
+        desc = re.sub(r'<[^>]+>', '', desc_m.group(1)).strip() if desc_m else ""
+
+        can_use = bool(use_url)
+
+        items.append({
+            "id": item_id,
+            "name": name,
+            "count": count,
+            "description": desc,
+            "can_use": can_use,
+            "use_url": use_url,
+        })
+
+    return {"items": items}
+
+
+def parse_map_response(data: Any) -> List[Dict[str, Any]]:
+    """
+    Analisa a resposta de dados do mapa do Tribal Wars com suporte total para:
+    1. Respostas de setores oficiais do Tribal Wars (/map.php?v=2&e=... e TWMap.sectorPrefech no HTML).
+    2. Dumps mundiais públicos em formato CSV (/map/village.txt).
+    3. Respostas AJAX legadas e estruturas serializadas em dicionários/listas.
+    4. Fallback por regex para marcação HTML.
+    """
+    villages: List[Dict[str, Any]] = []
+    seen_ids = set()
+    json_obj = None
+
+    def _parse_sector_dict(sec: Dict[str, Any]) -> None:
+        """Processa um setor 20x20 oficial do Tribal Wars."""
+        d = sec.get("data", sec)
+        bx = int(d.get("x", sec.get("x", 0)))
+        by = int(d.get("y", sec.get("y", 0)))
+        v_list = d.get("villages", [])
+        p_dict = d.get("players", {})
+        a_dict = d.get("allies", {})
+
+        if isinstance(v_list, list):
+            for dx, y_dict in enumerate(v_list):
+                if not isinstance(y_dict, dict):
+                    continue
+                ax = bx + dx
+                for dy_str, v_info in y_dict.items():
+                    try:
+                        ay = by + int(dy_str)
+                    except ValueError:
+                        continue
+                    if not isinstance(v_info, (list, tuple)) or len(v_info) < 2:
+                        continue
+                    try:
+                        vid = int(v_info[0])
+                    except (ValueError, TypeError):
+                        continue
+                    if vid in seen_ids:
+                        continue
+                    seen_ids.add(vid)
+
+                    raw_name = v_info[2] if len(v_info) > 2 else ""
+                    raw_pts = v_info[3] if len(v_info) > 3 else 0
+                    raw_pid = v_info[4] if len(v_info) > 4 else 0
+                    bonus_info = v_info[6] if len(v_info) > 6 else None
+                    bonus_id = int(v_info[8]) if (len(v_info) > 8 and isinstance(v_info[8], int)) else (1 if bonus_info else 0)
+
+                    try:
+                        pid = int(raw_pid)
+                    except (ValueError, TypeError):
+                        pid = 0
+                    try:
+                        pts = int(raw_pts)
+                    except (ValueError, TypeError):
+                        pts = 0
+
+                    p_data = p_dict.get(str(pid)) or p_dict.get(pid) or []
+                    p_name = str(p_data[0]) if len(p_data) >= 1 else ""
+                    t_id = int(p_data[2]) if (len(p_data) >= 3 and str(p_data[2]).isdigit()) else 0
+
+                    a_data = a_dict.get(str(t_id)) or a_dict.get(t_id) or []
+                    t_tag = str(a_data[2]) if len(a_data) >= 3 else (str(a_data[0]) if len(a_data) >= 1 else "")
+
+                    vname = str(raw_name) if (raw_name and raw_name != 0 and raw_name != "0") else ("Aldeia bónus" if bonus_id > 0 else "Aldeia de bárbaros")
+
+                    villages.append({
+                        "id": vid,
+                        "x": ax,
+                        "y": ay,
+                        "name": vname,
+                        "points": pts,
+                        "player_id": pid,
+                        "player_name": p_name,
+                        "tribe_id": t_id,
+                        "tribe_tag": t_tag,
+                        "bonus_id": bonus_id,
+                    })
+
+    if isinstance(data, (dict, list)):
+        json_obj = data
+    elif isinstance(data, str):
+        raw_str = data.strip()
+        # 1. Verifica se é dump CSV (/map/village.txt)
+        if "\n" in raw_str and not raw_str.startswith("<") and not raw_str.startswith("{") and not raw_str.startswith("["):
+            first_line = raw_str.split("\n")[0].strip()
+            parts = first_line.split(",")
+            if len(parts) >= 6 and parts[0].isdigit() and parts[2].isdigit():
+                for line in raw_str.splitlines():
+                    p = line.strip().split(",")
+                    if len(p) >= 6:
+                        try:
+                            vid = int(p[0])
+                            vname = urllib.parse.unquote_plus(p[1])
+                            vx = int(p[2])
+                            vy = int(p[3])
+                            pid = int(p[4])
+                            pts = int(p[5])
+                            if vid not in seen_ids:
+                                seen_ids.add(vid)
+                                villages.append({
+                                    "id": vid,
+                                    "x": vx,
+                                    "y": vy,
+                                    "name": vname,
+                                    "points": pts,
+                                    "player_id": pid,
+                                    "player_name": "" if pid == 0 else f"Jogador {pid}",
+                                    "tribe_id": 0,
+                                    "tribe_tag": "",
+                                    "bonus_id": 0,
+                                })
+                        except (ValueError, IndexError):
+                            pass
+                return villages
+
+        # 2. Tenta decodificar JSON direto
+        if (raw_str.startswith("{") and raw_str.endswith("}")) or (raw_str.startswith("[") and raw_str.endswith("]")):
+            try:
+                json_obj = json.loads(raw_str)
+            except Exception:
+                json_obj = None
+
+        # 3. Procura variáveis JS no HTML do jogo
+        if json_obj is None:
+            js_patterns = [
+                r'TWMap\.sectorPrefech\s*=\s*(\[.*?\]);',
+                r'TWMap\.sectorData\s*=\s*(\{.*?\});',
+                r'TWMap\.initMap\s*\(\s*(\{.*?\})\s*\)',
+                r'(?:var|let|const)\s+map_data\s*=\s*(\{.*?\});',
+                r'TWMap\.mapData\s*=\s*(\{.*?\});',
+            ]
+            for pat in js_patterns:
+                m = re.search(pat, data, re.DOTALL)
+                if m:
+                    try:
+                        json_obj = json.loads(m.group(1))
+                        if json_obj:
+                            break
+                    except Exception:
+                        continue
+
+    # Processamento se o JSON for lista de setores (formato /map.php ou TWMap.sectorPrefech)
+    if isinstance(json_obj, list):
+        is_sector_list = any(isinstance(item, dict) and ("tiles" in item or "data" in item) for item in json_obj)
+        if is_sector_list:
+            for item in json_obj:
+                if isinstance(item, dict):
+                    _parse_sector_dict(item)
+            return villages
+
+        # Caso contrário, trata como lista legada de aldeias em formato plano
+        for v_item in json_obj:
+            if isinstance(v_item, dict):
+                v_id = int(v_item.get("id", 0))
+                x = int(v_item.get("x", 0))
+                y = int(v_item.get("y", 0))
+                name = str(v_item.get("name") or f"Aldeia ({x}|{y})")
+                points = int(v_item.get("points", 0))
+                player_id = int(v_item.get("player_id", v_item.get("player", 0)) or 0)
+                player_name = str(v_item.get("player_name", ""))
+                tribe_id = int(v_item.get("tribe_id", v_item.get("tribe", 0)) or 0)
+                tribe_tag = str(v_item.get("tribe_tag", ""))
+                bonus_id = int(v_item.get("bonus_id", v_item.get("bonus", 0)) or 0)
+
+                if v_id and v_id not in seen_ids:
+                    seen_ids.add(v_id)
+                    villages.append({
+                        "id": v_id,
+                        "x": x,
+                        "y": y,
+                        "name": name,
+                        "points": points,
+                        "player_id": player_id,
+                        "player_name": player_name,
+                        "tribe_id": tribe_id,
+                        "tribe_tag": tribe_tag,
+                        "bonus_id": bonus_id,
+                    })
+        return villages
+
+    # Processamento de JSON quando é dicionário
+    if isinstance(json_obj, dict):
+        if "data" in json_obj and isinstance(json_obj["data"], dict) and "villages" in json_obj["data"]:
+            _parse_sector_dict(json_obj)
+            return villages
+
+        raw_v_list = json_obj.get("villages")
+        if isinstance(raw_v_list, list) and raw_v_list and isinstance(raw_v_list[0], dict) and "data" not in json_obj:
+            # Lista de colunas de setor
+            if any(k.isdigit() for k in raw_v_list[0].keys()):
+                _parse_sector_dict({"data": json_obj})
+                return villages
+
+        # Formato legado {villages: {...}, players: {...}, allies: {...}}
+        players_data = json_obj.get("players", {})
+        allies_data = json_obj.get("allies", {})
+
+        def get_player_info(p_id: int) -> Tuple[str, int]:
+            p_val = players_data.get(str(p_id)) or players_data.get(p_id)
+            if not p_val:
+                return ("", 0)
+            if isinstance(p_val, (list, tuple)) and len(p_val) >= 1:
+                p_name = str(p_val[0])
+                t_id = int(p_val[2]) if len(p_val) >= 3 and str(p_val[2]).isdigit() else 0
+                return (p_name, t_id)
+            if isinstance(p_val, dict):
+                p_name = str(p_val.get("name", ""))
+                t_id = int(p_val.get("tribe_id", 0) or p_val.get("tribe", 0))
+                return (p_name, t_id)
+            return (str(p_val), 0)
+
+        def get_tribe_tag(t_id: int) -> str:
+            t_val = allies_data.get(str(t_id)) or allies_data.get(t_id)
+            if not t_val:
+                return ""
+            if isinstance(t_val, (list, tuple)) and len(t_val) >= 2:
+                return str(t_val[1])
+            if isinstance(t_val, dict):
+                return str(t_val.get("tag", "") or t_val.get("name", ""))
+            return str(t_val)
+
+        raw_villages = json_obj.get("villages", {})
+        if isinstance(raw_villages, dict):
+            for v_id_str, v_info in raw_villages.items():
+                try:
+                    v_id = int(v_id_str)
+                except ValueError:
+                    v_id = 0
+
+                if isinstance(v_info, (list, tuple)) and len(v_info) >= 2:
+                    x = int(v_info[0])
+                    y = int(v_info[1])
+                    name = str(v_info[2]) if len(v_info) >= 3 else f"Aldeia ({x}|{y})"
+                    points = int(v_info[3]) if len(v_info) >= 4 and str(v_info[3]).isdigit() else 0
+                    player_id = int(v_info[4]) if len(v_info) >= 5 and str(v_info[4]).isdigit() else 0
+                    tribe_id = int(v_info[5]) if len(v_info) >= 6 and str(v_info[5]).isdigit() else 0
+                    bonus_id = int(v_info[6]) if len(v_info) >= 7 and str(v_info[6]).isdigit() else 0
+
+                    p_name, p_tribe = get_player_info(player_id)
+                    if not tribe_id and p_tribe:
+                        tribe_id = p_tribe
+                    tribe_tag = get_tribe_tag(tribe_id)
+
+                    if v_id and v_id not in seen_ids:
+                        seen_ids.add(v_id)
+                        villages.append({
+                            "id": v_id,
+                            "x": x,
+                            "y": y,
+                            "name": name,
+                            "points": points,
+                            "player_id": player_id,
+                            "player_name": p_name,
+                            "tribe_id": tribe_id,
+                            "tribe_tag": tribe_tag,
+                            "bonus_id": bonus_id,
+                        })
+
+                elif isinstance(v_info, dict):
+                    v_id = int(v_info.get("id", v_id))
+                    x = int(v_info.get("x", 0))
+                    y = int(v_info.get("y", 0))
+                    name = str(v_info.get("name") or f"Aldeia ({x}|{y})")
+                    points = int(v_info.get("points", 0))
+                    player_id = int(v_info.get("player_id", v_info.get("player", 0)) or 0)
+                    tribe_id = int(v_info.get("tribe_id", v_info.get("tribe", 0)) or 0)
+                    bonus_id = int(v_info.get("bonus_id", v_info.get("bonus", 0)) or 0)
+
+                    p_name, p_tribe = get_player_info(player_id)
+                    if not tribe_id and p_tribe:
+                        tribe_id = p_tribe
+                    tribe_tag = get_tribe_tag(tribe_id)
+
+                    if v_id and v_id not in seen_ids:
+                        seen_ids.add(v_id)
+                        villages.append({
+                            "id": v_id,
+                            "x": x,
+                            "y": y,
+                            "name": name,
+                            "points": points,
+                            "player_id": player_id,
+                            "player_name": p_name,
+                            "tribe_id": tribe_id,
+                            "tribe_tag": tribe_tag,
+                            "bonus_id": bonus_id,
+                        })
+
+        elif isinstance(raw_villages, list):
+            for v_item in raw_villages:
+                if isinstance(v_item, dict):
+                    v_id = int(v_item.get("id", 0))
+                    x = int(v_item.get("x", 0))
+                    y = int(v_item.get("y", 0))
+                    name = str(v_item.get("name") or f"Aldeia ({x}|{y})")
+                    points = int(v_item.get("points", 0))
+                    player_id = int(v_item.get("player_id", v_item.get("player", 0)) or 0)
+                    tribe_id = int(v_item.get("tribe_id", v_item.get("tribe", 0)) or 0)
+                    bonus_id = int(v_item.get("bonus_id", v_item.get("bonus", 0)) or 0)
+
+                    p_name, p_tribe = get_player_info(player_id)
+                    if not tribe_id and p_tribe:
+                        tribe_id = p_tribe
+                    tribe_tag = get_tribe_tag(tribe_id)
+
+                    if v_id and v_id not in seen_ids:
+                        seen_ids.add(v_id)
+                        villages.append({
+                            "id": v_id,
+                            "x": x,
+                            "y": y,
+                            "name": name,
+                            "points": points,
+                            "player_id": player_id,
+                            "player_name": p_name,
+                            "tribe_id": tribe_id,
+                            "tribe_tag": tribe_tag,
+                            "bonus_id": bonus_id,
+                        })
+
+    # Fallback de extração via regex em tags HTML do mapa
+    if not villages and isinstance(data, str):
+        village_matches = re.finditer(
+            r'<(?:div|a|td)[^>]*?(?:data-village-id|data-id)=["\'](\d+)["\'][^>]*>(.*?)</(?:div|a|td)>',
+            data,
+            re.DOTALL | re.IGNORECASE,
+        )
+        for vm in village_matches:
+            v_id = int(vm.group(1))
+            content = vm.group(2)
+            if v_id in seen_ids:
+                continue
+
+            coord_m = re.search(r'\((\d{1,3})\|(\d{1,3})\)', content) or re.search(
+                r'data-x=["\'](\d+)["\']\s+data-y=["\'](\d+)["\']', content, re.IGNORECASE
+            )
+            if not coord_m:
+                continue
+
+            x = int(coord_m.group(1))
+            y = int(coord_m.group(2))
+
+            name_m = re.search(r'class=["\']?[^"\']*(?:village_name|title)[^"\']*["\']?[^>]*>(.*?)</', content, re.IGNORECASE)
+            name = name_m.group(1).strip() if name_m else f"Aldeia ({x}|{y})"
+            name = re.sub(r'<[^>]+>', '', name).strip()
+
+            is_barb = "bárbar" in content.lower() or "barbarian" in content.lower()
+            player_id = 0 if is_barb else 1
+            player_name = "" if is_barb else "Desconhecido"
+
+            bonus_id = 1 if "bonus" in content.lower() else 0
+
+            seen_ids.add(v_id)
+            villages.append({
+                "id": v_id,
+                "x": x,
+                "y": y,
+                "name": name,
+                "points": 0,
+                "player_id": player_id,
+                "player_name": player_name,
+                "tribe_id": 0,
+                "tribe_tag": "",
+                "bonus_id": bonus_id,
+            })
+
+    return villages
+
+    return villages
+
 
 
 

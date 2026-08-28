@@ -18,45 +18,83 @@
     
     <!-- Top Navigation Bar -->
     <header class="top-nav">
+      <!-- Coluna 1: Brand & Logo -->
       <div class="brand-section">
         <div class="brand-logo">⚔</div>
         <div class="brand-text">
           <h1>TribalWars Bot <span class="version-tag">v2.0 HUD</span></h1>
-          <p class="brand-subtitle">Automação Mobile HTTP com Evasão de TLS</p>
         </div>
       </div>
 
-      <div class="nav-indicators">
-        <div class="badge badge-world" id="badge-world">PT117</div>
+      <!-- Coluna 2: Centro (Mundos, Relógio e Status Perfeitamente Centrados na Janela) -->
+      <div class="top-nav-center">
+        <!-- Dropdown Seletor de Mundo -->
+        <div class="world-dropdown-wrapper" style="position: relative; display: inline-flex; align-items: center;">
+          <button class="badge badge-world" id="btn-world-dropdown" title="Clique para selecionar outro mundo (ex: pt114, pt117)" style="cursor: pointer; display: flex; align-items: center; gap: 5px; border: 1px solid var(--neon-cyan); background: rgba(6, 182, 212, 0.15); color: var(--neon-cyan); font-weight: 700; padding: 4px 8px; border-radius: 6px;">
+            <span>🌐</span>
+            <span id="badge-world-text">PT117</span>
+            <span style="font-size: 0.6rem; opacity: 0.8;">▼</span>
+          </button>
+          <div class="world-dropdown-menu" id="world-dropdown-menu" style="display: none; position: absolute; top: calc(100% + 6px); left: 0; min-width: 170px; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(16px); border: 1px solid var(--neon-cyan); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 1000; padding: 6px 0;">
+            <div style="padding: 4px 12px; font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 700; border-bottom: 1px solid var(--border-subtle);">Mundos Disponíveis</div>
+            <div id="world-dropdown-list">
+              <!-- Injetado dinamicamente: pt114, pt115, pt116, pt117, pt118, etc. -->
+            </div>
+            <div style="border-top: 1px solid var(--border-subtle); padding: 4px 6px; margin-top: 4px;">
+              <button class="dropdown-item" id="btn-dropdown-add-world" style="width: 100%; text-align: left; background: none; border: none; color: var(--neon-cyan); padding: 6px 8px; font-size: 0.78rem; font-weight: 600; cursor: pointer; border-radius: 4px; display: flex; align-items: center; gap: 6px;">
+                <span>➕</span> Outro Mundo...
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chips de Mundos Concorrentes Ativos -->
+        <div id="world-tabs-container" style="display: flex; gap: 4px; align-items: center;">
+          <!-- Botões de mundos injetados via JS -->
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btn-add-world" style="padding: 3px 7px; font-size: 0.72rem; border-radius: 6px;" title="Adicionar e orquestrar outro mundo em simultâneo">
+          <span>➕</span>
+        </button>
+
+        <!-- Relógio HUD de Alta Precisão -->
         <div class="badge badge-clock" id="badge-clock" title="Relógio do Jogo / Servidor (Horas:Minutos:Segundos.Microssegundos)">
           <span class="clock-icon">⏳</span>
           <span class="clock-digits" id="clock-hms">00:00:00</span>
           <span class="clock-sub" id="clock-ms">.000000</span>
         </div>
+
+        <!-- Indicador de Status do Motor -->
         <div class="badge badge-status active" id="badge-status">
           <span class="status-dot"></span>
           <span id="status-text">MOTOR ATIVO</span>
         </div>
       </div>
 
+      <!-- Coluna 3: Botões de Ação Rápidos (Alinhados à Direita sem Overflow) -->
       <div class="quick-actions">
-        <button class="btn btn-secondary" id="btn-renew-session" title="Abre o ecrã de login do Tribal Wars para entrar manualmente e capturar a sessão">
-          <span>🔑</span> Entrar / Login
+        <button class="btn btn-secondary btn-sm" id="btn-renew-session" title="Abre o ecrã de login do Tribal Wars para entrar manualmente e capturar a sessão">
+          <span>🔑</span> Login
         </button>
-
-
-        <button class="btn btn-warning" id="btn-toggle-scheduler">
+        <button class="btn btn-secondary btn-sm" id="btn-refresh-data" title="Atualizar recursos e tropas da aldeia ativa" style="padding: 5px 8px;">
+          <span>🔄</span>
+        </button>
+        <button class="btn btn-secondary btn-sm" id="btn-claim-quests" title="Resgatar todas as recompensas de missões prontas de forma segura">
+          <span>🎁</span> <span id="badge-quest-count" class="badge" style="display:none; background:var(--neon-emerald); color:#000; padding:1px 5px; border-radius:8px; font-size:0.65rem; margin-left:2px; font-weight:700;">0</span>
+        </button>
+        <button class="btn btn-warning btn-sm" id="btn-toggle-scheduler">
           <span>⏸</span> Pausar
         </button>
-        <button class="btn btn-primary" id="btn-build-now" title="Força a execução de um ciclo imediato de construção">
-          <span>🔨</span> Construir
-        </button>
-        <button class="btn btn-secondary" id="btn-farm-now" title="Dispara uma onda imediata do Assistente de Farm">
-          <span>🌾</span> Farm
-        </button>
-        <button class="btn btn-secondary" id="btn-recruit-now" title="Dispara verificação imediata de recrutamento militar">
-          <span>🪖</span> Recrutar
-        </button>
+        <div class="btn-group" style="display: inline-flex; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border-glass);">
+          <button class="btn btn-primary btn-sm" id="btn-build-now" title="Força a execução de um ciclo imediato de construção" style="border-radius: 0; border: none; border-right: 1px solid rgba(255,255,255,0.15);">
+            <span>🔨</span> Construir
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btn-farm-now" title="Dispara uma onda imediata do Assistente de Farm" style="border-radius: 0; border: none; border-right: 1px solid rgba(255,255,255,0.15);">
+            <span>🌾</span> Farm
+          </button>
+          <button class="btn btn-secondary btn-sm" id="btn-recruit-now" title="Dispara verificação imediata de recrutamento militar" style="border-radius: 0; border: none;">
+            <span>🪖</span> Recrutar
+          </button>
+        </div>
       </div>
     </header>
 
@@ -73,7 +111,13 @@
           <span class="tab-icon">🏛</span> Edifícios & Fila
         </button>
         <button class="nav-tab" data-tab="tab-military" id="tab-btn-military">
-          <span class="tab-icon">⚔</span> Farm & Exército
+          <span class="tab-icon">⚔</span> Recrutamento & Tropas
+        </button>
+        <button class="nav-tab" data-tab="tab-map" id="tab-btn-map">
+          <span class="tab-icon">🗺</span> Mapa Tático
+        </button>
+        <button class="nav-tab" data-tab="tab-villages" id="tab-btn-villages">
+          <span class="tab-icon">🏰</span> Multi-Aldeia
         </button>
         <button class="nav-tab" data-tab="tab-map" id="tab-btn-map">
           <span class="tab-icon">🗺️</span> Mapa do Mundo
@@ -180,25 +224,65 @@
               </div>
             </div>
             <div class="army-matrix">
-              <div class="army-cell">
+              <div class="army-cell" title="Lanceiro">
+                <div class="army-cell-icon">🗡</div>
                 <div class="army-cell-name">Lanceiro</div>
                 <div class="army-cell-count" id="army-spear">0</div>
               </div>
-              <div class="army-cell">
+              <div class="army-cell" title="Espadachim">
+                <div class="army-cell-icon">🛡</div>
                 <div class="army-cell-name">Espadachim</div>
                 <div class="army-cell-count" id="army-sword">0</div>
               </div>
-              <div class="army-cell">
+              <div class="army-cell" title="Viking / Bárbaro">
+                <div class="army-cell-icon">🪓</div>
                 <div class="army-cell-name">Viking</div>
                 <div class="army-cell-count" id="army-axe">0</div>
               </div>
-              <div class="army-cell">
+              <div class="army-cell" title="Arqueiro">
+                <div class="army-cell-icon">🏹</div>
+                <div class="army-cell-name">Arqueiro</div>
+                <div class="army-cell-count" id="army-archer">0</div>
+              </div>
+              <div class="army-cell" title="Explorador">
+                <div class="army-cell-icon">🐎</div>
                 <div class="army-cell-name">Explorador</div>
                 <div class="army-cell-count" id="army-spy">0</div>
               </div>
-              <div class="army-cell">
+              <div class="army-cell" title="Cavalaria Leve">
+                <div class="army-cell-icon">🏇</div>
                 <div class="army-cell-name">Cav. Leve</div>
                 <div class="army-cell-count" id="army-light">0</div>
+              </div>
+              <div class="army-cell" title="Arqueiro a Cavalo">
+                <div class="army-cell-icon">🏹</div>
+                <div class="army-cell-name">Arq. Cavalo</div>
+                <div class="army-cell-count" id="army-marcher">0</div>
+              </div>
+              <div class="army-cell" title="Cavalaria Pesada">
+                <div class="army-cell-icon">🛡</div>
+                <div class="army-cell-name">Cav. Pesada</div>
+                <div class="army-cell-count" id="army-heavy">0</div>
+              </div>
+              <div class="army-cell" title="Aríete">
+                <div class="army-cell-icon">🪵</div>
+                <div class="army-cell-name">Aríete</div>
+                <div class="army-cell-count" id="army-ram">0</div>
+              </div>
+              <div class="army-cell" title="Catapulta">
+                <div class="army-cell-icon">🪨</div>
+                <div class="army-cell-name">Catapulta</div>
+                <div class="army-cell-count" id="army-catapult">0</div>
+              </div>
+              <div class="army-cell" title="Paladino">
+                <div class="army-cell-icon">👑</div>
+                <div class="army-cell-name">Paladino</div>
+                <div class="army-cell-count" id="army-knight">0</div>
+              </div>
+              <div class="army-cell" title="Nobre">
+                <div class="army-cell-icon">📜</div>
+                <div class="army-cell-name">Nobre</div>
+                <div class="army-cell-count" id="army-snob">0</div>
               </div>
             </div>
           </section>
@@ -244,17 +328,559 @@
         </div>
       </main>
 
-      <!-- Panel 3: Farm & Exército -->
+      <!-- Panel 3: Recrutamento & Objetivos de Tropas -->
       <main class="tab-content" id="tab-military">
-        <div class="glass-card" style="max-width: 1000px; margin: 0 auto">
-          <div class="card-header">
-            <div class="card-title">
-              <span class="icon">⚔</span> Recrutamento & Estratégia Militar
+        <div class="glass-card" style="max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px;">
+          
+          <!-- Cabeçalho Principal do Painel -->
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div>
+              <div class="card-title" style="display: flex; align-items: center; gap: 10px;">
+                <span class="icon">⚔</span> Metas de Tropas & Estratégia Militar
+                <span id="badge-rec-status" class="badge" style="font-size: 0.72rem; background: rgba(100,116,139,0.25); color: #94a3b8;">INATIVO</span>
+              </div>
+              <p style="color: var(--text-muted); font-size: 0.82rem; margin-top: 4px;">
+                Define os objetivos de tropas da aldeia ativa ou aplica templates táticos (Ataque, Defesa, Farm). O bot treina em lotes contínuos respeitando a população da Fazenda.
+              </p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <label class="switch-container" style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-main); cursor: pointer; background: rgba(15,23,42,0.6); padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <input type="checkbox" id="rec-enabled" style="accent-color: var(--neon-cyan); cursor: pointer; width: 16px; height: 16px;">
+                <span>Auto-Recrutamento Ativo</span>
+              </label>
+              <button class="btn btn-primary btn-sm" id="btn-save-recruitment">
+                <span>💾</span> Guardar Metas
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btn-trigger-recruit-tab">
+                <span>🪖</span> Recrutar Agora
+              </button>
             </div>
           </div>
-          <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 20px">
-            O gestor de recrutamento treina tropas em lotes controlados para nunca estrangular o crescimento do Edifício Principal e reserva automaticamente vagas de população livre da Fazenda.
-          </p>
+
+          <!-- Barra de Templates Táticos Rápidos (1-Clique) -->
+          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 14px 18px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+              <span style="font-size: 0.78rem; font-weight: 700; text-transform: uppercase; color: var(--neon-cyan); letter-spacing: 0.5px;">
+                🎯 Templates Táticos Pré-Definidos (1-Clique):
+              </span>
+              <span style="font-size: 0.75rem; color: var(--text-muted);">
+                Aplica instantaneamente proporções otimizadas para a aldeia
+              </span>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-secondary btn-sm" id="btn-tmpl-nuke" title="Foco ofensivo: 6.000 Machados, 3.000 Cavalaria Leve, 250 Aríetes, 100 Espiões">
+                <span>⚔️</span> Ataque Nuke
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btn-tmpl-defense" title="Bunker defensivo de apoio rápido: 7.000 Lanças, 7.000 Espadas, 1.000 Cavalaria Pesada, 100 Espiões">
+                <span>🛡️</span> Defesa Bunker
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btn-tmpl-farm" title="Especialista em Saque: 200 Machados, 20 Espiões, 200 Cavalaria Leve">
+                <span>🌾</span> Rush Farm
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btn-tmpl-balanced" title="Exército equilibrado early-game: 150 Lanças, 150 Espadas, 300 Machados, 30 Espiões, 100 Leves">
+                <span>⚖️</span> Equilibrado
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btn-tmpl-clear" style="color: #f87171; border-color: rgba(239,68,68,0.4);" title="Zerar todas as metas de tropas">
+                <span>🧹</span> Limpar Metas
+              </button>
+            </div>
+          </div>
+
+          <!-- Grelhas de Unidades por Edifício -->
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            
+            <!-- Grupo: Quartel (Infantaria) -->
+            <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 14px 16px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                <h4 style="margin: 0; font-size: 0.9rem; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                  <span>🗡️</span> Quartel (Infantaria)
+                </h4>
+                <span style="font-size: 0.75rem; color: var(--text-muted);">Edifício de Treino de Infantaria</span>
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+                <!-- Spear -->
+                <div class="unit-rec-card" data-unit="spear">
+                  <div class="unit-rec-header">
+                    <span class="unit-rec-icon">🗡️</span>
+                    <div>
+                      <div class="unit-rec-name">Lanceiro</div>
+                      <div class="unit-rec-pop">1 pop / unid.</div>
+                    </div>
+                    <span class="unit-rec-curr badge" id="rec-curr-spear">0</span>
+                  </div>
+                  <div class="unit-rec-progress-wrap">
+                    <div class="unit-rec-progress-bar" id="rec-bar-spear" style="width: 0%;"></div>
+                  </div>
+                  <div class="unit-rec-inputs">
+                    <div>
+                      <label>Meta Alvo</label>
+                      <input type="number" class="form-control rec-input" id="rec-target-spear" value="0" min="0">
+                    </div>
+                    <div>
+                      <label>Lote / Ciclo</label>
+                      <input type="number" class="form-control rec-input" id="rec-batch-spear" value="10" min="1">
+                    </div>
+                  </div>
+                </div>
+                <!-- Sword -->
+                <div class="unit-rec-card" data-unit="sword">
+                  <div class="unit-rec-header">
+                    <span class="unit-rec-icon">🛡️</span>
+                    <div>
+                      <div class="unit-rec-name">Espadachim</div>
+                      <div class="unit-rec-pop">1 pop / unid.</div>
+                    </div>
+                    <span class="unit-rec-curr badge" id="rec-curr-sword">0</span>
+                  </div>
+                  <div class="unit-rec-progress-wrap">
+                    <div class="unit-rec-progress-bar" id="rec-bar-sword" style="width: 0%;"></div>
+                  </div>
+                  <div class="unit-rec-inputs">
+                    <div>
+                      <label>Meta Alvo</label>
+                      <input type="number" class="form-control rec-input" id="rec-target-sword" value="0" min="0">
+                    </div>
+                    <div>
+                      <label>Lote / Ciclo</label>
+                      <input type="number" class="form-control rec-input" id="rec-batch-sword" value="10" min="1">
+                    </div>
+                  </div>
+                </div>
+                <!-- Axe -->
+                <div class="unit-rec-card" data-unit="axe">
+                  <div class="unit-rec-header">
+                    <span class="unit-rec-icon">🪓</span>
+                    <div>
+                      <div class="unit-rec-name">Viking / Bárbaro</div>
+                      <div class="unit-rec-pop">1 pop / unid.</div>
+                    </div>
+                    <span class="unit-rec-curr badge" id="rec-curr-axe">0</span>
+                  </div>
+                  <div class="unit-rec-progress-wrap">
+                    <div class="unit-rec-progress-bar" id="rec-bar-axe" style="width: 0%;"></div>
+                  </div>
+                  <div class="unit-rec-inputs">
+                    <div>
+                      <label>Meta Alvo</label>
+                      <input type="number" class="form-control rec-input" id="rec-target-axe" value="200" min="0">
+                    </div>
+                    <div>
+                      <label>Lote / Ciclo</label>
+                      <input type="number" class="form-control rec-input" id="rec-batch-axe" value="15" min="1">
+                    </div>
+                  </div>
+                </div>
+                <!-- Archer -->
+                <div class="unit-rec-card" data-unit="archer">
+                  <div class="unit-rec-header">
+                    <span class="unit-rec-icon">🏹</span>
+                    <div>
+                      <div class="unit-rec-name">Arqueiro</div>
+                      <div class="unit-rec-pop">1 pop / unid.</div>
+                    </div>
+                    <span class="unit-rec-curr badge" id="rec-curr-archer">0</span>
+                  </div>
+                  <div class="unit-rec-progress-wrap">
+                    <div class="unit-rec-progress-bar" id="rec-bar-archer" style="width: 0%;"></div>
+                  </div>
+                  <div class="unit-rec-inputs">
+                    <div>
+                      <label>Meta Alvo</label>
+                      <input type="number" class="form-control rec-input" id="rec-target-archer" value="0" min="0">
+                    </div>
+                    <div>
+                      <label>Lote / Ciclo</label>
+                      <input type="number" class="form-control rec-input" id="rec-batch-archer" value="10" min="1">
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Grupo: Estábulo (Cavalaria) -->
+            <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 14px 16px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                <h4 style="margin: 0; font-size: 0.9rem; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                  <span>🐎</span> Estábulo (Cavalaria & Reconhecimento)
+                </h4>
+                <span style="font-size: 0.75rem; color: var(--text-muted);">Edifício de Montaria</span>
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+                <!-- Spy -->
+                <div class="unit-rec-card" data-unit="spy">
+                  <div class="unit-rec-header">
+                    <span class="unit-rec-icon">👁️</span>
+                    <div>
+                      <div class="unit-rec-name">Espião</div>
+                      <div class="unit-rec-pop">2 pop / unid.</div>
+                    </div>
+                    <span class="unit-rec-curr badge" id="rec-curr-spy">0</span>
+                  </div>
+                  <div class="unit-rec-progress-wrap">
+                    <div class="unit-rec-progress-bar" id="rec-bar-spy" style="width: 0%;"></div>
+                  </div>
+                  <div class="unit-rec-inputs">
+                    <div>
+                      <label>Meta Alvo</label>
+                      <input type="number" class="form-control rec-input" id="rec-target-spy" value="20" min="0">
+                    </div>
+                    <div>
+                      <label>Lote / Ciclo</label>
+                      <input type="number" class="form-control rec-input" id="rec-batch-spy" value="5" min="1">
+                    </div>
+                  </div>
+                </div>
+                <!-- Light -->
+                <div class="unit-rec-card" data-unit="light">
+                  <div class="unit-rec-header">
+                    <span class="unit-rec-icon">🐎</span>
+                    <div>
+                      <div class="unit-rec-name">Cavalaria Leve</div>
+                      <div class="unit-rec-pop">4 pop / unid.</div>
+                    </div>
+                    <span class="unit-rec-curr badge" id="rec-curr-light">0</span>
+                  </div>
+                  <div class="unit-rec-progress-wrap">
+                    <div class="unit-rec-progress-bar" id="rec-bar-light" style="width: 0%;"></div>
+                  </div>
+                  <div class="unit-rec-inputs">
+                    <div>
+                      <label>Meta Alvo</label>
+                      <input type="number" class="form-control rec-input" id="rec-target-light" value="200" min="0">
+                    </div>
+                    <div>
+                      <label>Lote / Ciclo</label>
+                      <input type="number" class="form-control rec-input" id="rec-batch-light" value="5" min="1">
+                    </div>
+                  </div>
+                </div>
+                <!-- Marcher -->
+                <div class="unit-rec-card" data-unit="marcher">
+                  <div class="unit-rec-header">
+                    <span class="unit-rec-icon">🏹🐎</span>
+                    <div>
+                      <div class="unit-rec-name">Arqueiro a Cavalo</div>
+                      <div class="unit-rec-pop">5 pop / unid.</div>
+                    </div>
+                    <span class="unit-rec-curr badge" id="rec-curr-marcher">0</span>
+                  </div>
+                  <div class="unit-rec-progress-wrap">
+                    <div class="unit-rec-progress-bar" id="rec-bar-marcher" style="width: 0%;"></div>
+                  </div>
+                  <div class="unit-rec-inputs">
+                    <div>
+                      <label>Meta Alvo</label>
+                      <input type="number" class="form-control rec-input" id="rec-target-marcher" value="0" min="0">
+                    </div>
+                    <div>
+                      <label>Lote / Ciclo</label>
+                      <input type="number" class="form-control rec-input" id="rec-batch-marcher" value="5" min="1">
+                    </div>
+                  </div>
+                </div>
+                <!-- Heavy -->
+                <div class="unit-rec-card" data-unit="heavy">
+                  <div class="unit-rec-header">
+                    <span class="unit-rec-icon">🛡️🐎</span>
+                    <div>
+                      <div class="unit-rec-name">Cavalaria Pesada</div>
+                      <div class="unit-rec-pop">6 pop / unid.</div>
+                    </div>
+                    <span class="unit-rec-curr badge" id="rec-curr-heavy">0</span>
+                  </div>
+                  <div class="unit-rec-progress-wrap">
+                    <div class="unit-rec-progress-bar" id="rec-bar-heavy" style="width: 0%;"></div>
+                  </div>
+                  <div class="unit-rec-inputs">
+                    <div>
+                      <label>Meta Alvo</label>
+                      <input type="number" class="form-control rec-input" id="rec-target-heavy" value="0" min="0">
+                    </div>
+                    <div>
+                      <label>Lote / Ciclo</label>
+                      <input type="number" class="form-control rec-input" id="rec-batch-heavy" value="5" min="1">
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Grupo: Oficina (Armas de Cerco) -->
+            <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 14px 16px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                <h4 style="margin: 0; font-size: 0.9rem; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                  <span>🚪</span> Oficina (Armas de Cerco)
+                </h4>
+                <span style="font-size: 0.75rem; color: var(--text-muted);">Edifício de Máquinas</span>
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+                <!-- Ram -->
+                <div class="unit-rec-card" data-unit="ram">
+                  <div class="unit-rec-header">
+                    <span class="unit-rec-icon">🚪</span>
+                    <div>
+                      <div class="unit-rec-name">Aríete</div>
+                      <div class="unit-rec-pop">5 pop / unid.</div>
+                    </div>
+                    <span class="unit-rec-curr badge" id="rec-curr-ram">0</span>
+                  </div>
+                  <div class="unit-rec-progress-wrap">
+                    <div class="unit-rec-progress-bar" id="rec-bar-ram" style="width: 0%;"></div>
+                  </div>
+                  <div class="unit-rec-inputs">
+                    <div>
+                      <label>Meta Alvo</label>
+                      <input type="number" class="form-control rec-input" id="rec-target-ram" value="0" min="0">
+                    </div>
+                    <div>
+                      <label>Lote / Ciclo</label>
+                      <input type="number" class="form-control rec-input" id="rec-batch-ram" value="2" min="1">
+                    </div>
+                  </div>
+                </div>
+                <!-- Catapult -->
+                <div class="unit-rec-card" data-unit="catapult">
+                  <div class="unit-rec-header">
+                    <span class="unit-rec-icon">🪨</span>
+                    <div>
+                      <div class="unit-rec-name">Catapulta</div>
+                      <div class="unit-rec-pop">8 pop / unid.</div>
+                    </div>
+                    <span class="unit-rec-curr badge" id="rec-curr-catapult">0</span>
+                  </div>
+                  <div class="unit-rec-progress-wrap">
+                    <div class="unit-rec-progress-bar" id="rec-bar-catapult" style="width: 0%;"></div>
+                  </div>
+                  <div class="unit-rec-inputs">
+                    <div>
+                      <label>Meta Alvo</label>
+                      <input type="number" class="form-control rec-input" id="rec-target-catapult" value="0" min="0">
+                    </div>
+                    <div>
+                      <label>Lote / Ciclo</label>
+                      <input type="number" class="form-control rec-input" id="rec-batch-catapult" value="2" min="1">
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Parâmetros de Segurança e Cadência -->
+          <div style="display: flex; gap: 16px; align-items: center; justify-content: flex-end; padding: 12px 16px; background: rgba(15,23,42,0.6); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label for="rec-min-free-pop" style="font-size: 0.8rem; color: var(--text-muted);">Reserva Mínima Fazenda:</label>
+              <input type="number" id="rec-min-free-pop" class="form-control" style="width: 70px; padding: 4px 8px; font-size: 0.82rem;" value="10" min="0">
+              <span style="font-size: 0.75rem; color: var(--text-muted);">pop</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <label for="rec-interval-minutes" style="font-size: 0.8rem; color: var(--text-muted);">Intervalo de Treino:</label>
+              <input type="number" id="rec-interval-minutes" class="form-control" style="width: 70px; padding: 4px 8px; font-size: 0.82rem;" value="5.0" step="0.5" min="1">
+              <span style="font-size: 0.75rem; color: var(--text-muted);">min</span>
+            </div>
+            <button class="btn btn-primary" id="btn-save-recruitment-bottom">
+              <span>💾</span> Guardar Configurações
+            </button>
+          </div>
+
+        </div>
+      </main>
+
+      <!-- Panel: Mapa Tático & Scanner de Bárbaras -->
+      <main class="tab-content" id="tab-map">
+        <div class="glass-card" style="max-width: 1200px; margin: 0 auto">
+          <div class="card-header" style="flex-wrap: wrap; gap: 12px;">
+            <div class="card-title">
+              <span class="icon">🗺</span> Mapa Tático & Scanner de Bárbaras
+            </div>
+            <div class="map-toolbar" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 4px; font-size: 0.85rem;">
+                <label for="map-center-x" style="color: var(--text-muted)">Centro:</label>
+                <input type="number" id="map-center-x" class="form-control" style="width: 75px; padding: 4px 8px; font-size: 0.85rem;" placeholder="X">
+                <span>|</span>
+                <input type="number" id="map-center-y" class="form-control" style="width: 75px; padding: 4px 8px; font-size: 0.85rem;" placeholder="Y">
+              </div>
+              <div style="display: flex; align-items: center; gap: 4px; font-size: 0.85rem;">
+                <label for="map-radius" style="color: var(--text-muted)">Raio:</label>
+                <select id="map-radius" class="form-control" style="width: 90px; padding: 4px 8px; font-size: 0.85rem;">
+                  <option value="5">5 camp.</option>
+                  <option value="10">10 camp.</option>
+                  <option value="15" selected>15 camp.</option>
+                  <option value="20">20 camp.</option>
+                </select>
+              </div>
+              <button class="btn btn-secondary" id="btn-map-my-village" style="padding: 6px 12px; font-size: 0.82rem;" title="Centralizar nas coordenadas da aldeia ativa">
+                <span>🎯</span> Minha Aldeia
+              </button>
+              <button class="btn btn-primary" id="btn-map-scan" style="padding: 6px 12px; font-size: 0.82rem;" title="Forçar varredura ativa do mapa oficial">
+                <span>🔍</span> Scan Ativo
+              </button>
+              <button class="btn btn-warning" id="btn-map-farm-nearby" style="padding: 6px 12px; font-size: 0.82rem;" title="Disparar onda de saques contra bárbaras do mapa">
+                <span>🌾</span> Farmar Bárbaras
+              </button>
+            </div>
+          </div>
+
+          <!-- Legenda do Mapa -->
+          <div class="map-legend" style="display: flex; gap: 16px; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px; flex-wrap: wrap; background: rgba(15,23,42,0.6); padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border-subtle);">
+            <div style="display: flex; align-items: center; gap: 6px;"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:#eab308; box-shadow:0 0 8px #eab308;"></span> <strong>Sua Aldeia</strong></div>
+            <div style="display: flex; align-items: center; gap: 6px;"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:#06b6d4;"></span> <strong>Jogador</strong></div>
+            <div style="display: flex; align-items: center; gap: 6px;"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:#64748b;"></span> <strong>Bárbara / Abandonada</strong></div>
+            <div style="display: flex; align-items: center; gap: 6px;"><span style="display:inline-block; width:12px; height:12px; border-radius:3px; background:#a855f7;"></span> <strong>Aldeia Bónus</strong></div>
+            <div style="margin-left: auto; color: var(--neon-cyan);"><span id="map-stats-text">0 aldeias mapeadas</span></div>
+          </div>
+
+          <!-- Grid Visual 2D do Mapa -->
+          <div class="map-canvas-wrapper" id="map-canvas-wrapper">
+            <canvas id="tactical-map-canvas" style="display: block; width: 100%; height: 100%; cursor: crosshair;"></canvas>
+            
+            <!-- HUD de Navegação Tática Direcional & Zoom -->
+            <div class="map-nav-hud">
+              <div class="map-dpad">
+                <div></div>
+                <button class="map-nav-btn" id="btn-nav-n" title="Mover para Norte (▲)">▲</button>
+                <div></div>
+                <button class="map-nav-btn" id="btn-nav-w" title="Mover para Oeste (◄)">◄</button>
+                <button class="map-nav-btn" id="btn-nav-center" title="Centralizar na Minha Aldeia (🎯)" style="color: #eab308; font-weight: bold;">🎯</button>
+                <button class="map-nav-btn" id="btn-nav-e" title="Mover para Este (►)">►</button>
+                <div></div>
+                <button class="map-nav-btn" id="btn-nav-s" title="Mover para Sul (▼)">▼</button>
+                <div></div>
+              </div>
+              <div class="map-zoom-controls">
+                <button class="map-nav-btn" id="btn-zoom-in" title="Aproximar Zoom (+)">＋</button>
+                <button class="map-nav-btn" id="btn-zoom-out" title="Afastar Zoom (-)">－</button>
+              </div>
+            </div>
+
+            <div id="map-tooltip" class="map-tooltip" style="display: none; position: absolute; pointer-events: none; z-index: 100; background: rgba(15, 23, 42, 0.95); border: 1px solid var(--neon-cyan); border-radius: 8px; padding: 8px 12px; font-size: 0.8rem; box-shadow: 0 4px 20px rgba(0,0,0,0.6); backdrop-filter: blur(8px);"></div>
+          </div>
+
+          <!-- Card de Aldeia Selecionada no Mapa -->
+          <div id="selected-village-card" class="selected-village-card" style="display: none;">
+            <div style="display: flex; align-items: center; gap: 14px;">
+              <div id="selected-village-icon" style="font-size: 1.6rem; width: 44px; height: 44px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: rgba(6, 182, 212, 0.15); border: 1px solid var(--neon-cyan);">🏰</div>
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <h4 id="selected-village-name" style="margin: 0; font-size: 1rem; color: #fff;">Aldeia Selecionada</h4>
+                  <span id="selected-village-coords" style="font-family: var(--font-mono); color: var(--neon-cyan); font-weight: 700; font-size: 0.88rem;">(571|485)</span>
+                  <span id="selected-village-bonus" class="badge" style="display: none; background: rgba(168,85,247,0.2); color: #c084fc; border: 1px solid rgba(168,85,247,0.4); font-size: 0.7rem;">BÓNUS</span>
+                </div>
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">
+                  Distância: <strong id="selected-village-dist" style="color: var(--text-main);">0.0 camp.</strong> •
+                  Pontos: <strong id="selected-village-pts" style="color: var(--text-main);">0</strong> •
+                  Jogador: <strong id="selected-village-player" style="color: var(--neon-cyan);">-</strong>
+                </div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <button class="btn btn-warning" id="btn-selected-attack" style="padding: 6px 14px; font-size: 0.82rem;">⚔ Atacar / Farmar</button>
+              <button class="btn btn-secondary" id="btn-selected-center" style="padding: 6px 12px; font-size: 0.82rem;">🎯 Centralizar</button>
+              <button class="btn btn-secondary" id="btn-selected-copy" style="padding: 6px 12px; font-size: 0.82rem;">📋 Copiar Coords</button>
+            </div>
+          </div>
+
+          <!-- Lista de Bárbaras Próximas Encontradas -->
+          <div style="margin-top: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <h4 style="margin: 0; font-size: 0.95rem; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
+                <span>💀</span> Aldeias Bárbaras mais Próximas <span id="barb-count-badge" class="badge" style="background: rgba(100,116,139,0.3); color: #cbd5e1; font-size: 0.75rem;">0</span>
+              </h4>
+              <button class="btn btn-secondary" id="btn-refresh-barbs" style="padding: 4px 10px; font-size: 0.75rem;">🔄 Atualizar Lista</button>
+            </div>
+            <div class="table-responsive" style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: 8px;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+                <thead style="background: rgba(30, 41, 59, 0.8); position: sticky; top: 0; z-index: 10;">
+                  <tr style="border-bottom: 1px solid var(--border-subtle);">
+                    <th style="padding: 8px 12px;">Coordenadas</th>
+                    <th style="padding: 8px 12px;">Distância</th>
+                    <th style="padding: 8px 12px;">Nome</th>
+                    <th style="padding: 8px 12px;">Pontos</th>
+                    <th style="padding: 8px 12px;">Tipo</th>
+                    <th style="padding: 8px 12px; text-align: right;">Ação</th>
+                  </tr>
+                </thead>
+                <tbody id="barbarians-table-body">
+                  <tr>
+                    <td colspan="6" style="padding: 16px; text-align: center; color: var(--text-muted);">
+                      Nenhuma aldeia bárbara mapeada. Clique em "Scan Ativo" para varrer o mapa.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </main>
+
+      <!-- Panel: Gestão Simultânea de Multi-Aldeias & Categorização -->
+      <main class="tab-content" id="tab-villages">
+        <div class="card" style="margin-bottom: 20px;">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div>
+              <span class="icon">🏰</span> Gestão Multi-Aldeia & Categorização Tática
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <button class="btn btn-secondary" id="btn-sync-all-villages" style="padding: 6px 12px; font-size: 0.8rem;">
+                <span>🔄</span> Sincronizar Todas
+              </button>
+              <button class="btn btn-primary" id="btn-run-all-cycle" style="padding: 6px 12px; font-size: 0.8rem;">
+                <span>⚡</span> Ciclo Global (Todas)
+              </button>
+            </div>
+          </div>
+
+          <!-- Resumo de Recursos Agregados de Todas as Aldeias -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px;">
+            <div class="resource-pill wood" style="display: flex; flex-direction: column; gap: 2px; padding: 10px 14px;">
+              <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Madeira Total</span>
+              <strong id="agg-wood" style="font-size: 1.15rem; font-family: var(--font-mono); color: #22c55e;">0</strong>
+            </div>
+            <div class="resource-pill stone" style="display: flex; flex-direction: column; gap: 2px; padding: 10px 14px;">
+              <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Argila Total</span>
+              <strong id="agg-stone" style="font-size: 1.15rem; font-family: var(--font-mono); color: #06b6d4;">0</strong>
+            </div>
+            <div class="resource-pill iron" style="display: flex; flex-direction: column; gap: 2px; padding: 10px 14px;">
+              <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Ferro Total</span>
+              <strong id="agg-iron" style="font-size: 1.15rem; font-family: var(--font-mono); color: #cbd5e1;">0</strong>
+            </div>
+            <div class="resource-pill pop" style="display: flex; flex-direction: column; gap: 2px; padding: 10px 14px;">
+              <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase;">Aldeias Mapeadas</span>
+              <strong id="agg-villages-count" style="font-size: 1.15rem; font-family: var(--font-mono); color: var(--neon-gold);">0</strong>
+            </div>
+          </div>
+
+          <!-- Tabela de Aldeias da Conta -->
+          <div class="table-responsive" style="border: 1px solid var(--border-subtle); border-radius: 10px; overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.88rem; text-align: left;">
+              <thead style="background: rgba(30, 41, 59, 0.85);">
+                <tr style="border-bottom: 1px solid var(--border-subtle);">
+                  <th style="padding: 10px 14px;">Aldeia</th>
+                  <th style="padding: 10px 14px;">Coordenadas</th>
+                  <th style="padding: 10px 14px;">Categoria Tática</th>
+                  <th style="padding: 10px 14px;">Recursos (M / A / F)</th>
+                  <th style="padding: 10px 14px;">Armazém</th>
+                  <th style="padding: 10px 14px;">População Livre</th>
+                  <th style="padding: 10px 14px; text-align: right;">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="villages-table-body">
+                <!-- Linhas injetadas via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Card de Análise de Balanceamento de Recursos -->
+        <div class="card">
+          <div class="card-header">
+            <span class="icon">⚖</span> Balanceamento de Recursos & Distribuição de Mercadores
+          </div>
+          <div id="balance-analysis-container" style="color: var(--text-muted); font-size: 0.88rem; line-height: 1.6;">
+            A carregar análise de balanceamento...
+          </div>
         </div>
       </main>
 
@@ -298,7 +924,14 @@
               <div class="form-grid">
                 <div class="form-group">
                   <label for="cfg-world">Mundo do Jogo</label>
-                  <input type="text" id="cfg-world" class="form-control" value="pt117">
+                  <input type="text" id="cfg-world" class="form-control" list="common-worlds-list" value="pt117">
+                  <datalist id="common-worlds-list">
+                    <option value="pt114">Mundo 114 (pt114)</option>
+                    <option value="pt115">Mundo 115 (pt115)</option>
+                    <option value="pt116">Mundo 116 (pt116)</option>
+                    <option value="pt117">Mundo 117 (pt117)</option>
+                    <option value="pt118">Mundo 118 (pt118)</option>
+                  </datalist>
                 </div>
                 <div class="form-group">
                   <label for="cfg-sid">Cookie de Sessão (sid)</label>
@@ -490,6 +1123,46 @@
           <button class="btn btn-warning" id="btn-resolve-captcha">
             ✅ Concluído, Retomar Bot
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Adicionar Novo Mundo Simultâneo -->
+    <div class="modal-overlay" id="add-world-modal" style="display: none;">
+      <div class="modal-box" style="max-width: 480px;">
+        <div class="modal-icon">🌐</div>
+        <h2 class="modal-title">Adicionar Novo Mundo Concorrente</h2>
+        <p class="modal-desc">
+          Executa múltiplos mundos em simultâneo com sessões, agendadores e proxies independentes.
+        </p>
+        <div style="display: flex; flex-direction: column; gap: 12px; margin: 16px 0; text-align: left;">
+          <div>
+            <label style="font-size: 0.8rem; color: var(--text-muted);">Mundo (ex: pt114, pt117, pt118):</label>
+            <div style="display: flex; gap: 6px; margin: 4px 0 6px 0; flex-wrap: wrap;">
+              <button type="button" class="btn-quick-world" data-world="pt114" style="padding: 2px 8px; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--neon-cyan); background: rgba(6,182,212,0.15); color: var(--neon-cyan); cursor: pointer; font-weight: 600;">pt114</button>
+              <button type="button" class="btn-quick-world" data-world="pt115" style="padding: 2px 8px; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--border-glass); background: rgba(30,41,59,0.7); color: var(--text-muted); cursor: pointer;">pt115</button>
+              <button type="button" class="btn-quick-world" data-world="pt116" style="padding: 2px 8px; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--border-glass); background: rgba(30,41,59,0.7); color: var(--text-muted); cursor: pointer;">pt116</button>
+              <button type="button" class="btn-quick-world" data-world="pt117" style="padding: 2px 8px; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--border-glass); background: rgba(30,41,59,0.7); color: var(--text-muted); cursor: pointer;">pt117</button>
+              <button type="button" class="btn-quick-world" data-world="pt118" style="padding: 2px 8px; font-size: 0.75rem; border-radius: 4px; border: 1px solid var(--border-glass); background: rgba(30,41,59,0.7); color: var(--text-muted); cursor: pointer;">pt118</button>
+            </div>
+            <input type="text" id="input-world-id" class="form-control" placeholder="pt114" style="width: 100%; margin-top: 2px;">
+          </div>
+          <div>
+            <label style="font-size: 0.8rem; color: var(--text-muted);">Cookie de Sessão (sid):</label>
+            <input type="text" id="input-world-sid" class="form-control" placeholder="Cole o cookie 'sid' deste mundo..." style="width: 100%; margin-top: 4px; font-family: var(--font-mono); font-size: 0.78rem;">
+          </div>
+          <div>
+            <label style="font-size: 0.8rem; color: var(--text-muted);">Domínio (padrão: tribalwars.com.pt):</label>
+            <input type="text" id="input-world-domain" class="form-control" value="tribalwars.com.pt" style="width: 100%; margin-top: 4px;">
+          </div>
+          <div>
+            <label style="font-size: 0.8rem; color: var(--text-muted);">Proxy Dedicado (opcional):</label>
+            <input type="text" id="input-world-proxy" class="form-control" placeholder="http://user:pass@ip:port" style="width: 100%; margin-top: 4px; font-family: var(--font-mono); font-size: 0.78rem;">
+          </div>
+        </div>
+        <div class="modal-actions" style="display: flex; gap: 10px; justify-content: flex-end;">
+          <button class="btn btn-secondary" id="btn-cancel-add-world">Cancelar</button>
+          <button class="btn btn-primary" id="btn-confirm-add-world">Conectar Mundo</button>
         </div>
       </div>
     </div>

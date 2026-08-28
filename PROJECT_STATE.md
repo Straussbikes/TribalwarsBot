@@ -3,8 +3,8 @@
 > **Propósito deste ficheiro:** Manter o histórico de progresso, decisões arquiteturais, mapa de ficheiros e diretrizes de desenvolvimento para que qualquer sessão de IA recupere o contexto instantaneamente com consumo mínimo de tokens e sem perda de continuidade.
 
 **Última Atualização:** 2026-08-27  
-**Estado Geral:** Fases 1, 3 e 4 Concluídas com Sucesso | 75 Testes Unitários Automatizados (100% OK)  
-**Ambiente Validado:** Windows 11 / Python 3.14 / `curl_cffi` 0.16.2 / `fastapi` 0.141.1 / `uvicorn` 0.52.4 / `pywebview` 6.1 (Edge WebView2) / Git Branch: `main`
+**Estado Geral:** Fases 1, 3 e 4 Concluídas | Missões (2.10) e Mapa Tático (2.11) Concluídos com Formato Oficial (/map.php, TWMap.sectorPrefech e CSV) | Aba de Mapa Tático 2D Interativo no Cockpit | Matriz de 12 Unidades Militares e Auto-Claim de Missões no Frontend | 107 Testes Unitários Automatizados (100% OK)  
+**Ambiente Validado:** macOS 12+ / Windows 11 / Python 3.11-3.14 / `curl_cffi` 0.16.2 / `fastapi` 0.141.1 / `uvicorn` 0.52.4 / `pywebview` 6.2 (Edge WebView2 & Cocoa WebKit) / Git Branch: `main`
 
 ---
 
@@ -29,9 +29,9 @@
 | Fase | Descrição | Status | Detalhes |
 |---|---|---|---|
 | **Fase 1** | **Fundação do Core & Rede** | ✅ Concluída | Estrutura modular, `TribalAccount`, `TaskScheduler`, parsers, anti-bot e 10 testes unitários. |
-| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (Edifício Principal), `place` (Praça), `farm` (Micro-Farming) e `recruitment` (Quartel/Estábulo/Oficina) concluídos. Scavenging e Snob pendentes. |
-| **Fase 3** | **Camada Sidecar IPC, Multi-Aldeia & Perfis** | ✅ Concluída | FastAPI REST, WebSockets bidirecionais (logs, status, captcha), autenticação efêmera, suporte multi-aldeia (`switch_village`), `ProfileManager` com AES/XOR e diagnóstico de proxies. |
-| **Fase 4** | **Shell Desktop & Frontend Nativo** | ✅ Concluída | Cockpit Dark Glassmorphism, streaming WebSocket, login manual com interceção de tráfego, HUD timer com microssegundos e 75 testes unitários (100% OK). |
+| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main`, `place`, `farm`, `recruitment`, `quest` e `map` (Mapa Tático & Scanner de Bárbaras) concluídos. Scavenging, Snob, Mercado & Balanceamento, Defesa/Dodge e Arbitragem planeados. |
+| **Fase 3** | **Camada Sidecar IPC, Multi-Aldeia & Perfis** | ✅ Concluída | FastAPI REST, WebSockets, autenticação efêmera, proxies, perfis, `MultiWorldManager` (orquestrador concorrente paralelo) e `MultiVillageCoordinator` (gestão de múltiplas aldeias com categorização Ataque/Defesa/Balanceado e balanceamento de recursos). |
+| **Fase 4** | **Shell Desktop & Frontend Nativo** | 🔄 Em Expansão | Cockpit Dark Glassmorphism, HUD timer, réplica interativa do mapa 2D, seletor de mundos na barra superior e aba consolidada de multi-aldeia com recursos agregados. |
 | **Fase 5** | **Empacotamento & Release** | 📋 Pendente | Empacotamento executável com PyInstaller e instalador desktop. |
 
 ---
@@ -49,6 +49,12 @@ TribalwarsBot/
 ├── profiles.json                    # Perfis de contas encriptados (ProfileManager)
 │
 ├── engine/                          # Python Core Engine
+│   ├── platforms/                   # Camada de Abstração Multiplataforma (Windows / macOS / Linux)
+│   │   ├── __init__.py              # get_platform_adapter (fábrica com deteção e cache)
+│   │   ├── base.py                  # BasePlatformAdapter (contrato abstrato, anti-hijack de captchas)
+│   │   ├── windows.py               # WindowsPlatformAdapter (Edge WebView2, interceptação de rede)
+│   │   ├── darwin.py                # MacOSPlatformAdapter (WebKit/Cocoa, WKHTTPCookieStore, proteção de POST)
+│   │   └── linux.py                 # LinuxPlatformAdapter (WebKit2GTK)
 │   ├── core/                        # Núcleo da automação
 │   │   ├── __init__.py              # Exporta classes e exceções principais
 │   │   ├── account.py               # TribalAccount: AsyncSession, mobile headers, update_sid, parsing, CSRF, multi-aldeia
@@ -66,7 +72,9 @@ TribalwarsBot/
 │   │   ├── main_building.py         # MainBuildingManager: leitura, níveis virtuais, auto-build, cancelamento
 │   │   ├── place.py                 # PlaceManager: leitura de tropas, capacidade de saque, comandos em 2 etapas
 │   │   ├── farm.py                  # FarmManager: Assistente de Farm (A/B), filtros de segurança, fallback Praça
-│   │   └── recruitment.py           # RecruitmentManager: Quartel, Estábulo e Oficina em lotes graduais
+│   │   ├── recruitment.py           # RecruitmentManager: Quartel, Estábulo e Oficina em lotes graduais
+│   │   ├── quest.py                 # QuestManager: Missões, baú diário e inventário manual (Item 2.10)
+│   │   └── map.py                   # MapManager: Mapa Tático, Scanner de Bárbaras e Map-Driven Farming (Item 2.11)
 │   ├── api/                         # Camada de comunicação Sidecar IPC (Fase 3)
 │   │   ├── __init__.py              # Exporta EngineContext, create_app, start_sidecar_server
 │   │   ├── auth.py                  # Token efêmero criptográfico, verificação HTTP/WS e .sidecar_auth.json
@@ -76,10 +84,10 @@ TribalwarsBot/
 │   │   └── server.py                # create_app (CORS tauri://localhost) e start_sidecar_server (uvicorn)
 │   ├── config/                      # Configurações e carregamento de perfis
 │   │   ├── __init__.py
-│   │   ├── settings.py              # BotConfig, BuildingConfig, FarmConfig, RecruitmentConfig, AuthConfig, load_config
-│   ├── desktop_launcher.py          # Desktop Launcher: janela nativa Edge WebView2, interceção de cookies e monitor de login
+│   │   └── settings.py              # BotConfig, BuildingConfig, FarmConfig, RecruitmentConfig, AuthConfig, load_config
+│   ├── desktop_launcher.py          # Desktop Launcher: janela nativa, interceção adaptada ao SO e monitor de login
 │   └── main.py                      # Ponto de entrada CLI, Sidecar e Desktop (--gui, --api, --port)
-│
+│   │
 ├── frontend/                        # Frontend Cockpit Web & Desktop (HTML5 / Vanilla CSS / Vanilla JS)
 │   ├── index.html                   # Estrutura do dashboard, cards, HUD timer, modal de captcha e seletor multi-aldeia
 │   ├── css/
@@ -89,7 +97,7 @@ TribalwarsBot/
 │       ├── websocket.js             # Conexão WebSocket em tempo real e sintetizador sonoro de alertas
 │       └── app.js                   # Controlador da interface, cronómetro de alta resolução e streaming de logs
 │
-├── tests/                           # Suíte de testes unitários automatizados (75 testes, 100% OK)
+├── tests/                           # Suíte de testes unitários automatizados (81 testes, 100% OK)
 │   ├── __init__.py
 │   ├── test_core.py                 # 10 testes cobrindo models, timing, parsers, account e scheduler
 │   ├── test_main_building.py        # 12 testes cobrindo níveis, fila mobile/desktop, templates, auto-build e cancelamento
@@ -97,11 +105,14 @@ TribalwarsBot/
 │   ├── test_place.py                # 10 testes cobrindo tropas, capacidade de carga, comandos e envio em 2 etapas
 │   ├── test_farm.py                 # 6 testes cobrindo Assistente de Farm, modelos A/B, filtros e fallback
 │   ├── test_recruitment.py          # 5 testes cobrindo filas de treino, metas, lotes e reserva de população
-│   ├── test_api.py                  # 14 testes cobrindo auth, REST, WebSockets, auth-info e static files
+│   ├── test_api.py                  # 16 testes cobrindo auth, REST, WebSockets, quest e map endpoints e static files
 │   ├── test_auth.py                 # 7 testes cobrindo extração de cookies, persistência e auto-login
+│   ├── test_platform.py             # 6 testes cobrindo adaptadores Windows/macOS/Linux e anti-hijack
 │   ├── test_profiles.py             # 4 testes cobrindo persistência de perfis e ofuscação de senhas
 │   ├── test_multi_village.py        # 3 testes cobrindo extração multi-aldeia e alternância de contexto
-│   └── test_proxy.py                # 2 testes cobrindo diagnóstico ativo de proxies
+│   ├── test_proxy.py                # 2 testes cobrindo diagnóstico ativo de proxies
+│   ├── test_quest.py                # 13 testes cobrindo missões, segurança de armazém/pop, baú diário e inventário manual
+│   └── test_map.py                  # 8 testes cobrindo parsing de mapa, distância euclidiana, bárbaras/bónus, cache e farm
 ```
 
 ---

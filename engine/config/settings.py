@@ -40,6 +40,9 @@ class FarmConfig:
     interval_minutes: float = 10.0     # Frequência de envio de ondas em minutos
     custom_targets: List[Tuple[int, int]] = field(default_factory=list)
     custom_troops: Dict[str, int] = field(default_factory=lambda: {"spear": 5, "spy": 1})
+    use_map_scanner: bool = True       # Descoberta automática de bárbaras pelo mapa
+    map_scan_radius: float = 15.0      # Raio de varredura em campos
+    map_cache_ttl_hours: float = 12.0  # Validade da cache de aldeias bárbaras mapeadas
 
 
 @dataclass
@@ -63,6 +66,24 @@ class AuthConfig:
 
 
 @dataclass
+class QuestConfig:
+    """Configurações da rotina de Missões, Bónus Diário e Inventário (uso de inventário apenas manual)."""
+    enabled: bool = True
+    auto_claim_quests: bool = True
+    auto_daily_bonus: bool = True
+    safe_storage_margin: float = 0.95  # Não recolher se ultrapassar 95% da capacidade do armazém
+    interval_minutes: float = 30.0
+
+
+@dataclass
+class VillageConfig:
+    """Configurações de categorização e templates de uma aldeia específica."""
+    category: str = "balanced"  # 'attack', 'defense', 'balanced'
+    building_template: Optional[str] = None
+    recruitment_targets: Optional[Dict[str, int]] = None
+
+
+@dataclass
 class BotConfig:
     """Configuração global consolidada do bot."""
     world: str = "pt117"
@@ -73,22 +94,44 @@ class BotConfig:
     building: BuildingConfig = field(default_factory=BuildingConfig)
     farm: FarmConfig = field(default_factory=FarmConfig)
     recruitment: RecruitmentConfig = field(default_factory=RecruitmentConfig)
+    quest: QuestConfig = field(default_factory=QuestConfig)
+    villages: Dict[str, VillageConfig] = field(default_factory=dict)
 
-
-
-    def get_active_build_plan(self) -> List[Tuple[str, int]]:
+    def get_active_build_plan(self, village_id: Optional[Any] = None) -> List[Tuple[str, int]]:
         """
-        Retorna a lista de metas de construção com base no template configurado.
+        Retorna a lista de metas de construção com base no template configurado
+        ou na categoria e template atribuídos à aldeia específica.
         """
         tmpl = self.building.template.lower().strip()
+        if village_id and str(village_id) in self.villages:
+            v_cfg = self.villages[str(village_id)]
+            if v_cfg.building_template:
+                tmpl = v_cfg.building_template.lower().strip()
+            elif v_cfg.category == "attack":
+                tmpl = "military_rush"
+            elif v_cfg.category == "defense":
+                tmpl = "balanced"
+            elif v_cfg.category == "balanced":
+                tmpl = "rush_resources"
+
         if tmpl == "balanced":
             return BALANCED_TEMPLATE
         elif tmpl in ("military", "military_rush"):
             return MILITARY_RUSH_TEMPLATE
-        elif tmpl == "custom" and self.building.custom_plan:
-            return self.building.custom_plan
-        else:
-            return RUSH_RESOURCES_TEMPLATE
+        elif tmpl in ("custom", "custom_plan"):
+            return self.building.custom_plan if self.building.custom_plan else RUSH_RESOURCES_TEMPLATE
+        return RUSH_RESOURCES_TEMPLATE
+
+    def get_village_recruitment_targets(self, village_id: Optional[Any] = None) -> Dict[str, int]:
+        """Retorna as metas de recrutamento da aldeia conforme a sua categoria."""
+        from engine.core.models import VillageCategory, CATEGORY_RECRUITMENT_TARGETS
+        if village_id and str(village_id) in self.villages:
+            v_cfg = self.villages[str(village_id)]
+            if v_cfg.recruitment_targets:
+                return v_cfg.recruitment_targets
+            cat = VillageCategory(v_cfg.category) if v_cfg.category in ("attack", "defense", "balanced") else VillageCategory.BALANCED
+            return CATEGORY_RECRUITMENT_TARGETS.get(cat, self.recruitment.targets)
+        return self.recruitment.targets
 
     @property
     def effective_building_plan(self) -> List[Tuple[str, int]]:
@@ -171,6 +214,9 @@ def load_config(config_file: str = "config.json") -> BotConfig:
         interval_minutes=float(f_data.get("interval_minutes", 10.0)),
         custom_targets=custom_targets,
         custom_troops=custom_troops,
+        use_map_scanner=bool(f_data.get("use_map_scanner", True)),
+        map_scan_radius=float(f_data.get("map_scan_radius", 15.0)),
+        map_cache_ttl_hours=float(f_data.get("map_cache_ttl_hours", 12.0)),
     )
 
     # 4. Carrega configurações de Recrutamento Militar
@@ -207,6 +253,28 @@ def load_config(config_file: str = "config.json") -> BotConfig:
         keep_alive_interval_minutes=float(a_data.get("keep_alive_interval_minutes", 15.0)),
     )
 
+    # 6. Carrega configurações de Missões, Bónus Diário e Inventário
+    q_data = data.get("quest", {})
+    quest_config = QuestConfig(
+        enabled=bool(q_data.get("enabled", True)),
+        auto_claim_quests=bool(q_data.get("auto_claim_quests", True)),
+        auto_daily_bonus=bool(q_data.get("auto_daily_bonus", True)),
+        safe_storage_margin=float(q_data.get("safe_storage_margin", 0.95)),
+        interval_minutes=float(q_data.get("interval_minutes", 30.0)),
+    )
+
+    # 7. Carrega configurações e categorização de Aldeias
+    v_data = data.get("villages", {})
+    villages_config = {}
+    if isinstance(v_data, dict):
+        for vid, vinfo in v_data.items():
+            if isinstance(vinfo, dict):
+                villages_config[str(vid)] = VillageConfig(
+                    category=str(vinfo.get("category", "balanced")).lower().strip(),
+                    building_template=vinfo.get("building_template"),
+                    recruitment_targets=vinfo.get("recruitment_targets"),
+                )
+
     return BotConfig(
         world=world.strip().lower(),
         sid=sid.strip(),
@@ -216,6 +284,8 @@ def load_config(config_file: str = "config.json") -> BotConfig:
         building=building_config,
         farm=farm_config,
         recruitment=recruitment_config,
+        quest=quest_config,
+        villages=villages_config,
     )
 
 

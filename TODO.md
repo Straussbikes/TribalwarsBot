@@ -97,10 +97,13 @@
 - [ ] Cunha automática de moedas quando o armazém estiver prestes a encher.
 - [ ] Recrutamento automático de Nobres mediante configuração do utilizador.
 
-### 2.7. Mercado & Balanceamento (`screen=market`)
-- [ ] Leitura de mercadores disponíveis.
-- [ ] Balanceamento automático de recursos entre aldeias da mesma conta.
-- [ ] Criação de ofertas no mercado para troca de excedentes.
+### 2.7. Mercado & Balanceamento de Recursos (`screen=market`)
+- [ ] Leitura de mercadores disponíveis e mercadores em trânsito.
+- [ ] **Algoritmo de Balanceamento Automático de Recursos:**
+  - [ ] Cálculo de médias e desvios de recursos entre todas as aldeias da mesma conta.
+  - [ ] Identificação automática de aldeias doadoras (excedente ou risco de transbordamento de armazém) e aldeias recetoras (défice para construções ou recrutamento urgente).
+  - [ ] Despacho automatizado de mercadores para transferência equilibrada de recursos entre aldeias.
+- [ ] Criação de ofertas no mercado local para troca automática de recursos excedentes por recursos em carência.
 
 ### 2.8. Sistema de Defesa & Alarme de Ataques (Prioridade 0 / Alertas)
 - [ ] Monitorização em tempo real de ataques a chegar à aldeia (`incomings`).
@@ -108,18 +111,64 @@
 - [ ] **Rotina de Auto-Dodge (Desvio de Tropas e Recursos):** Envio para aldeia bárbara 30s antes do impacto e cancelamento pós-impacto.
 - [ ] Notificação sonora e visual de emergência.
 
-### 2.9. Algoritmo de Decisão Inteligente & Perfis de Aldeia (Evolução vs. Tropas)
-- [ ] **Classificação e Especialização de Aldeias:**
-  - [ ] Definição de perfil por aldeia: **Ofensiva** (Ataque / Nuke) vs. **Defensiva** (Defesa / Bunker).
-  - [ ] Templates e modelos de tropas personalizáveis por perfil (ex.: Full Ataque: Machado + CL + Aríete / Full Defesa: Lança + Espada + Pesada/Arco).
-- [ ] **Algoritmo de Priorização Dinâmica (Edifícios vs. Recrutamento):**
-  - [ ] Co-design e definição do algoritmo de arbitragem de recursos: quando gastar em edifícios vs. manter as filas de recrutamento 100% ativas.
-  - [ ] Regras de reserva de recursos (buffer de segurança) para nunca bloquear a evolução de edifícios vitais ou o treino contínuo.
-  - [ ] Adaptação às fases do jogo (Early Game: foco em minas/fazenda/farm vs. Mid/Late Game: foco em exército contínuo e nobres).
+### 2.9. Táticas de Combate & Sincronização ao Milissegundo (`screen=place`)
+- [ ] **Sincronização com o Relógio do Servidor:**
+  - [ ] Medição de latência de ida e volta (RTT) e cálculo contínuo de desvio (*server clock offset / drift*).
+  - [ ] Ajuste dinâmico do agendador para disparo no instante exato `t_alvo - latency/2`.
+- [ ] **Sniper de Nobres (Anti-Conquista):**
+  - [ ] Identificação de comboios de nobres inimigos a caminho com extração dos tempos de chegada ao milissegundo.
+  - [ ] Cálculo e disparo cirúrgico de apoios (da própria aldeia ou aldeias vizinhas) para intercalação entre o ataque de limpeza (*nuke*) e o primeiro nobre.
+  - [ ] Tolerância de milissegundos configurável (ex.: janela de 50ms a 150ms).
+- [ ] **Calculadora & Agendador de Backtime:**
+  - [ ] Leitura da hora de retorno de tropas inimigas a partir de relatórios ou comandos visíveis.
+  - [ ] Agendamento de contra-ataque de precisão para aterrar exatamente no mesmo segundo do regresso das tropas inimigas.
+- [ ] **Comboio de Nobres Automatizado (Noble Train):**
+  - [ ] Envio sequencial de 4 a 5 ataques com Nobre a partir da mesma aldeia com separação mínima de milissegundos permitida pelas regras do mundo (ex.: 50ms a 100ms).
+  - [ ] Automação de distribuição de escolta (tropas de ataque distribuídas entre o primeiro nobre e os seguintes).
+- [ ] **Fake Trains & Ataques Coordenados de Distração:**
+  - [ ] Geração de ondas de ataques falsos (*fakes*) com aríetes/catapultas para simular nobres e dispersar a defesa inimiga.
+- [ ] **Mecanismo de Cancelamento de Emergência (Fail-Safe):**
+  - [ ] Verificação do milissegundo real de saída do comando após confirmação pelo servidor.
+  - [ ] Cancelamento automático imediato do comando caso o desvio temporal exceda o limite de tolerância configurado.
 
-### 2.10. Sistema de Missões & Recompensas de Edifícios (`quests`)
-- [ ] Leitura de missões concluídas e recompensas pendentes de edifícios finalizados.
-- [ ] Resgate automático de recompensas com verificação de espaço livre no armazém para evitar desperdício de recursos.
+### 2.10. Missões, Recompensas Diárias & Inventário (`screen=quest` / `screen=inventory`)
+- [x] **Leitura e Extração de Missões do Sistema:**
+  - [x] Parsing do estado das missões ativas e concluídas a partir do `game_data` e ecrãs dedicados (`screen=quest`).
+  - [x] Identificação de tipos de recompensa (recursos, tropas imediatas, bónus temporários, bandeiras).
+- [x] **Auto-Claim Inteligente de Recompensas:**
+  - [x] Recolha automática de recompensas de missões concluídas com validação de capacidade do Armazém e Fazenda (para evitar desperdício de recursos ou população).
+  - [x] Notificação de missões prontas para entrega e recompensas obtidas.
+- [x] **Bónus Diário & Eventos:**
+  - [x] Recolha automática do baú de login diário (*Daily Bonus*) no reset do servidor.
+  - [x] Suporte a recolhas de recompensas gratuitas em eventos especiais e bónus sazonais.
+- [x] **Gestão e Utilização de Itens do Inventário:**
+  - [x] Parsing do inventário do jogador (`screen=inventory`).
+  - [x] Ativação de itens do inventário estritamente mediante acionamento manual do utilizador (segurança garantida).
+  - [x] Suíte de testes unitários dedicada (13 testes cobrindo missões, segurança de armazém/pop, baú diário e inventário manual).
+
+### 2.11. Mapa Tático & Scanner de Bárbaras (`screen=map`)
+- [x] **Extração e Leitura da Grelha do Mapa Oficial:**
+  - [x] Parsing dos setores e tiles do mapa via requisições oficiais (`screen=map` e endpoints de mapa AJAX).
+  - [x] Extração completa dos metadados de todas as aldeias visíveis: coordenadas `(X|Y)`, ID da aldeia, nome, jogador, tribo, pontos e bónus.
+  - [x] Deteção e categorização de aldeias bárbaras / abandonadas e aldeias bónus.
+- [x] **Scanner de Aldeias Bárbaras Próximas:**
+  - [x] Descoberta automática de todas as aldeias bárbaras num raio configurável a partir da aldeia ativa.
+  - [x] Cálculo de distância euclidiana exata e ordenação por proximidade.
+  - [x] Persistência e cache local das bárbaras detetadas para evitar pedidos redundantes ao servidor.
+- [x] **Farming Automatizado Baseado em Mapa (Map-Driven Farming):**
+  - [x] Recuperação da lista em cache de aldeias bárbaras próximas mapeadas.
+  - [x] Envio automático de micro-ataques de saque via Praça de Reunião (`screen=place`) com modelos configuráveis de tropas (ex.: 5 lanceiros ou 2 leves).
+  - [x] Fila cíclica de ataques: reenvio automatizado assim que as tropas regressam à aldeia de origem.
+  - [x] Filtros de segurança: exclusão automática de bárbaras com histórico recente de perdas ou muralha detetada.
+  - [x] Suíte de testes unitários dedicada (8 testes cobrindo parsing de mapa, distância euclidiana, bárbaras/bónus, cache em disco e onda de saques).
+
+### 2.12. Algoritmo de Arbitragem Económica & Orquestração (Construção vs. Recrutamento)
+- [ ] **Filosofia "Fila Sempre Ativa":** Manter as filas do Edifício Principal e dos edifícios militares (Quartel, Estábulo, Oficina) permanentemente em execução contínua sem tempo ocioso.
+- [ ] **Decisão Inteligente em Concorrência de Recursos:**
+  - [ ] Monitorização dos temporizadores e tempos restantes de conclusão de cada fila ativa.
+  - [ ] Priorização de emergência: se uma fila estiver prestes a esgotar o tempo restante, direcionar os recursos disponíveis prioritariamente para mantê-la ativa.
+  - [ ] Recrutamento dinâmico em micro-lotes: recrutar quantidades menores de tropas (ex.: 2 a 5 unidades) para manter os edifícios militares a trabalhar sem canibalizar o custo do próximo nível de edifício planeado.
+  - [ ] Projeção de fluxo de caixa em tempo real: cálculo preditivo baseado na taxa de produção horária da aldeia e recursos estimados a chegar de saques e transferências de mercadores.
 
 ---
 
@@ -144,6 +193,18 @@
   - [x] Persistência segura de perfis de conta com ofuscação/encriptação (`ProfileManager` em `profiles.json`).
   - [x] Suporte a proxy dedicado ou residencial por conta com diagnóstico ativo (`test_proxy_connection`).
   - [x] Suíte de testes unitários dedicada (9 testes cobrindo perfis, multi-aldeia e proxies).
+- [x] **Orquestrador Multi-Mundo Simultâneo:**
+  - [x] Execução concorrente de múltiplos mundos em paralelo (ex.: `pt117`, `pt118`, mundos internacionais) no mesmo processo.
+  - [x] Ciclo de vida desacoplado: instâncias dedicadas de `TribalAccount`, `TaskScheduler`, cookies de sessão e proxies independentes por mundo (`WorldInstance` e `MultiWorldManager`).
+  - [x] Gestão centralizada de instâncias na Sidecar API com multiplexação de eventos WebSocket e rotas contextualizadas (`/api/worlds`, `/api/worlds/register`, `/api/worlds/switch`).
+- [x] **Gestão Simultânea e Categorizada de Múltiplas Aldeias:**
+  - [x] Execução assíncrona coordenada das rotinas de farm, construção e recrutamento para todas as aldeias da conta sem bloqueio mútuo (`MultiVillageCoordinator`).
+  - [x] **Categorização de Aldeias (`⚔️ Ataque` / `🛡️ Defesa` / `⚖️ Balanceado`):**
+    - [x] Atribuição de perfil por aldeia persistido em `config.json` (`villages[id].category`).
+    - [x] Associação dinâmica de templates de construção específicos ao tipo de aldeia (Ataque foca `military_rush`; Defesa foca `balanced`/muralha; Balanceado foca `rush_resources`).
+    - [x] Associação dinâmica de templates de recrutamento específicos ao tipo de aldeia (Ataque = Machados/Leves/Aríetes; Defesa = Lanças/Espadachins/Pesadas; Misto = Balanceado).
+    - [x] Módulo analítico de balanceamento de recursos entre aldeias (identificação de doadoras vs recetoras e desvios médios).
+    - [x] Suíte de testes unitários dedicada (2 testes com 7 asserções cobrindo multi-mundo, isolamento de sessões, categorização e balanceamento).
 
 ---
 
@@ -168,6 +229,28 @@
 - [x] **Modal de Alerta & Resolução de Captchas Anti-Bot**
   - [x] Overlay modal de emergência ativado instantaneamente por evento WebSocket (`CAPTCHA_ALERT`) com aviso sonoro sintetizado.
   - [x] Botão para abertura direta da janela do jogo para resolução humana e botão para retoma automática do motor.
+- [ ] **Painel de Métricas & Estatísticas de Eficiência (Dashboard HUD)**
+  - [ ] Registo persistente de recursos farmados por hora e por dia (Madeira, Argila, Ferro e Total).
+  - [ ] Gráfico visual de rendimento de farm ao longo do tempo (últimas 24h e 7 dias).
+  - [ ] Contador acumulado de aldeias saqueadas e tropas recrutadas por unidade.
+  - [ ] Histórico de comandos enviados e taxa de sucesso/baixas.
+  - [ ] Endpoints dedicados na Sidecar API (`GET /api/stats/summary` e `GET /api/stats/history`) alimentando o frontend em tempo real.
+- [x] **Visualizador de Mapa Réplica Interativo do Tribos (Frontend Cockpit)**
+  - [x] Réplica visual fiel da grelha de mapa original do Tribal Wars (mesma disposição de coordenadas X|Y, réguas cartográficas, células discretas de terreno e ícones de aldeias).
+  - [x] Navegação fluida: arrastar com o rato (*pan*), zoom com a roda ou botões (+/-), HUD D-pad direcional (▲, ◄, 🎯, ►, ▼), centralizar na aldeia ativa e busca rápida por coordenadas.
+  - [x] Diferenciação visual clara: aldeias do jogador (ouro 🏰), aldeias de outros jogadores (ciano/azul 🛡️), aldeias bárbaras (slate 🛖) e aldeias bónus (púrpura ⭐).
+  - [x] Tooltip e card interativo ao clicar numa aldeia: nome, jogador, tribo, pontos, distância euclidiana e botões diretos "Atacar / Farmar", "Centralizar" e "Copiar Coords".
+  - [x] Camada de sobreposição tática (*overlay*): círculo de raio de farm configurado, linhas de setor (a cada 20 campos), fronteiras de continente (a cada 100 campos) e tag de continente (ex.: K45).
+- [x] **Visão Geral Multi-Aldeia & Tabela de Recursos em Tempo Real (Cockpit UI)**
+  - [x] Tabela/card consolidado listando todas as aldeias da conta ativa com coordenadas, recursos, armazém e população.
+  - [x] Exibição em tempo real de recursos agregados (Madeira, Argila, Ferro Total) e contagem de aldeias.
+  - [x] Análise integrada de balanceamento de recursos (aldeias doadoras de excedente vs aldeias recetoras de défice).
+- [x] **Gestor Visual de Categorias de Aldeia (`⚔️ Ataque` / `🛡️ Defesa` / `⚖️ Balanceado`)**
+  - [x] Controlo rápido na UI para alternar a categoria da aldeia com 1 clique (dropdown e badges estilizados).
+  - [x] Associação e visualização dos templates de recrutamento e construção vinculados a cada aldeia conforme a categoria.
+- [x] **Seletor e Navegação Multi-Mundo na Interface**
+  - [x] Barra superior com abas de mundos ativos (`.world-chip`) para alternar a visualização e gestão do Cockpit entre mundos em execução concorrente.
+  - [x] Modal para adicionar novos mundos concorrentes em tempo real com SID e proxy opcional.
 
 ---
 

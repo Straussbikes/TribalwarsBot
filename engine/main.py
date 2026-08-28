@@ -21,7 +21,7 @@ if sys.platform == "win32":
 import argparse
 from pathlib import Path
 
-from engine.actions import FarmManager, MainBuildingManager, RecruitmentManager
+from engine.actions import FarmManager, MainBuildingManager, QuestManager, RecruitmentManager
 from engine.api import EngineContext, remove_auth_file, start_sidecar_server
 from engine.config import load_config
 from engine.core.account import TribalAccount
@@ -166,6 +166,44 @@ async def main():
             )
         else:
             logger.info("Módulo de Recrutamento Militar desativado no config.json (enabled=false).")
+
+        # 3.4. Módulo de Missões & Bónus Diário (Item 2.10)
+        if config.quest.enabled:
+            quest_manager = QuestManager()
+
+            async def quest_cycle_task():
+                try:
+                    logger.debug(f"[{world}] A executar verificação de missões e bónus diário...")
+                    res = await quest_manager.run_cycle(
+                        account=account,
+                        village_id=account.current_village_id,
+                        config=config.quest,
+                    )
+                    if res.get("quests_claimed", 0) > 0:
+                        logger.info(f"[{world}] {res['quests_claimed']} missões resgatadas com sucesso.")
+                    if res.get("daily_bonus_opened"):
+                        logger.info(f"[{world}] Baú diário gratuito aberto com sucesso.")
+                except Exception as e:
+                    logger.warning(f"[{world}] Falha no ciclo de missões: {e}")
+                finally:
+                    scheduler.schedule_human_like(
+                        name="QuestCycle",
+                        priority=TaskPriority.QUEST,
+                        action=quest_cycle_task,
+                        base_delay=config.quest.interval_minutes * 60.0,
+                        jitter_sigma=30.0,
+                    )
+
+            scheduler.schedule(
+                name="QuestCycleInicial",
+                priority=TaskPriority.QUEST,
+                action=quest_cycle_task,
+                delay_seconds=15.0,
+            )
+            logger.info(
+                f"Módulo de Missões & Bónus Diário ativado "
+                f"(a cada ~{config.quest.interval_minutes:.0f}min, uso de inventário apenas manual)."
+            )
 
         # 3.4. Módulo de Manutenção de Sessão (Keep-Alive)
         if config.auth.keep_alive:

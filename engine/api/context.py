@@ -16,10 +16,13 @@ from engine.actions.farm import FarmManager
 from engine.actions.main_building import MainBuildingManager
 from engine.actions.map import MapData, MapManager
 from engine.actions.place import PlaceManager
+from engine.actions.quest import QuestManager
 from engine.actions.recruitment import RecruitmentManager
+from engine.actions.village_coordinator import MultiVillageCoordinator
 from engine.config.settings import BotConfig, load_config
 from engine.core.account import TribalAccount
 from engine.core.models import TaskPriority
+from engine.core.multi_world import MultiWorldManager, WorldInstance
 from engine.core.profile_manager import ProfileManager
 from engine.core.scheduler import TaskScheduler
 
@@ -45,13 +48,33 @@ class EngineContext:
         self.account = account
         self.config_path = config_path or Path("config.json")
 
-        # Gestores de ecrãs/ações da Fase 2
+        # Gestores de ecrãs/ações da Fase 2 e Fase 3
         self.main_building_manager = MainBuildingManager()
         self.place_manager = PlaceManager()
         self.farm_manager = FarmManager()
         self.recruitment_manager = RecruitmentManager()
+        self.quest_manager = QuestManager()
+        self._map_cache: Dict[str, Tuple[float, Any]] = {}
         self.map_manager = MapManager()
         self.profile_manager = ProfileManager()
+        self.village_coordinator = MultiVillageCoordinator(
+            main_building_manager=self.main_building_manager,
+            recruitment_manager=self.recruitment_manager,
+            farm_manager=self.farm_manager,
+        )
+
+        # Orquestrador Multi-Mundo Concorrente
+        self.world_manager = MultiWorldManager(on_captcha_alert=self.notify_captcha_detected)
+        if self.account:
+            self.world_manager.instances[self.config.world] = WorldInstance(
+                world=self.config.world,
+                account=self.account,
+                scheduler=self.scheduler,
+                config=self.config,
+                coordinator=self.village_coordinator,
+                is_active=True,
+            )
+            self.world_manager.active_world = self.config.world
 
         # Cache de mapa
         self._map_cache: Dict[str, Tuple[float, MapData]] = {}
@@ -234,6 +257,63 @@ class EngineContext:
         )
         return {"status": "scheduled", "task_id": task_id}
 
+    async def trigger_quest_cycle(self) -> Dict[str, Any]:
+        """Força a execução imediata de um ciclo de missões e bónus diário (sem uso de itens)."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+
+        target_village = self.account.current_village_id or "active"
+        task_id = f"ManualQuest-Village-{target_village}_{time.time_ns()}"
+
+        async def _run():
+            res = await self.quest_manager.run_cycle(
+                account=self.account,
+                village_id=self.account.current_village_id,
+                config=self.config.quest,
+            )
+            await self.broadcast("QUEST_CYCLE_COMPLETED", res)
+
+        self.scheduler.schedule(
+            name=f"ManualQuest-Village-{target_village}",
+            priority=TaskPriority.QUEST,
+            action=_run,
+            delay_seconds=0.1,
+            task_id=task_id,
+        )
+        return {"status": "scheduled", "task_id": task_id}
+
+    async def trigger_map_farm_wave(self, radius: Optional[float] = None) -> Dict[str, Any]:
+        """Dispara uma onda imediata de farming baseada no Scanner de Bárbaras do mapa."""
+        if not self.account or not self.account.sid:
+            return {"status": "error", "message": "Conta não conectada ou sem 'sid'."}
+
+        target_village = self.account.current_village_id or "active"
+        task_id = f"MapFarm-Village-{target_village}_{time.time_ns()}"
+
+        async def _run():
+            from engine.actions.place import UnitsCount
+            raw_troops = getattr(self.config.farm, "custom_troops", {"spear": 5, "spy": 1})
+            troops = UnitsCount.from_dict(raw_troops) if isinstance(raw_troops, dict) else UnitsCount(spear=5, spy=1)
+            scan_radius = radius or getattr(self.config.farm, "map_scan_radius", 15.0)
+
+            sent = await self.map_manager.run_map_farm_wave(
+                account=self.account,
+                farm_manager=self.farm_manager,
+                troops=troops,
+                radius=scan_radius,
+                village_id=self.account.current_village_id,
+            )
+            await self.broadcast("MAP_FARM_COMPLETED", {"sent": sent, "radius": scan_radius})
+
+        self.scheduler.schedule(
+            name=f"MapFarm-Village-{target_village}",
+            priority=TaskPriority.FARM,
+            action=_run,
+            delay_seconds=0.1,
+            task_id=task_id,
+        )
+        return {"status": "scheduled", "task_id": task_id}
+
     async def trigger_renew_session(self) -> Dict[str, Any]:
         """Dispara a renovação do cookie 'sid' via WebView2 nativo."""
         if getattr(self, "on_renew_session", None):
@@ -298,24 +378,29 @@ class EngineContext:
         """Retorna uma visão completa do estado atual para o frontend."""
         village_data = None
         player_data = None
+        resources_dict = None
+        troops_dict = {}
 
         if self.account:
             curr_v = self.account.current_village
             if curr_v:
+                resources_dict = {
+                    "wood": curr_v.resources.wood,
+                    "stone": curr_v.resources.stone,
+                    "iron": curr_v.resources.iron,
+                    "storage_max": curr_v.resources.storage_max,
+                    "pop": curr_v.resources.pop,
+                    "pop_max": curr_v.resources.pop_max,
+                    "free_pop": curr_v.resources.free_pop,
+                }
+                troops_dict = getattr(curr_v, "troops", {}) or {}
                 village_data = {
                     "id": curr_v.id,
                     "name": curr_v.name,
                     "coordinates": curr_v.coordinates,
                     "points": curr_v.points,
-                    "resources": {
-                        "wood": curr_v.resources.wood,
-                        "stone": curr_v.resources.stone,
-                        "iron": curr_v.resources.iron,
-                        "storage_max": curr_v.resources.storage_max,
-                        "pop": curr_v.resources.pop,
-                        "pop_max": curr_v.resources.pop_max,
-                        "free_pop": curr_v.resources.free_pop,
-                    },
+                    "resources": resources_dict,
+                    "troops": troops_dict,
                 }
 
             if self.account.player:
@@ -327,6 +412,20 @@ class EngineContext:
                     "villages_count": p.villages_count,
                 }
 
+        # Lista detalhada de aldeias com categoria
+        villages_list = []
+        if self.account:
+            for v in self.account.villages.values():
+                v_dict = v.to_dict()
+                cat = self.village_coordinator.get_village_category(self.account, self.config, v.id)
+                v_dict["category"] = cat.value
+                villages_list.append(v_dict)
+
+        # Balanceamento de recursos entre aldeias
+        balance_summary = None
+        if self.account and len(self.account.villages) > 0:
+            balance_summary = self.village_coordinator.calculate_resource_balance(self.account)
+
         return {
             "engine": {
                 "uptime_seconds": round(self.uptime_seconds, 1),
@@ -334,6 +433,8 @@ class EngineContext:
                 "is_paused": self.scheduler.is_paused,
                 "queue_size": self.scheduler.queue_size,
             },
+            "active_world": self.world_manager.active_world or self.config.world,
+            "worlds": self.world_manager.list_worlds(),
             "account": {
                 "world": self.config.world,
                 "domain": self.config.domain,
@@ -341,9 +442,11 @@ class EngineContext:
                 "proxy": self.config.proxy,
                 "player": player_data,
                 "village": village_data,
-                "villages": [v.to_dict() for v in self.account.villages.values()] if self.account else [],
+                "villages": villages_list,
             },
-
+            "resource_balance": balance_summary,
+            "resources": resources_dict,
+            "troops": troops_dict,
             "modules": {
                 "building": {
                     "enabled": True,
@@ -362,10 +465,57 @@ class EngineContext:
                     "interval_minutes": self.config.recruitment.interval_minutes,
                     "min_free_pop": self.config.recruitment.min_free_pop,
                     "targets": self.config.recruitment.targets,
+                    "batch_sizes": self.config.recruitment.batch_sizes,
+                },
+                "quest": {
+                    "enabled": self.config.quest.enabled,
+                    "auto_claim_quests": self.config.quest.auto_claim_quests,
+                    "auto_daily_bonus": self.config.quest.auto_daily_bonus,
+                    "safe_storage_margin": self.config.quest.safe_storage_margin,
+                    "interval_minutes": self.config.quest.interval_minutes,
                 },
             },
             "captcha_alert": self.last_captcha_alert,
         }
+
+    async def refresh_village_data(self) -> Dict[str, Any]:
+        """Atualiza ativamente recursos, tropas e estado da aldeia ativa."""
+        if not self.account or not self.account.sid:
+            return {"status": "error", "message": "Conta não conectada ou sem 'sid'."}
+        try:
+            await self.account.refresh_village_details()
+            status_dict = self.get_status_dict()
+            await self.broadcast("VILLAGE_UPDATED", status_dict)
+            return {"status": "success", "data": status_dict}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    async def claim_all_quests_safe(self) -> Dict[str, Any]:
+        """Resgata todas as missões concluídas com validação de armazém/população."""
+        if not self.account or not self.account.sid:
+            return {"status": "error", "message": "Conta não conectada ou sem 'sid'."}
+        try:
+            res = await self.quest_manager.claim_all_valid_quests(
+                account=self.account,
+                safe_mode=True,
+                safe_margin=self.config.quest.safe_storage_margin,
+            )
+            # Atualiza recursos após os resgates
+            try:
+                await self.account.refresh_state()
+            except Exception:
+                pass
+            status_dict = self.get_status_dict()
+            await self.broadcast("QUESTS_CLAIMED", res)
+            await self.broadcast("VILLAGE_UPDATED", status_dict)
+            return {
+                "status": "success",
+                "claimed_count": res.get("claimed", 0),
+                "skipped_count": res.get("skipped", 0),
+                "data": status_dict,
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
     def get_config_dict(self) -> Dict[str, Any]:
         """Retorna as configurações em formato serializável."""
@@ -381,7 +531,6 @@ class EngineContext:
                 "keep_alive_interval_minutes": self.config.auth.keep_alive_interval_minutes,
             },
             "building": {
-
                 "template": self.config.building.template,
                 "max_queue": self.config.building.max_queue,
                 "interval_seconds": self.config.building.interval_seconds,
@@ -404,6 +553,13 @@ class EngineContext:
                 "min_free_pop": self.config.recruitment.min_free_pop,
                 "targets": self.config.recruitment.targets,
                 "batch_sizes": self.config.recruitment.batch_sizes,
+            },
+            "quest": {
+                "enabled": self.config.quest.enabled,
+                "auto_claim_quests": self.config.quest.auto_claim_quests,
+                "auto_daily_bonus": self.config.quest.auto_daily_bonus,
+                "safe_storage_margin": self.config.quest.safe_storage_margin,
+                "interval_minutes": self.config.quest.interval_minutes,
             },
         }
 
@@ -464,6 +620,126 @@ class EngineContext:
         """Testa conectividade de um proxy residencial/dedicado."""
         from engine.core.profile_manager import test_proxy_connection
         return await test_proxy_connection(proxy_url)
+
+# --- Gestão Multi-Mundo Concorrente ---
+
+    def list_worlds(self) -> List[Dict[str, Any]]:
+        """Lista todos os mundos geridos e os respetivos estados operacionais."""
+        return self.world_manager.list_worlds()
+
+    async def register_world(
+        self,
+        world: str,
+        sid: str,
+        domain: str = "tribalwars.com.pt",
+        proxy: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Regista e inicializa um novo mundo em execução concorrente paralela."""
+        inst = await self.world_manager.register_world(
+            world=world,
+            sid=sid,
+            domain=domain,
+            proxy=proxy,
+            config=self.config,
+            auto_start=True,
+        )
+        self.broadcast_sync("WORLDS_UPDATED", {"worlds": self.world_manager.list_worlds()})
+        return {"status": "success", "message": f"Mundo '{world}' registado e ativo.", "world": inst.to_dict()}
+
+    async def switch_world(self, world: str) -> Dict[str, Any]:
+        """Alterna o foco do dashboard para outro mundo em execução, auto-registando se necessário."""
+        world_key = world.strip().lower()
+        inst = self.world_manager.get_instance(world_key)
+        if not inst:
+            if self.config.sid:
+                logger.info(f"A inicializar automaticamente nova instância para o mundo '{world_key}'...")
+                inst = await self.world_manager.register_world(
+                    world=world_key,
+                    sid=self.config.sid,
+                    domain=self.config.domain,
+                    proxy=self.config.proxy,
+                    config=None,
+                    auto_start=True,
+                )
+                self.broadcast_sync("WORLDS_UPDATED", {"worlds": self.world_manager.list_worlds()})
+            else:
+                return {"status": "error", "message": f"Mundo '{world}' não encontrado e nenhum 'sid' configurado."}
+
+        self.world_manager.set_active_world(world_key)
+        self.account = inst.account
+        self.scheduler = inst.scheduler
+        self.config = inst.config
+
+        # Atualiza e persiste o mundo ativo no config.json
+        self.update_config_and_save({"world": world_key})
+
+        status = self.get_status_dict()
+        self.broadcast_sync("WORLD_SWITCHED", {"active_world": world_key, "status": status})
+        return {"status": "success", "message": f"Dashboard focado no mundo '{world_key}'.", "world": inst.to_dict()}
+
+    # --- Gestão Coordenada Multi-Aldeia & Categorização ---
+
+    def set_village_category(self, village_id: int, category: str, world: Optional[str] = None) -> Dict[str, Any]:
+        """Atribui categoria (attack, defense, balanced) a uma aldeia e persiste no config.json."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        cfg = inst.config if inst else self.config
+        if not acc:
+            return {"status": "error", "message": "Conta não inicializada."}
+
+        success = self.village_coordinator.set_village_category(acc, cfg, village_id, category)
+        if success:
+            new_v_data = {
+                "villages": {
+                    str(village_id): {
+                        "category": category.lower().strip(),
+                    }
+                }
+            }
+            self.update_config_and_save(new_v_data)
+            self.broadcast_sync("VILLAGE_CATEGORY_UPDATED", {
+                "village_id": village_id,
+                "category": category,
+            })
+            return {"status": "success", "message": f"Aldeia {village_id} categorizada como '{category}'."}
+        return {"status": "error", "message": "Falha ao definir categoria."}
+
+    async def sync_and_get_all_villages(self, world: Optional[str] = None) -> Dict[str, Any]:
+        """Retorna visão detalhada de todas as aldeias da conta com categorias e recursos."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        cfg = inst.config if inst else self.config
+        if not acc:
+            return {"status": "error", "message": "Conta não inicializada."}
+
+        villages_data = []
+        for v in acc.villages.values():
+            cat = self.village_coordinator.get_village_category(acc, cfg, v.id)
+            v_dict = v.to_dict()
+            v_dict["category"] = cat.value
+            villages_data.append(v_dict)
+
+        balance = self.village_coordinator.calculate_resource_balance(acc)
+        return {
+            "world": acc.world,
+            "count": len(villages_data),
+            "villages": villages_data,
+            "balance": balance,
+        }
+
+    async def trigger_all_villages_cycle(self, world: Optional[str] = None) -> Dict[str, Any]:
+        """Dispara ciclo coordenado em todas as aldeias da conta (Construção + Recrutamento)."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        cfg = inst.config if inst else self.config
+        if not acc:
+            return {"status": "error", "message": "Conta não inicializada."}
+
+        res = await self.village_coordinator.run_coordinated_cycle(acc, cfg)
+        self.broadcast_sync("ALL_VILLAGES_CYCLE_DONE", res)
+        return {"status": "success", "results": res}
+
+    # --- Visualizador de Mapa e Comandos Rápidos ---
 
     async def get_map_data(
         self,

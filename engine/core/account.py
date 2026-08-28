@@ -29,6 +29,7 @@ from engine.utils.parsers import (
     extract_village_and_player,
     is_bot_protection_present,
     is_session_expired,
+    parse_available_units,
 )
 
 from engine.utils.timing import get_click_jitter
@@ -267,6 +268,15 @@ class TribalAccount:
             if self.current_village_id in self.villages:
                 self.villages[self.current_village_id].resources = res
 
+        # 4. Atualização das Tropas disponíveis na aldeia ativa
+        if self.current_village_id and self.current_village_id in self.villages:
+            try:
+                units = parse_available_units(html)
+                if any(units.values()):
+                    self.villages[self.current_village_id].troops = units
+            except Exception:
+                pass
+
 
     async def get_screen(
         self,
@@ -402,4 +412,14 @@ class TribalAccount:
         if village_id in self.villages:
             return self.villages[village_id]
         return VillageData(id=village_id, name=f"Aldeia {village_id}")
+
+    async def refresh_village_details(self, village_id: Optional[int] = None) -> VillageData:
+        """
+        Navega até à Praça de Reunião para ler os recursos e tropas disponíveis mais recentes.
+        """
+        v_id = village_id or self.current_village_id
+        await self.get_screen("place", village_id=v_id)
+        if v_id and v_id in self.villages:
+            return self.villages[v_id]
+        return self.current_village or VillageData(id=v_id or 0)
 
