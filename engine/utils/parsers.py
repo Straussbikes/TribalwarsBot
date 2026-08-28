@@ -31,8 +31,8 @@ RESOURCE_SPAN_REGEX = {
     "stone": re.compile(r'<span[^>]*id=["\']stone["\'][^>]*>([\d\.]+)</span>', re.IGNORECASE),
     "iron": re.compile(r'<span[^>]*id=["\']iron["\'][^>]*>([\d\.]+)</span>', re.IGNORECASE),
     "storage": re.compile(r'<span[^>]*id=["\']storage["\'][^>]*>([\d\.]+)</span>', re.IGNORECASE),
-    "pop_current": re.compile(r'<span[^>]*id=["\']pop_current_label["\'][^>]*>([\d\.]+)</span>', re.IGNORECASE),
-    "pop_max": re.compile(r'<span[^>]*id=["\']pop_max_label["\'][^>]*>([\d\.]+)</span>', re.IGNORECASE),
+    "pop_current": re.compile(r'<span[^>]*id=["\']pop_current(?:_label)?["\'][^>]*>([\d\.]+)</span>', re.IGNORECASE),
+    "pop_max": re.compile(r'<span[^>]*id=["\']pop_max(?:_label)?["\'][^>]*>([\d\.]+)</span>', re.IGNORECASE),
 }
 
 # Padrões indicadores de tela de verificação anti-bot (captcha)
@@ -359,11 +359,34 @@ def parse_building_levels(html: str, game_data: Optional[Dict[str, Any]] = None)
     return levels
 
 
+def parse_timer_to_seconds(timer_str: str) -> Optional[int]:
+    """
+    Converte strings de timer do Tribal Wars para segundos totais.
+    Exemplos: '0:02:45' -> 165, '2:45' -> 165, '0:00:15' -> 15, '1:10:05' -> 4205.
+    """
+    if not timer_str:
+        return None
+    cleaned = re.sub(r'[^\d:]', '', str(timer_str).strip())
+    parts = cleaned.split(":")
+    try:
+        if len(parts) == 3:
+            h, m, s = int(parts[0]), int(parts[1]), int(parts[2])
+            return h * 3600 + m * 60 + s
+        elif len(parts) == 2:
+            m, s = int(parts[0]), int(parts[1])
+            return m * 60 + s
+        elif len(parts) == 1 and parts[0]:
+            return int(parts[0])
+    except ValueError:
+        pass
+    return None
+
+
 def parse_build_queue(html: str) -> List[Dict[str, Any]]:
     """
     Extrai as ordens ativas na fila de construção do Edifício Principal.
     Suporta tanto a versão Desktop (#buildqueue table) como a versão Mobile (#buildqueue_wrap div.queueItem).
-    Retorna uma lista de dicionários com: order_id, building_raw, target_level, timer_str, cancel_url.
+    Retorna uma lista de dicionários com: order_id, building_raw, target_level, timer_str, timer_seconds, cancel_url, instant_build_url.
     """
     queue: List[Dict[str, Any]] = []
     if not html:
@@ -401,13 +424,26 @@ def parse_build_queue(html: str) -> List[Dict[str, Any]]:
 
             timer_match = re.search(r'<span[^>]*class=["\']timer["\'][^>]*>([\d:]+)</span>', content, re.IGNORECASE)
             timer_str = timer_match.group(1) if timer_match else None
+            timer_sec = parse_timer_to_seconds(timer_str) if timer_str else None
+
+            # Deteção do botão de conclusão instantânea/grátis (< 3 min)
+            instant_m = re.search(
+                r'<a[^>]*href=["\']([^"\']*[?&]action=(?:instant_build|instant_finish|complete_order|free_finish)[^"\']*)["\']|<button[^>]*class=["\'][^"\']*\b(?:btn-instant-free|btn-instant)\b[^"\']*["\']',
+                content,
+                re.IGNORECASE,
+            )
+            instant_build_url = instant_m.group(1) if (instant_m and instant_m.group(1)) else None
+            if not instant_build_url and timer_sec is not None and timer_sec <= 180:
+                instant_build_url = f"/game.php?screen=main&action=instant_build&id={order_id}"
 
             queue.append({
                 "order_id": order_id,
                 "building_raw": building_raw,
                 "target_level": target_level,
                 "timer_str": timer_str,
+                "timer_seconds": timer_sec,
                 "cancel_url": f"/game.php?screen=main&action=cancel_order&id={order_id}",
+                "instant_build_url": instant_build_url,
             })
         return queue
 
@@ -435,7 +471,9 @@ def parse_build_queue(html: str) -> List[Dict[str, Any]]:
 
         # Obter o bloco precedente que contém o nome do edifício e nível
         start_pos = max(0, link_match.start() - 600)
+        end_pos = min(len(search_scope), link_match.end() + 300)
         preceding_text = search_scope[start_pos:link_match.start()]
+        surrounding_text = search_scope[start_pos:end_pos]
 
         name_match = re.search(
             r'([A-Za-zÀ-ÿ\s]+?)\s*(?:\(Nível\s+(\d+)\)|\(Level\s+(\d+)\)|Nível\s+(\d+))',
@@ -458,13 +496,26 @@ def parse_build_queue(html: str) -> List[Dict[str, Any]]:
         # Timer
         timer_match = re.search(r'<span[^>]*class=["\']timer["\'][^>]*>([\d:]+)</span>', preceding_text, re.IGNORECASE)
         timer_str = timer_match.group(1) if timer_match else ""
+        timer_sec = parse_timer_to_seconds(timer_str) if timer_str else None
+
+        # Deteção do link/botão de conclusão instantânea/grátis
+        instant_m = re.search(
+            r'<a[^>]*href=["\']([^"\']*[?&]action=(?:instant_build|instant_finish|complete_order|free_finish)[^"\']*)["\']',
+            surrounding_text,
+            re.IGNORECASE,
+        )
+        instant_build_url = instant_m.group(1) if instant_m else None
+        if not instant_build_url and timer_sec is not None and timer_sec <= 180 and order_id:
+            instant_build_url = f"/game.php?screen=main&action=instant_build&id={order_id}"
 
         queue.append({
             "order_id": order_id,
             "building_raw": b_name_raw,
             "target_level": target_lvl,
             "timer_str": timer_str,
+            "timer_seconds": timer_sec,
             "cancel_url": full_cancel_url,
+            "instant_build_url": instant_build_url,
         })
 
     return queue
@@ -481,10 +532,11 @@ def parse_building_upgrades(html: str) -> Dict[str, Dict[str, Any]]:
         return upgrades
 
     # 1. Prioridade: Extração do JSON nativo 'BuildingMain.buildings = {...};'
-    m_bm = re.search(r'BuildingMain\.buildings\s*=\s*(\{.+?\});', html, re.DOTALL)
+    m_bm = re.search(r'BuildingMain\.buildings\s*=\s*(\{)', html)
     if m_bm:
         try:
-            bm_data = json.loads(m_bm.group(1))
+            decoder = json.JSONDecoder()
+            bm_data, _ = decoder.raw_decode(html, idx=m_bm.start(1))
             if isinstance(bm_data, dict):
                 for b_name, b_info in bm_data.items():
                     if isinstance(b_info, dict):
@@ -497,6 +549,24 @@ def parse_building_upgrades(html: str) -> Dict[str, Dict[str, Any]]:
                         pop = int(b_info.get("pop", 0))
                         can_build = bool(b_info.get("can_build", False))
                         error_reason = b_info.get("error")
+                        build_url = (
+                            b_info.get("build_url")
+                            or b_info.get("url")
+                            or b_info.get("build_link")
+                            or b_info.get("upgrade_url")
+                            or b_info.get("link")
+                        )
+
+                        # Se não estiver no JSON, tenta localizar link de construção específico no HTML
+                        if not build_url:
+                            b_link_m = re.search(
+                                rf'<a[^>]*href=["\']([^"\']*[?&]id={b_canon}[^"\']*[?&]action=(?:build|upgrade_building)[^"\']*)["\']|'
+                                rf'<a[^>]*href=["\']([^"\']*[?&]action=(?:build|upgrade_building)[^"\']*[?&]id={b_canon}[^"\']*)["\']',
+                                html,
+                                re.IGNORECASE,
+                            )
+                            if b_link_m:
+                                build_url = b_link_m.group(1) or b_link_m.group(2)
 
                         upgrades[b_canon] = {
                             "building": b_canon,
@@ -508,12 +578,12 @@ def parse_building_upgrades(html: str) -> Dict[str, Dict[str, Any]]:
                             "pop": pop,
                             "can_build": can_build,
                             "error_reason": error_reason,
-                            "build_url": None,
+                            "build_url": build_url,
                         }
                 if upgrades:
                     return upgrades
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"raw_decode BuildingMain.buildings falhou: {e}")
 
     # 2. Fallback via HTML regex
     normalized_html = html.replace("&amp;", "&")
@@ -1044,17 +1114,17 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
     # 1. Extração de unidades desbloqueadas e quantidade máxima recrutável
     # Padrão 1: <a id="spear_0_a" ...>(15)</a> ou >15<
     # Padrão 2: <input id="spear_0" name="spear" ... data-max="15" ... />
+    # Padrão 3: javascript:insertUnit(...) ou set_max(...)
     for unit_key in ALL_UNITS:
         # Verifica se o input da unidade existe (indica que está desbloqueada no edifício)
         input_match = re.search(
-            rf'<input[^>]*name=["\']{unit_key}["\'][^>]*>',
+            rf'<input[^>]*(?:name=["\'](?:units\[)?{unit_key}(?:\])?["\']|id=["\']{unit_key}(?:_\d+)?["\'])[^>]*>',
             normalized,
             re.IGNORECASE,
         )
         if not input_match:
             continue
 
-        # Procura link ou atributo com o máximo recrutável
         max_val = 0
         # a) <a id="spear_0_a" ...>(15)</a>
         link_max = re.search(
@@ -1067,7 +1137,8 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
                 max_val = int(link_max.group(1))
             except ValueError:
                 pass
-        else:
+        
+        if max_val <= 0:
             # b) data-max="15"
             data_max = re.search(
                 rf'name=["\']{unit_key}["\'][^>]*data-max=["\'](\d+)["\']|data-max=["\'](\d+)["\'][^>]*name=["\']{unit_key}["\']',
@@ -1075,11 +1146,30 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
                 re.IGNORECASE,
             )
             if data_max:
-                val = next(g for g in data_max.groups() if g is not None)
+                val = next((g for g in data_max.groups() if g is not None), None)
+                if val:
+                    try:
+                        max_val = int(val)
+                    except ValueError:
+                        pass
+
+        if max_val <= 0:
+            # c) javascript:insertUnit(...) ou set_max(...)
+            js_max = re.search(
+                rf'(?:insertUnit|set_max|selectAllUnits)\([^)]*?["\']?{unit_key}["\']?[^)]*?,\s*(\d+)\)',
+                normalized,
+                re.IGNORECASE,
+            )
+            if js_max:
                 try:
-                    max_val = int(val)
+                    max_val = int(js_max.group(1))
                 except ValueError:
                     pass
+
+        # Se o input de recrutamento existe na página mas o número exato do link não foi capturado,
+        # define fallback de 999 para permitir o envio do lote pretendido (o servidor valida os recursos)
+        if max_val <= 0:
+            max_val = 999
 
         result["available_units"][unit_key] = max_val
 
@@ -1137,18 +1227,18 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
 
 def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Extrai o estado das missões a partir do HTML de 'screen=quest' e/ou do 'game_data.quest'.
-    Identifica missões ativas, concluídas (prontas para resgate), recompensas em recursos,
-    tropas/população, itens e URLs de claim com CSRF.
+    Extrai o estado das missões a partir do HTML de 'screen=quest', 'screen=main' e/ou do 'game_data.quest'.
+    Identifica missões ativas, recompensas de níveis de edifícios concluídos, recompensas em recursos,
+    tropas/população e URLs de claim nativas (action=reward).
     """
-    normalized = html.replace("&amp;", "&")
+    normalized = html.replace("&amp;", "&") if html else ""
     normalized = re.sub(r'<!--.*?-->', '', normalized, flags=re.DOTALL)
     quests: List[Dict[str, Any]] = []
     seen_ids = set()
 
     # 1. Extração via game_data se disponível
     if game_data and isinstance(game_data, dict):
-        q_data = game_data.get("quest") or game_data.get("quests")
+        q_data = game_data.get("quest") or game_data.get("quests") or game_data.get("Quests")
         if isinstance(q_data, dict):
             raw_list = q_data.get("quests") or q_data.get("list") or q_data
             if isinstance(raw_list, dict):
@@ -1161,13 +1251,23 @@ def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) ->
                             continue
                         title = str(item.get("title") or item.get("name") or f"Missão #{q_id}").strip()
                         desc = str(item.get("description") or "").strip()
-                        finishable = bool(item.get("finishable") or item.get("completed") or item.get("finished"))
+                        state_str = str(item.get("state", "")).lower()
+                        finishable = bool(
+                            item.get("finishable")
+                            or item.get("completed")
+                            or item.get("finished")
+                            or item.get("can_be_completed")
+                            or item.get("goals_completed") is True
+                            or state_str in ("finished", "completed", "claimable")
+                        )
                         claim_url = item.get("claim_url") or item.get("url")
                         rewards = item.get("rewards") or item.get("reward") or {}
 
-                        wood = int(rewards.get("wood", 0) or 0)
-                        stone = int(rewards.get("stone", 0) or 0)
-                        iron = int(rewards.get("iron", 0) or 0)
+                        # Suporte a formatos planos e aninhados de recursos
+                        res_obj = rewards.get("resources") if isinstance(rewards.get("resources"), dict) else rewards
+                        wood = int(res_obj.get("wood", 0) or 0)
+                        stone = int(res_obj.get("stone", 0) or 0)
+                        iron = int(res_obj.get("iron", 0) or 0)
                         pop = int(rewards.get("pop", 0) or 0)
 
                         seen_ids.add(q_id)
@@ -1192,7 +1292,7 @@ def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) ->
     raw_starts = [
         m
         for m in re.finditer(
-            r'<(?:div|tr|li)[^>]*?(?:class=["\'][^"\']*\b(?:quest_item|quest-item|quest_container)\b[^"\']*["\']|data-quest-id=["\']\d+["\'])',
+            r'<(?:div|tr|li)[^>]*?(?:class=["\'][^"\']*\b(?:quest_item|quest-item|quest_container|quest-container|quest_reward)\b[^"\']*["\']|data-quest-id=["\']\w+["\'])',
             normalized,
             re.IGNORECASE,
         )
@@ -1210,7 +1310,7 @@ def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) ->
     block_starts = [m.start() for m in raw_starts]
 
     claim_btn_regex = re.compile(
-        r'<a[^>]*href=["\']([^"\']*[?&]action=(?:claim_reward|claim|reward)[^"\']*)["\'][^>]*>(.*?)</a>',
+        r'<a[^>]*href=["\']([^"\']*[?&]action=(?:claim_reward|claim|reward|claim_quest)[^"\']*)["\'][^>]*>(.*?)</a>',
         re.DOTALL | re.IGNORECASE,
     )
 
@@ -1220,14 +1320,14 @@ def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) ->
 
         # Extração de ID
         q_id = None
-        id_m = re.search(r'(?:data-quest-id|data-id)=["\'](\d+)["\']', content, re.IGNORECASE)
+        id_m = re.search(r'(?:data-quest-id|data-id)=["\'](\w+)["\']', content, re.IGNORECASE)
         if id_m:
             q_id = id_m.group(1)
 
         claim_match = claim_btn_regex.search(content)
         claim_url = claim_match.group(1) if claim_match else None
         if not q_id and claim_url:
-            url_id_m = re.search(r'[?&](?:quest_id|quest|id)=(\d+)', claim_url, re.IGNORECASE)
+            url_id_m = re.search(r'[?&](?:quest_id|quest|id)=(\w+)', claim_url, re.IGNORECASE)
             if url_id_m:
                 q_id = url_id_m.group(1)
 
@@ -1236,6 +1336,13 @@ def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) ->
             q_id = str(len(quests) + 1)
 
         if q_id in seen_ids:
+            # Se a missão já existe, mas encontramos um claim_url específico no HTML, atualizamos
+            for existing_q in quests:
+                if existing_q["id"] == q_id:
+                    if claim_url and not existing_q["claim_url"]:
+                        existing_q["claim_url"] = claim_url
+                    if claim_url:
+                        existing_q["finishable"] = True
             continue
 
         title_m = re.search(
@@ -1246,10 +1353,10 @@ def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) ->
         title = title_m.group(1).strip() if title_m else f"Missão #{q_id}"
         title = re.sub(r'<[^>]+>', '', title).strip()
 
-        wood_m = re.search(r'(?:icon header wood|wood)[^>]*>.*?([\d\.]+)', content, re.IGNORECASE)
-        stone_m = re.search(r'(?:icon header stone|stone)[^>]*>.*?([\d\.]+)', content, re.IGNORECASE)
-        iron_m = re.search(r'(?:icon header iron|iron)[^>]*>.*?([\d\.]+)', content, re.IGNORECASE)
-        pop_m = re.search(r'(?:icon header pop|pop|população)[^>]*>.*?([\d\.]+)', content, re.IGNORECASE)
+        wood_m = re.search(r'(?:icon header wood|cost_wood|wood)[^>]*>.*?([\d\.]+)', content, re.IGNORECASE)
+        stone_m = re.search(r'(?:icon header stone|cost_stone|stone)[^>]*>.*?([\d\.]+)', content, re.IGNORECASE)
+        iron_m = re.search(r'(?:icon header iron|cost_iron|iron)[^>]*>.*?([\d\.]+)', content, re.IGNORECASE)
+        pop_m = re.search(r'(?:icon header pop|cost_pop|pop|população)[^>]*>.*?([\d\.]+)', content, re.IGNORECASE)
 
         def clean_val(m):
             if not m:
@@ -1264,7 +1371,7 @@ def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) ->
 
         finishable = bool(claim_url) or bool(
             re.search(
-                r'class=["\'][^"\']*\b(?:quest_complete|quest_finished|btn-confirm-yes|claim)\b|<a[^>]*>(?:Receber|Resgatar|Claim|Reclamar)\b',
+                r'class=["\'][^"\']*\b(?:quest_complete|quest_finished|btn-confirm-yes|claim|reward_button|btn-reward)\b|<a[^>]*>(?:Receber|Resgatar|Claim|Reclamar|Recompensa)\b',
                 content,
                 re.IGNORECASE,
             )
@@ -1288,31 +1395,74 @@ def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) ->
             },
         })
 
-    # 3. Se houver botões de claim isolados no HTML
-    if not quests:
-        for c_match in claim_btn_regex.finditer(normalized):
-            url = c_match.group(1)
-            id_m = re.search(r'[?&](?:quest_id|quest|id)=(\d+)', url, re.IGNORECASE)
-            q_id = id_m.group(1) if id_m else str(len(quests) + 1)
-            if q_id in seen_ids:
-                continue
-            seen_ids.add(q_id)
-            quests.append({
-                "id": q_id,
-                "title": f"Missão #{q_id}",
+    # 3. Varredura global de links/botões de claim isolados no HTML (ex: screen=main ou botões soltos)
+    for c_match in claim_btn_regex.finditer(normalized):
+        url = c_match.group(1)
+        id_m = re.search(r'[?&](?:quest_id|quest|id)=(\w+)', url, re.IGNORECASE)
+        q_id = id_m.group(1) if id_m else None
+        if q_id and q_id in seen_ids:
+            # Atualiza claim_url
+            for existing_q in quests:
+                if existing_q["id"] == q_id:
+                    existing_q["claim_url"] = url
+                    existing_q["finishable"] = True
+            continue
+
+        if not q_id:
+            q_id = str(len(quests) + 1)
+        if q_id in seen_ids:
+            continue
+
+        seen_ids.add(q_id)
+        quests.append({
+            "id": q_id,
+            "title": f"Recompensa #{q_id}",
+            "description": "",
+            "finishable": True,
+            "claim_url": url,
+            "rewards": {
+                "wood": 0,
+                "stone": 0,
+                "iron": 0,
+                "pop": 0,
+                "flags": [],
+                "items": [],
                 "description": "",
-                "finishable": True,
-                "claim_url": url,
-                "rewards": {
-                    "wood": 0,
-                    "stone": 0,
-                    "iron": 0,
-                    "pop": 0,
-                    "flags": [],
-                    "items": [],
+            },
+        })
+
+    # 4. Varredura de chamadas JavaScript Quest.reward(ID) ou Quest.claim(ID)
+    js_claim_matches = re.finditer(
+        r'Quest\.(?:reward|claim)\((?:["\']?(\w+)["\']?|(\d+))\)',
+        normalized,
+        re.IGNORECASE,
+    )
+    for js_m in js_claim_matches:
+        q_id = js_m.group(1) or js_m.group(2)
+        if q_id:
+            q_id = str(q_id)
+            if q_id in seen_ids:
+                for existing_q in quests:
+                    if existing_q["id"] == q_id:
+                        existing_q["finishable"] = True
+            else:
+                seen_ids.add(q_id)
+                quests.append({
+                    "id": q_id,
+                    "title": f"Recompensa #{q_id}",
                     "description": "",
-                },
-            })
+                    "finishable": True,
+                    "claim_url": f"/game.php?screen=quest&action=reward&quest_id={q_id}",
+                    "rewards": {
+                        "wood": 0,
+                        "stone": 0,
+                        "iron": 0,
+                        "pop": 0,
+                        "flags": [],
+                        "items": [],
+                        "description": "",
+                    },
+                })
 
     finishable_count = sum(1 for q in quests if q["finishable"])
     return {
@@ -1808,7 +1958,180 @@ def parse_map_response(data: Any) -> List[Dict[str, Any]]:
 
     return villages
 
-    return villages
+
+def parse_market_screen(html: str) -> Dict[str, Any]:
+    """
+    Extrai informações da Praça do Mercado (screen=market):
+    - Mercadores disponíveis e mercadores totais
+    - Transportes em trânsito (a enviar ou a receber)
+    """
+    merchants_available = 0
+    merchants_total = 0
+
+    # 1. Extração de mercadores via ID direto ou regex no texto
+    avail_m = re.search(
+        r'id=["\']market_merchant_available_count["\'][^>]*>(\d+)</span>',
+        html,
+        re.IGNORECASE,
+    )
+    total_m = re.search(
+        r'id=["\']market_merchant_total_count["\'][^>]*>(\d+)</span>',
+        html,
+        re.IGNORECASE,
+    )
+
+    if avail_m and total_m:
+        try:
+            merchants_available = int(avail_m.group(1))
+            merchants_total = int(total_m.group(1))
+        except ValueError:
+            pass
+    else:
+        # Fallback para regex baseado em texto "Mercadores: X/Y" ou "Merchants: X/Y"
+        fallback_m = re.search(
+            r'(?:Mercadores|Merchants):\s*(?:<[^>]+>\s*)*(\d+)\s*/\s*(\d+)',
+            html,
+            re.IGNORECASE,
+        )
+        if fallback_m:
+            try:
+                merchants_available = int(fallback_m.group(1))
+                merchants_total = int(fallback_m.group(2))
+            except ValueError:
+                pass
+
+    # 2. Extração de transportes em trânsito
+    transports: List[Dict[str, Any]] = []
+
+    # Procura por blocos de linha de tabela contendo transportes
+    row_matches = re.findall(r'<tr[^>]*>(.*?)</tr>', html, re.DOTALL | re.IGNORECASE)
+    for row in row_matches:
+        row_lower = row.lower()
+        if "transporte" not in row_lower and "transport" not in row_lower:
+            continue
+
+        is_incoming = bool(re.search(r'\b(?:de|from)\b', row_lower))
+        is_outgoing = bool(re.search(r'\b(?:para|to)\b', row_lower))
+        direction = "incoming" if is_incoming and not is_outgoing else "outgoing"
+
+        # Coordenadas da aldeia (X|Y)
+        coord_m = re.search(r'\((\d{1,3})\|(\d{1,3})\)', row)
+        if not coord_m:
+            continue
+        target_x = int(coord_m.group(1))
+        target_y = int(coord_m.group(2))
+
+        # Nome da aldeia e ID
+        village_id = 0
+        id_m = re.search(r'(?:screen=info_village&(?:amp;)?id|target|village_id)[=:](\d+)', row, re.IGNORECASE)
+        if not id_m:
+            id_m = re.search(r'(?:[?&]id=)(\d+)', row, re.IGNORECASE)
+        if id_m:
+            village_id = int(id_m.group(1))
+
+        name_m = re.search(r'>([^<]+)\s*\(\d{1,3}\|\d{1,3}\)', row)
+        village_name = name_m.group(1).strip() if name_m else f"Aldeia ({target_x}|{target_y})"
+
+        # Quantidades de recursos
+        def _extract_res(res_name: str) -> int:
+            patterns = [
+                rf'{res_name}["\'][^>]*>\s*</span>\s*([\d\.]+)',
+                rf'class=["\']?[^"\']*{res_name}[^"\']*["\']?[^>]*>[^<]*</[^>]+>\s*([\d\.]+)',
+                rf'{res_name}[:\s]+([\d\.]+)',
+            ]
+            for p in patterns:
+                m = re.search(p, row, re.IGNORECASE)
+                if m:
+                    try:
+                        return int(m.group(1).replace(".", ""))
+                    except ValueError:
+                        pass
+            return 0
+
+        wood = _extract_res("wood")
+        stone = _extract_res("stone")
+        iron = _extract_res("iron")
+
+        # Tempo de chegada / duração
+        arrival_time = ""
+        timer_m = re.search(r'(?:<span[^>]*class=["\']timer["\'][^>]*>|chegada|arrival:?\s*)([\d:]+)', row, re.IGNORECASE)
+        if timer_m:
+            arrival_time = timer_m.group(1).strip()
+        else:
+            time_m = re.search(r'(\d{1,2}:\d{2}(?::\d{2})?)', row)
+            if time_m:
+                arrival_time = time_m.group(1).strip()
+
+        total_res = wood + stone + iron
+        merchants_count = max(1, (total_res + 999) // 1000) if total_res > 0 else 1
+
+        transports.append({
+            "direction": direction,
+            "village_id": village_id,
+            "village_name": village_name,
+            "coords": (target_x, target_y),
+            "wood": wood,
+            "stone": stone,
+            "iron": iron,
+            "total_resources": total_res,
+            "arrival_time": arrival_time,
+            "merchants_count": merchants_count,
+        })
+
+    return {
+        "merchants_available": merchants_available,
+        "merchants_total": merchants_total,
+        "transports": transports,
+    }
+
+
+def parse_market_offers(html: str) -> List[Dict[str, Any]]:
+    """
+    Extrai ofertas publicadas no mercado próprio (screen=market&mode=own_offer).
+    """
+    offers: List[Dict[str, Any]] = []
+    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', html, re.DOTALL | re.IGNORECASE)
+    for row in rows:
+        id_m = re.search(
+            r'(?:name=["\']id_(\d+)["\']|id=["\']offer_(\d+)["\']|action=delete_offer&(?:amp;)?id=(\d+))',
+            row,
+            re.IGNORECASE,
+        )
+        if not id_m:
+            continue
+        offer_id = int(id_m.group(1) or id_m.group(2) or id_m.group(3))
+
+        res_icons = re.findall(r'class=["\']?[^"\']*(wood|stone|iron)[^"\']*["\']?', row, re.IGNORECASE)
+        numbers = re.findall(r'>\s*([\d\.]+)\s*<', row)
+        cleaned_numbers = []
+        for n in numbers:
+            try:
+                cleaned_numbers.append(int(n.replace(".", "")))
+            except ValueError:
+                pass
+
+        sell_res = res_icons[0].lower() if len(res_icons) > 0 else "wood"
+        buy_res = res_icons[1].lower() if len(res_icons) > 1 else "stone"
+        sell_amount = cleaned_numbers[0] if len(cleaned_numbers) > 0 else 1000
+        buy_amount = cleaned_numbers[1] if len(cleaned_numbers) > 1 else 1000
+
+        ratio = round(buy_amount / sell_amount, 2) if sell_amount > 0 else 1.0
+
+        multi_m = re.search(r'>\s*(\d+)x\s*<', row, re.IGNORECASE)
+        available_offers = int(multi_m.group(1)) if multi_m else 1
+
+        offers.append({
+            "id": offer_id,
+            "sell_res": sell_res,
+            "sell_amount": sell_amount,
+            "buy_res": buy_res,
+            "buy_amount": buy_amount,
+            "ratio": ratio,
+            "available_offers": available_offers,
+        })
+
+    return offers
+
 
 
 

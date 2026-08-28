@@ -225,6 +225,55 @@ class TestRecruitmentActions(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(recruited), 0)
         account.post_action.assert_not_called()
 
+    async def test_run_recruitment_skips_unbuilt_buildings_and_unresearched_units(self):
+        from engine.core.account import TribalAccount
+        from engine.actions.place import PlaceState
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.current_village_id = 12345
+
+        # Aldeia tem apenas Edifício Principal 5 e Quartel 1 (Estábulo 0, Oficina 0, Ferreiro 0)
+        account.refresh_state = AsyncMock(return_value=VillageData(
+            id=12345,
+            name="Aldeia Inicial",
+            x=450,
+            y=550,
+            resources=Resources(wood=5000, stone=5000, iron=5000, storage_max=10000, pop=20, pop_max=100),
+            buildings={"main": 5, "barracks": 1, "stable": 0, "garage": 0, "smith": 0},
+        ))
+
+        mock_place = AsyncMock()
+        mock_place.get_state.return_value = PlaceState(village_id=12345, units=UnitsCount(spear=10, sword=0, axe=0, light=0, ram=0))
+        manager = RecruitmentManager(place_manager=mock_place)
+
+        # Quartel apenas tem spear disponível (axe e sword não pesquisados/sem requisitos)
+        manager.get_building_state = AsyncMock()
+        manager.get_building_state.return_value = RecruitmentState(
+            building="barracks",
+            available_units={"spear": 50},  # 'axe' e 'sword' ausentes
+            queue=[],
+            total_in_queue={"spear": 0, "sword": 0, "axe": 0},
+        )
+
+        account.post_action = AsyncMock()
+
+        # Pede para treinar spear, axe, light (estábulo) e ram (oficina)
+        recruited = await manager.run_recruitment_cycle(
+            account=account,
+            targets={"spear": 30, "axe": 50, "light": 20, "ram": 10},
+            batch_sizes={"spear": 10, "axe": 10, "light": 5, "ram": 5},
+            min_free_pop=10,
+        )
+
+        # Apenas spear deve ser treinado
+        self.assertEqual(recruited.get("spear"), 10)
+        self.assertNotIn("axe", recruited)
+        self.assertNotIn("light", recruited)
+        self.assertNotIn("ram", recruited)
+
+        # get_building_state só deve ter sido chamado para 'barracks' (nunca para stable ou garage a nível 0)
+        manager.get_building_state.assert_called_once_with(account, "barracks", village_id=12345)
+
 
 class TestRecruitmentConfig(unittest.TestCase):
     def test_recruitment_config_defaults(self):
@@ -241,6 +290,91 @@ class TestRecruitmentConfig(unittest.TestCase):
         self.assertEqual(r_cfg.batch_sizes["spear"], 20)
         self.assertEqual(r_cfg.min_free_pop, 15)
         self.assertEqual(r_cfg.interval_minutes, 4.0)
+        self.assertIn("attack", r_cfg.models)
+        self.assertIn("defense", r_cfg.models)
+        self.assertEqual(r_cfg.models["attack"]["axe"], 6000)
+        self.assertEqual(r_cfg.models["defense"]["spear"], 7000)
+
+    def test_get_village_recruitment_targets_by_model(self):
+        from engine.config.settings import VillageConfig
+
+        cfg = BotConfig()
+        cfg.villages["12345"] = VillageConfig(category="attack")
+        cfg.villages["67890"] = VillageConfig(category="defense")
+        cfg.recruitment.models["attack"]["axe"] = 7500
+        cfg.recruitment.models["defense"]["heavy"] = 1200
+
+        targets_attack = cfg.get_village_recruitment_targets("12345")
+        targets_defense = cfg.get_village_recruitment_targets("67890")
+
+        self.assertEqual(targets_attack.get("axe"), 7500)
+        self.assertEqual(targets_defense.get("heavy"), 1200)
+
+    def test_get_village_recruitment_targets_custom_model(self):
+        from engine.config.settings import VillageConfig
+
+        cfg = BotConfig()
+        cfg.recruitment.models["nuke"] = {"axe": 8000, "light": 3300, "ram": 350, "catapult": 20}
+        cfg.villages["999"] = VillageConfig(category="nuke")
+
+        targets_nuke = cfg.get_village_recruitment_targets("999")
+        self.assertEqual(targets_nuke.get("axe"), 8000)
+        self.assertEqual(targets_nuke.get("ram"), 350)
+
+
+class TestRecruitmentModelsApi(unittest.TestCase):
+    def test_get_and_save_recruitment_models_context(self):
+        from engine.api.context import EngineContext
+        from engine.core.scheduler import TaskScheduler
+
+        cfg = BotConfig()
+        scheduler = TaskScheduler()
+        ctx = EngineContext(scheduler=scheduler, config=cfg)
+        ctx.config.recruitment.models = {
+            "attack": {"axe": 5500, "light": 2800},
+            "defense": {"spear": 6500, "sword": 6500},
+        }
+
+        res = ctx.get_recruitment_models()
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["models"]["attack"]["axe"], 5500)
+        self.assertEqual(res["models"]["defense"]["spear"], 6500)
+
+        with patch.object(ctx, "update_config_and_save", return_value={"status": "success"}):
+            res_save = ctx.save_recruitment_models(
+                attack={"axe": 6200, "light": 3100, "ram": 300},
+                defense={"spear": 8000, "sword": 8000, "heavy": 1500},
+            )
+            self.assertEqual(res_save["status"], "success")
+            self.assertEqual(ctx.config.recruitment.models["attack"]["axe"], 6200)
+            self.assertEqual(ctx.config.recruitment.models["defense"]["spear"], 8000)
+
+    def test_save_and_delete_custom_models(self):
+        from engine.api.context import EngineContext
+        from engine.core.scheduler import TaskScheduler
+
+        cfg = BotConfig()
+        scheduler = TaskScheduler()
+        ctx = EngineContext(scheduler=scheduler, config=cfg)
+
+        with patch.object(ctx, "update_config_and_save", return_value={"status": "success"}):
+            res = ctx.save_recruitment_models(models={
+                "attack": {"axe": 6000},
+                "defense": {"spear": 7000},
+                "nuke_speed": {"axe": 7500, "light": 3200, "ram": 300},
+            })
+            self.assertEqual(res["status"], "success")
+            self.assertIn("nuke_speed", ctx.config.recruitment.models)
+            self.assertEqual(ctx.config.recruitment.models["nuke_speed"]["light"], 3200)
+
+            # Deleta modelo customizado
+            del_res = ctx.delete_recruitment_model("nuke_speed")
+            self.assertEqual(del_res["status"], "success")
+            self.assertNotIn("nuke_speed", ctx.config.recruitment.models)
+
+            # Tentar deletar attack dá erro
+            del_attack = ctx.delete_recruitment_model("attack")
+            self.assertEqual(del_attack["status"], "error")
 
 
 if __name__ == "__main__":

@@ -242,6 +242,55 @@ class TestTribalAccount(unittest.IsolatedAsyncioTestCase):
 
         await account.close()
 
+    async def test_get_screen_and_post_action_request_logging_and_mobile_page(self):
+        """Valida que page=mobile é injetado e que as requisições geram histórico e logs."""
+        from unittest.mock import AsyncMock, MagicMock
+        from engine.core.account import TribalAccount
+        from curl_cffi.requests import Response
+
+        account = TribalAccount(world="pt117", sid="test_sid_12345")
+        account.csrf_token = "test_csrf_token"
+
+        fake_resp = MagicMock(spec=Response)
+        fake_resp.status_code = 200
+        fake_resp.text = "<html><body>game screen</body></html>"
+        fake_resp.content = b"<html><body>game screen</body></html>"
+        fake_resp.url = "https://pt117.tribalwars.com.pt/game.php?screen=main&page=mobile"
+
+        # Mock da sessão HTTP
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=fake_resp)
+        mock_session.post = AsyncMock(return_value=fake_resp)
+        account._session = mock_session
+
+        # 1. Teste de GET com page=mobile
+        html = await account.get_screen("main", apply_jitter=False)
+        self.assertIn("game screen", html)
+        mock_session.get.assert_called_once()
+        call_params = mock_session.get.call_args[1]["params"]
+        self.assertEqual(call_params.get("page"), "mobile")
+        self.assertEqual(call_params.get("screen"), "main")
+
+        # 2. Verifica histórico de requisições
+        recent = account.get_recent_requests(limit=10)
+        self.assertEqual(len(recent), 1)
+        self.assertEqual(recent[0]["method"], "GET")
+        self.assertEqual(recent[0]["status_code"], 200)
+        self.assertIn("page=mobile", recent[0]["url"])
+
+        # 3. Teste de POST com page=mobile
+        post_html = await account.post_action("place", action="command", data={"attack": "1"}, apply_jitter=False)
+        self.assertIn("game screen", post_html)
+        mock_session.post.assert_called_once()
+        post_params = mock_session.post.call_args[1]["params"]
+        self.assertEqual(post_params.get("page"), "mobile")
+        self.assertEqual(post_params.get("screen"), "place")
+
+        # Verifica histórico atualizado (agora 2 requisições)
+        recent = account.get_recent_requests(limit=10)
+        self.assertEqual(len(recent), 2)
+        self.assertEqual(recent[1]["method"], "POST")
+
 
 if __name__ == "__main__":
     unittest.main()

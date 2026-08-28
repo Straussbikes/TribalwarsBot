@@ -5,7 +5,7 @@ segura de credenciais para multi-mundo e multi-conta.
 """
 
 import base64
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 import logging

@@ -4,7 +4,6 @@ Gera atrasos aleatórios com distribuição normal (gaussiana) truncada e micro-
 para evitar deteções heurísticas por regularidade temporal.
 """
 
-import math
 import random
 import time
 from typing import Tuple

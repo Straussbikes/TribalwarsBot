@@ -14,7 +14,6 @@ from engine.core.exceptions import (
     BotProtectionError,
     RateLimitError,
     SessionExpiredError,
-    TribalWarsException,
 )
 from engine.core.models import Task, TaskPriority
 from engine.utils.timing import get_human_delay

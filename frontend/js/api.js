@@ -244,8 +244,138 @@ class SidecarApi {
   async getVillageBalance() {
     return await this.request("/api/account/villages/balance");
   }
-}
 
+  // --- Mercado & Balanceamento de Recursos ---
+  async getMarketState(villageId = null) {
+    const url = villageId ? `/api/market/state?village_id=${villageId}` : "/api/market/state";
+    return await this.request(url);
+  }
+
+  async sendMarketResources(sourceVillageId, targetVillageId, wood = 0, stone = 0, iron = 0) {
+    return await this.request("/api/market/send", {
+      method: "POST",
+      body: JSON.stringify({
+        source_village_id: parseInt(sourceVillageId, 10),
+        target_village_id: parseInt(targetVillageId, 10),
+        wood: parseInt(wood, 10),
+        stone: parseInt(stone, 10),
+        iron: parseInt(iron, 10),
+      }),
+    });
+  }
+
+  async getMarketBalancingPlan() {
+    return await this.request("/api/market/balance/plan");
+  }
+
+  async triggerMarketBalancing() {
+    return await this.request("/api/market/balance/trigger", { method: "POST" });
+  }
+
+  async createMarketOffer(villageId, sellRes, sellAmount, buyRes, buyAmount, maxTime = 10, multi = 1) {
+    return await this.request("/api/market/offer", {
+      method: "POST",
+      body: JSON.stringify({
+        village_id: parseInt(villageId, 10),
+        sell_res: sellRes,
+        sell_amount: parseInt(sellAmount, 10),
+        buy_res: buyRes,
+        buy_amount: parseInt(buyAmount, 10),
+        max_time: parseInt(maxTime, 10),
+        multi: parseInt(multi, 10),
+      }),
+    });
+  }
+
+  async toggleMarket(enabled = null, autoBalanceEnabled = null) {
+    const payload = {};
+    if (enabled !== null) payload.enabled = enabled;
+    if (autoBalanceEnabled !== null) payload.auto_balance_enabled = autoBalanceEnabled;
+    return await this.request("/api/market/toggle", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getBuildingState(villageId = null) {
+    const url = villageId ? `/api/building/state?village_id=${villageId}` : "/api/building/state";
+    return await this.request(url);
+  }
+
+  async cancelBuildingOrder(orderId, villageId = null) {
+    const url = villageId ? `/api/building/cancel/${orderId}?village_id=${villageId}` : `/api/building/cancel/${orderId}`;
+    return await this.request(url, { method: "POST" });
+  }
+
+  async toggleBuilding(enabled = null, intervalSeconds = null, maxQueue = null) {
+    const payload = {};
+    if (enabled !== null) payload.enabled = enabled;
+    if (intervalSeconds !== null) payload.interval_seconds = parseFloat(intervalSeconds);
+    if (maxQueue !== null) payload.max_queue = parseInt(maxQueue, 10);
+    return await this.request("/api/building/toggle", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getRecruitmentState(villageId = null) {
+    const url = villageId ? `/api/recruitment/state?village_id=${villageId}` : "/api/recruitment/state";
+    return await this.request(url);
+  }
+
+  async getRecruitmentModels() {
+    return await this.request("/api/recruitment/models");
+  }
+
+  async saveRecruitmentModels(attack = null, defense = null, models = null) {
+    const payload = {};
+    if (attack !== null) payload.attack = attack;
+    if (defense !== null) payload.defense = defense;
+    if (models !== null) payload.models = models;
+    return await this.request("/api/recruitment/models", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteRecruitmentModel(modelName) {
+    return await this.request(`/api/recruitment/models/${encodeURIComponent(modelName)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async toggleRecruitment(enabled = null, intervalMinutes = null, minFreePop = null) {
+    const payload = {};
+    if (enabled !== null) payload.enabled = enabled;
+    if (intervalMinutes !== null) payload.interval_minutes = parseFloat(intervalMinutes);
+    if (minFreePop !== null) payload.min_free_pop = parseInt(minFreePop, 10);
+    return await this.request("/api/recruitment/toggle", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // --- Estatísticas & Métricas ---
+
+  async getStatsSummary(world = null) {
+    const url = world ? `/api/stats/summary?world=${encodeURIComponent(world)}` : "/api/stats/summary";
+    return await this.request(url);
+  }
+
+  async getStatsHistory(hours = 24, days = 7, world = null) {
+    let url = `/api/stats/history?hours=${hours}&days=${days}`;
+    if (world) {
+      url += `&world=${encodeURIComponent(world)}`;
+    }
+    return await this.request(url);
+  }
+
+  async resetStats(world = null) {
+    const url = world ? `/api/stats/reset?world=${encodeURIComponent(world)}` : "/api/stats/reset";
+    return await this.request(url, { method: "POST" });
+  }
+}
 
 // Exporta instância global
 window.api = new SidecarApi();
+

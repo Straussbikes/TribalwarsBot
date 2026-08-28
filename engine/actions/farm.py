@@ -18,7 +18,7 @@ from engine.utils.parsers import (
     parse_am_farm_targets,
     parse_am_farm_templates,
 )
-from engine.utils.timing import get_click_jitter, get_human_delay
+from engine.utils.timing import get_human_delay
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,59 @@ class FarmAssistantState:
     @property
     def total_targets_count(self) -> int:
         return len(self.targets)
+
+
+@dataclass
+class RadarFarmPlan:
+    """Plano dinâmico de alocação de micro-esquadrões para aldeias bárbaras mapeadas."""
+    village_id: int
+    total_barbarians_found: int
+    eligible_targets: List[Tuple[int, int]] = field(default_factory=list)
+    squads_assigned: List[Tuple[Tuple[int, int], UnitsCount]] = field(default_factory=list)
+    total_carrying_capacity: int = 0
+
+
+def allocate_dynamic_squads(
+    available_units: UnitsCount,
+    squad_template: UnitsCount,
+    targets: List[Tuple[int, int]],
+    max_squads: Optional[int] = None,
+) -> List[Tuple[Tuple[int, int], UnitsCount]]:
+    """
+    Divide de forma balanceada as tropas disponíveis na aldeia em micro-esquadrões de saque
+    de acordo com o modelo de esquadrão fornecido (ex.: 5 lanceiros + 1 explorador ou 2 cavalarias leves).
+    Distribui os esquadrões pelos alvos especificados (ordenados por proximidade).
+    """
+    if not targets:
+        return []
+
+    # Determinar unidades mínimas por esquadrão requeridas
+    template_dict = {u: cnt for u, cnt in squad_template.to_dict().items() if cnt > 0}
+    if not template_dict:
+        template_dict = {"spear": 5}
+        squad_template = UnitsCount(spear=5)
+
+    avail_dict = available_units.to_dict()
+
+    # Quantos esquadrões completos conseguimos formar com as tropas atualmente disponíveis?
+    max_possible_squads = min(
+        avail_dict.get(u, 0) // req_cnt
+        for u, req_cnt in template_dict.items()
+    )
+
+    if max_possible_squads <= 0:
+        return []
+
+    num_squads = min(max_possible_squads, len(targets))
+    if max_squads is not None and max_squads > 0:
+        num_squads = min(num_squads, max_squads)
+
+    allocations: List[Tuple[Tuple[int, int], UnitsCount]] = []
+    for i in range(num_squads):
+        target = targets[i]
+        allocations.append((target, squad_template))
+
+    return allocations
 
 
 class FarmManager:
@@ -265,6 +318,211 @@ class FarmManager:
 
         return sent_count
 
+    async def get_radar_farm_plan(
+        self,
+        account: TribalAccount,
+        radius: float = 15.0,
+        squad_template: Optional[UnitsCount] = None,
+        max_attacks: int = 30,
+        skip_active_targets: bool = True,
+        village_id: Optional[int] = None,
+        use_cache: bool = True,
+    ) -> RadarFarmPlan:
+        """
+        Calcula o plano de alocação de micro-esquadrões para as bárbaras mais próximas,
+        sem enviar comandos de ataque.
+        """
+        v_id = village_id or account.current_village_id
+        curr_v = account.villages.get(v_id) if account.villages else None
+        cx = curr_v.x if curr_v else 500
+        cy = curr_v.y if curr_v else 500
+
+        if not self.map_manager:
+            from engine.actions.map import MapManager
+            self.map_manager = MapManager()
+
+        # 1. Scanner de aldeias bárbaras ordenadas por proximidade
+        barbarians = await self.map_manager.scan_nearby_barbarians(
+            account=account,
+            center_x=cx,
+            center_y=cy,
+            radius=radius,
+            village_id=v_id,
+            use_cache=use_cache,
+        )
+
+        # 2. Leitura do estado da Praça de Reunião
+        place_state = await self.place_manager.get_state(account, village_id=v_id)
+
+        # 3. Extrair coordenadas com ataques atualmente a caminho para evitar repetições
+        active_target_coords = set()
+        if skip_active_targets:
+            for cmd in place_state.commands:
+                if cmd.movement_type in ("attack", "command"):
+                    clean_coords = cmd.target_coords.strip("() ")
+                    if clean_coords:
+                        active_target_coords.add(clean_coords)
+
+        # 4. Filtrar bárbaras elegíveis (não atacadas atualmente se skip_active_targets)
+        eligible_targets: List[Tuple[int, int]] = []
+        for b in barbarians:
+            b_coord_str = f"{b.x}|{b.y}"
+            if skip_active_targets and b_coord_str in active_target_coords:
+                continue
+            eligible_targets.append(b.coords_tuple)
+
+        # Se todas as bárbaras já tiverem ataques e ainda houver bárbaras, usa todas
+        if not eligible_targets and barbarians:
+            eligible_targets = [b.coords_tuple for b in barbarians]
+
+        # 5. Alocação dinâmica de esquadrões
+        squad = squad_template or UnitsCount(spear=5, spy=1)
+        squads_assigned = allocate_dynamic_squads(
+            available_units=place_state.units,
+            squad_template=squad,
+            targets=eligible_targets,
+            max_squads=max_attacks,
+        )
+
+        total_cap = sum(sq.carrying_capacity() for _, sq in squads_assigned)
+
+        return RadarFarmPlan(
+            village_id=v_id or 0,
+            total_barbarians_found=len(barbarians),
+            eligible_targets=eligible_targets,
+            squads_assigned=squads_assigned,
+            total_carrying_capacity=total_cap,
+        )
+
+    async def run_radar_farm_cycle(
+        self,
+        account: TribalAccount,
+        radius: float = 15.0,
+        squad_template: Optional[UnitsCount] = None,
+        max_attacks: int = 30,
+        skip_active_targets: bool = True,
+        village_id: Optional[int] = None,
+        use_cache: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Executa um ciclo completo de Radar de Bárbaras com alocação dinâmica de tropas:
+        Calcula o plano de alocação e despacha os ataques sequencialmente.
+        """
+        plan = await self.get_radar_farm_plan(
+            account=account,
+            radius=radius,
+            squad_template=squad_template,
+            max_attacks=max_attacks,
+            skip_active_targets=skip_active_targets,
+            village_id=village_id,
+            use_cache=use_cache,
+        )
+
+        if not plan.squads_assigned:
+            logger.info(
+                f"[{account.world}] Radar de Bárbaras (Aldeia {plan.village_id}): "
+                f"{plan.total_barbarians_found} bárbaras mapeadas, mas sem tropas suficientes para novos esquadrões."
+            )
+            return {
+                "sent_attacks": 0,
+                "total_targets": len(plan.eligible_targets),
+                "total_barbarians_found": plan.total_barbarians_found,
+                "total_carrying_capacity": 0,
+            }
+
+        sent_count = 0
+        total_loot_capacity = 0
+        logger.info(
+            f"[{account.world}] 🚀 A despachar {len(plan.squads_assigned)} micro-ataques pelo Radar de Bárbaras..."
+        )
+
+        for target_coords, squad in plan.squads_assigned:
+            success = await self.place_manager.send_command(
+                account=account,
+                target_coords=target_coords,
+                units=squad,
+                is_attack=True,
+                village_id=plan.village_id,
+                allow_partial=False,
+            )
+            if success:
+                sent_count += 1
+                total_loot_capacity += squad.carrying_capacity()
+                logger.info(
+                    f"[{account.world}] Saque #{sent_count} via Radar -> ({target_coords[0]}|{target_coords[1]}) "
+                    f"[{squad.to_summary_str()} | Cap: {squad.carrying_capacity()}]"
+                )
+                delay = get_human_delay(2.2, 0.4, 1.2, 3.5)
+                await asyncio.sleep(delay)
+            else:
+                logger.warning(
+                    f"[{account.world}] Interrupção no despacho de farm via Radar para ({target_coords[0]}|{target_coords[1]})."
+                )
+                break
+
+        logger.info(
+            f"[{account.world}] ✅ Ciclo de Radar de Bárbaras concluído: "
+            f"{sent_count} ataques despachados (Capacidade de saque total: {total_loot_capacity})."
+        )
+        return {
+            "sent_attacks": sent_count,
+            "total_targets": len(plan.eligible_targets),
+            "total_barbarians_found": plan.total_barbarians_found,
+            "total_carrying_capacity": total_loot_capacity,
+        }
+
+    def schedule_continuous_radar_farm(
+        self,
+        scheduler: TaskScheduler,
+        account: TribalAccount,
+        radius: float = 15.0,
+        squad_template: Optional[UnitsCount] = None,
+        interval_minutes: float = 5.0,
+        max_attacks: int = 30,
+        skip_active_targets: bool = True,
+        village_id: Optional[int] = None,
+    ) -> None:
+        """
+        Agenda no TaskScheduler o loop contínuo e recorrente de Radar Farming.
+        Mantém as micro-tropas sempre em rotação permanente de saques.
+        """
+        interval_seconds = max(60.0, interval_minutes * 60.0)
+        squad = squad_template or UnitsCount(spear=5, spy=1)
+
+        async def continuous_radar_task():
+            try:
+                await self.run_radar_farm_cycle(
+                    account=account,
+                    radius=radius,
+                    squad_template=squad,
+                    max_attacks=max_attacks,
+                    skip_active_targets=skip_active_targets,
+                    village_id=village_id,
+                )
+            except Exception as e:
+                logger.warning(f"Erro no ciclo contínuo de Radar Farming: {e}")
+            finally:
+                if scheduler.is_running and not scheduler.is_paused:
+                    scheduler.schedule_human_like(
+                        name=f"ContinuousRadarFarm-Village-{village_id or 'active'}",
+                        priority=TaskPriority.FARM,
+                        action=continuous_radar_task,
+                        base_seconds=interval_seconds,
+                        std_dev=interval_seconds * 0.15,
+                        min_seconds=max(30.0, interval_seconds * 0.5),
+                        max_seconds=interval_seconds * 1.5,
+                    )
+
+        scheduler.schedule(
+            name=f"ContinuousRadarFarm-Village-{village_id or 'active'}",
+            priority=TaskPriority.FARM,
+            action=continuous_radar_task,
+            delay_seconds=10.0,
+        )
+        logger.info(
+            f"Radar de Bárbaras contínuo agendado a cada ~{interval_minutes:.1f} minutos (Raio: {radius:.1f} campos)."
+        )
+
     def schedule_auto_farm(
         self,
         scheduler: TaskScheduler,
@@ -274,6 +532,7 @@ class FarmManager:
     ) -> None:
         """
         Agenda no TaskScheduler a execução periódica contínua de ondas de Micro-Farming.
+        Suporta 'am_farm', 'place' e 'radar' (saque recorrente dinâmico).
         """
         interval_minutes = getattr(farm_config, "interval_minutes", 10.0)
         interval_seconds = interval_minutes * 60.0
@@ -281,7 +540,19 @@ class FarmManager:
 
         async def auto_farm_task():
             try:
-                if mode == "place":
+                if mode == "radar":
+                    raw_troops = getattr(farm_config, "custom_troops", {})
+                    troops = UnitsCount.from_dict(raw_troops) if isinstance(raw_troops, dict) else UnitsCount(spear=5, spy=1)
+                    scan_radius = getattr(farm_config, "map_scan_radius", 15.0)
+                    skip_active = getattr(farm_config, "skip_active_targets", True)
+                    await self.run_radar_farm_cycle(
+                        account=account,
+                        radius=scan_radius,
+                        squad_template=troops,
+                        skip_active_targets=skip_active,
+                        village_id=village_id,
+                    )
+                elif mode == "place":
                     targets = getattr(farm_config, "custom_targets", [])
                     raw_troops = getattr(farm_config, "custom_troops", {})
                     troops = UnitsCount.from_dict(raw_troops) if isinstance(raw_troops, dict) else UnitsCount(spear=5, spy=1)

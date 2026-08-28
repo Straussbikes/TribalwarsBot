@@ -46,10 +46,10 @@ class MapVillage:
             if self.player_id == 0:
                 self.is_barbarian = True
             else:
-                p_lower = self.player_name.lower().strip()
-                self.is_barbarian = not p_lower or p_lower in (
+                p_lower = self.player_name.lower().strip() if self.player_name else ""
+                self.is_barbarian = bool(p_lower and p_lower in (
                     "bárbaro", "bárbaros", "barbarians", "abandonada", "aldeia de bárbaros"
-                )
+                ))
 
     @property
     def coordinates(self) -> str:
@@ -542,16 +542,28 @@ class MapManager:
 
         # Converte para instâncias MapVillage e calcula distâncias
         result: List[MapVillage] = []
+        is_large_dump = len(villages_raw) > 500
+        own_ids = set(account.villages.keys()) if hasattr(account, "villages") else set()
+        if account.current_village_id:
+            own_ids.add(account.current_village_id)
+
         for item in villages_raw:
-            vx = int(item["x"])
-            vy = int(item["y"])
+            try:
+                vx = int(item["x"])
+                vy = int(item["y"])
+            except (ValueError, TypeError):
+                continue
             dist = self.calculate_distance(center_x, center_y, vx, vy)
+            if is_large_dump and radius > 0 and dist > radius + 20:
+                continue
+            v_id_val = int(item["id"])
+            is_own_val = v_id_val in own_ids or (hasattr(account, "player") and account.player and item.get("player_id") == account.player.id)
             result.append(
                 MapVillage(
-                    id=int(item["id"]),
+                    id=v_id_val,
                     x=vx,
                     y=vy,
-                    name=str(item["name"]),
+                    name=str(item.get("name", "")),
                     points=int(item.get("points", 0)),
                     player_id=int(item.get("player_id", 0)),
                     player_name=str(item.get("player_name", "")),
@@ -559,9 +571,11 @@ class MapManager:
                     tribe_tag=str(item.get("tribe_tag", "")),
                     bonus_id=int(item.get("bonus_id", 0)),
                     distance=dist,
+                    is_own=bool(is_own_val),
                 )
             )
 
+        result.sort(key=lambda v: v.distance)
         return result
 
     async def scan_nearby_barbarians(

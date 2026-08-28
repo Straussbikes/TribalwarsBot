@@ -6,7 +6,7 @@ Estruturas de dados fortemente tipadas para representar recursos, aldeias, jogad
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 import time
-from typing import Any, Callable, Coroutine, Dict, Optional
+from typing import Any, Callable, Coroutine, Dict, Optional, Tuple
 
 
 class TaskPriority(IntEnum):
@@ -25,7 +25,6 @@ class TaskPriority(IntEnum):
     REFRESH = 90     # Atualização periódica de recursos / estado
     IDLE = 100       # Tarefas de manutenção em segundo plano
     BACKGROUND = 100 # Tarefas de fundo / keep-alive da sessão
-
 
 
 @dataclass
@@ -56,12 +55,13 @@ class Resources:
 
     def can_afford(self, wood: int = 0, stone: int = 0, iron: int = 0, pop: int = 0) -> bool:
         """Valida se a aldeia dispõe dos recursos e população necessários."""
-        return (
-            self.wood >= wood
-            and self.stone >= stone
-            and self.iron >= iron
-            and self.free_pop >= pop
-        )
+        has_res = self.wood >= wood and self.stone >= stone and self.iron >= iron
+        if not has_res:
+            return False
+        # Se pop_max é conhecido (> 0), valida população livre
+        if self.pop_max > 0 and pop > 0:
+            return self.free_pop >= pop
+        return True
 
 
 class VillageCategory(str, Enum):
@@ -114,10 +114,15 @@ class VillageData:
     category: VillageCategory = VillageCategory.BALANCED
     resources: Resources = field(default_factory=Resources)
     troops: Dict[str, int] = field(default_factory=dict)
+    buildings: Dict[str, int] = field(default_factory=dict)
 
     @property
     def coordinates(self) -> str:
         return f"{self.x}|{self.y}"
+
+    @property
+    def coords_tuple(self) -> Tuple[int, int]:
+        return (self.x, self.y)
 
     def to_dict(self) -> Dict[str, Any]:
         cat_val = self.category.value if isinstance(self.category, VillageCategory) else str(self.category)
@@ -139,8 +144,8 @@ class VillageData:
                 "free_pop": self.resources.free_pop,
             },
             "troops": self.troops,
+            "buildings": self.buildings,
         }
-
 
 
 @dataclass
@@ -153,31 +158,51 @@ class PlayerData:
     villages_count: int = 0
 
 
-@dataclass(order=True)
+@dataclass
 class Task:
     """
     Representação de uma tarefa na fila de prioridades (asyncio.PriorityQueue).
-    A ordenação é baseada em:
-    1. Prioridade (menor número tem precedência).
-    2. scheduled_at (timestamp de execução com delay humano).
+    Ordenação inteligente:
+    1. Tarefas já vencidas (due) são ordenadas estritamente por prioridade (ALERT > FARM > BUILD).
+    2. Tarefas prontas têm precedência sobre tarefas agendadas para o futuro.
+    3. Tarefas futuras são ordenadas pelo tempo de execução mais próximo (evita que tarefas distantes bloqueiem a fila).
     """
 
     priority: int
     scheduled_at: float
-    name: str = field(compare=False)
-    id: str = field(compare=False, default="")
-    action: Optional[Callable[..., Coroutine[Any, Any, Any]]] = field(
-        compare=False, default=None
-    )
-    args: tuple = field(compare=False, default_factory=tuple)
-    kwargs: Dict[str, Any] = field(compare=False, default_factory=dict)
-    retry_count: int = field(compare=False, default=0)
-    max_retries: int = field(compare=False, default=3)
-    metadata: Dict[str, Any] = field(compare=False, default_factory=dict)
+    name: str = ""
+    id: str = ""
+    action: Optional[Callable[..., Coroutine[Any, Any, Any]]] = None
+    args: tuple = field(default_factory=tuple)
+    kwargs: Dict[str, Any] = field(default_factory=dict)
+    retry_count: int = 0
+    max_retries: int = 3
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
-    def is_due(self) -> bool:
-        """Indica se a tarefa está pronta para execução imediata."""
-        return time.monotonic() >= self.scheduled_at
+    def __lt__(self, other: Any) -> bool:
+        if not isinstance(other, Task):
+            return NotImplemented
+        now = time.monotonic()
+        self_due = self.scheduled_at <= now
+        other_due = other.scheduled_at <= now
+
+        # 1. Se ambas já estão prontas para execução, a prioridade tem precedência absoluta
+        if self_due and other_due:
+            if self.priority != other.priority:
+                return self.priority < other.priority
+            return self.scheduled_at < other.scheduled_at
+
+        # 2. Se uma já está pronta e a outra é futura, a pronta vem primeiro
+        if self_due != other_due:
+            return self_due
+
+        # 3. Se ambas são futuras, a que executa mais cedo vem primeiro
+        if abs(self.scheduled_at - other.scheduled_at) > 0.05:
+            return self.scheduled_at < other.scheduled_at
+
+        if self.priority != other.priority:
+            return self.priority < other.priority
+        return self.scheduled_at < other.scheduled_at
 
     def time_until_due(self) -> float:
         """Tempo restante em segundos até a execução agendada."""

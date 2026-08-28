@@ -37,6 +37,34 @@ BUILDING_UNITS: Dict[str, List[str]] = {
     "garage": ["ram", "catapult"],
 }
 
+# Tabela de pré-requisitos mínimos de edifícios para desbloqueio/pesquisa de cada unidade
+UNIT_BUILDING_REQUIREMENTS: Dict[str, Dict[str, int]] = {
+    "spear": {"barracks": 1},
+    "sword": {"barracks": 1, "smith": 1},
+    "axe": {"barracks": 2, "smith": 2},
+    "archer": {"barracks": 5, "smith": 5},
+    "spy": {"stable": 1},
+    "light": {"stable": 3},
+    "marcher": {"stable": 5},
+    "heavy": {"stable": 10, "smith": 15},
+    "ram": {"garage": 1},
+    "catapult": {"garage": 2, "smith": 12},
+}
+
+
+UNIT_POP_COST: Dict[str, int] = {
+    "spear": 1,
+    "sword": 1,
+    "axe": 1,
+    "archer": 1,
+    "spy": 2,
+    "light": 4,
+    "marcher": 5,
+    "heavy": 6,
+    "ram": 5,
+    "catapult": 8,
+}
+
 
 @dataclass
 class TrainingOrder:
@@ -68,8 +96,17 @@ class RecruitmentManager:
     e submeter ordens de recrutamento em lotes inteligentes.
     """
 
-    def __init__(self, place_manager: Optional[PlaceManager] = None):
+    def __init__(
+        self,
+        place_manager: Optional[PlaceManager] = None,
+        smith_manager: Optional[Any] = None,
+    ):
         self.place_manager = place_manager or PlaceManager()
+        if smith_manager is not None:
+            self.smith_manager = smith_manager
+        else:
+            from engine.actions.smith import SmithManager
+            self.smith_manager = SmithManager()
 
     async def get_building_state(
         self, account: TribalAccount, building: str, village_id: Optional[int] = None
@@ -124,11 +161,19 @@ class RecruitmentManager:
         order_summary = ", ".join(f"{cnt}x {u}" for u, cnt in valid_orders.items())
         logger.info(f"[{account.world}] A recrutar no {building.capitalize()}: {order_summary}...")
 
+        # Prepara payload compatível com inputs planos ('spear=10') e aninhados ('units[spear]=10')
+        post_data = {}
+        for u, cnt in valid_orders.items():
+            post_data[u] = str(cnt)
+            post_data[f"units[{u}]"] = str(cnt)
+        if account.csrf_token:
+            post_data["h"] = account.csrf_token
+
         try:
             await account.post_action(
                 screen=building,
                 action="train",
-                data=valid_orders,
+                data=post_data,
                 village_id=v_id,
                 apply_jitter=True,
             )
@@ -156,16 +201,21 @@ class RecruitmentManager:
         v_id = village_id or account.current_village_id
 
         # 1. Validação de População Livre da Fazenda
+        free_pop = 9999
         try:
-            village = await account.refresh_state()
-            if village.resources.free_pop <= min_free_pop:
+            village = await account.refresh_state(village_id=v_id)
+            free_pop = village.resources.free_pop
+            if free_pop <= 0 or (min_free_pop > 0 and free_pop < min_free_pop):
                 logger.info(
-                    f"[{account.world}] População livre ({village.resources.free_pop}) <= limite de segurança "
+                    f"[{account.world}] População livre ({free_pop}) < limite de segurança "
                     f"({min_free_pop}). Recrutamento suspenso para preservar melhorias de edifícios."
                 )
                 return recruited_summary
         except Exception as e:
             logger.warning(f"Não foi possível verificar população antes de recrutar: {e}")
+
+        # Orçamento de população disponível para este ciclo
+        pop_budget = max(0, free_pop - min_free_pop) if min_free_pop > 0 else free_pop
 
         # 2. Leitura de tropas existentes na aldeia ativa
         try:
@@ -175,7 +225,26 @@ class RecruitmentManager:
             logger.warning(f"Falha ao ler tropas na aldeia para cálculo de metas: {e}")
             troops_home = {}
 
-        # 3. Processamento por edifício militar
+        # Obtém níveis de edifícios conhecidos da aldeia
+        village_buildings: Dict[str, int] = {}
+        if village and hasattr(village, "buildings") and village.buildings:
+            village_buildings = village.buildings
+        elif v_id in account.villages and account.villages[v_id].buildings:
+            village_buildings = account.villages[v_id].buildings
+
+        # 3. Auto-pesquisa no Ferreiro para unidades necessárias cujos requisitos de edifícios foram atingidos
+        needed_target_units = [u for u, target in targets.items() if target > 0]
+        if needed_target_units and self.smith_manager:
+            try:
+                await self.smith_manager.auto_research_needed_units(
+                    account=account,
+                    village_id=v_id,
+                    needed_units=needed_target_units,
+                )
+            except Exception as e:
+                logger.debug(f"Erro suave ao auto-pesquisar tropas no Ferreiro: {e}")
+
+        # 4. Processamento por edifício militar
         buildings_to_check = set()
         for u, target in targets.items():
             if target > 0 and u in UNIT_TO_BUILDING:
@@ -183,6 +252,14 @@ class RecruitmentManager:
 
         for building in ("barracks", "stable", "garage"):
             if building not in buildings_to_check:
+                continue
+
+            # Verificação 1: Se os edifícios da aldeia são conhecidos e o edifício principal de treino não existe (nível 0)
+            if village_buildings and village_buildings.get(building, 0) < 1:
+                logger.info(
+                    f"[{account.world}] Edifício '{building}' ainda não construído na aldeia {v_id} (nível 0). "
+                    f"Recrutamento ignorado para este edifício."
+                )
                 continue
 
             try:
@@ -196,6 +273,29 @@ class RecruitmentManager:
             for unit in BUILDING_UNITS.get(building, []):
                 target_count = targets.get(unit, 0)
                 if target_count <= 0:
+                    continue
+
+                # Verificação 2: Pré-requisitos de edifícios da unidade (ex: Bárbaro requer Quartel 2 e Ferreiro 2)
+                reqs = UNIT_BUILDING_REQUIREMENTS.get(unit, {})
+                if village_buildings and reqs:
+                    unmet = [
+                        f"{req_b} nv{req_lvl} (atual: {village_buildings.get(req_b, 0)})"
+                        for req_b, req_lvl in reqs.items()
+                        if village_buildings.get(req_b, 0) < req_lvl
+                    ]
+                    if unmet:
+                        logger.info(
+                            f"[{account.world}] Pré-requisitos não cumpridos para {unit.capitalize()} na aldeia {v_id}: "
+                            f"{', '.join(unmet)}. Ignorando."
+                        )
+                        continue
+
+                # Verificação 3: Unidade desbloqueada/pesquisada no ecrã de treino
+                if unit not in b_state.available_units:
+                    logger.info(
+                        f"[{account.world}] {unit.capitalize()} não está pesquisado ou desbloqueado no {building.capitalize()} "
+                        f"da aldeia {v_id}. Ignorando."
+                    )
                     continue
 
                 home_count = troops_home.get(unit, 0)
@@ -212,12 +312,19 @@ class RecruitmentManager:
                     logger.debug(f"Recursos insuficientes no momento para recrutar {unit}.")
                     continue
 
+                # Limita pela população livre disponível
+                pop_per_unit = UNIT_POP_COST.get(unit, 1)
+                max_by_pop = pop_budget // pop_per_unit if pop_per_unit > 0 else needed
+                if max_by_pop <= 0:
+                    continue
+
                 # Lote configurado (padrão de 10 unidades por ciclo)
                 batch_limit = batch_sizes.get(unit, 10)
-                to_recruit = min(needed, batch_limit, max_recruitable)
+                to_recruit = min(needed, batch_limit, max_recruitable, max_by_pop)
 
                 if to_recruit > 0:
                     orders_for_building[unit] = to_recruit
+                    pop_budget -= to_recruit * pop_per_unit
 
             if orders_for_building:
                 success = await self.train_units(
@@ -237,6 +344,7 @@ class RecruitmentManager:
         account: TribalAccount,
         recruit_config: Any,
         village_id: Optional[int] = None,
+        enabled_check: Optional[Callable[[], bool]] = None,
     ) -> None:
         """
         Agenda no TaskScheduler a rotina periódica contínua de Recrutamento Militar.
@@ -245,6 +353,9 @@ class RecruitmentManager:
         interval_seconds = interval_minutes * 60.0
 
         async def auto_recruit_task():
+            if enabled_check and not enabled_check():
+                return
+
             try:
                 targets = getattr(recruit_config, "targets", {})
                 batch_sizes = getattr(recruit_config, "batch_sizes", {})
@@ -261,15 +372,16 @@ class RecruitmentManager:
                 logger.warning(f"Erro na rotina de recrutamento: {e}")
             finally:
                 if scheduler.is_running and not scheduler.is_paused:
-                    scheduler.schedule_human_like(
-                        name=f"AutoRecruit-Village-{village_id or 'active'}",
-                        priority=TaskPriority.RECRUIT,
-                        action=auto_recruit_task,
-                        base_seconds=interval_seconds,
-                        std_dev=interval_seconds * 0.15,
-                        min_seconds=max(30.0, interval_seconds * 0.5),
-                        max_seconds=interval_seconds * 1.5,
-                    )
+                    if not enabled_check or enabled_check():
+                        scheduler.schedule_human_like(
+                            name=f"AutoRecruit-Village-{village_id or 'active'}",
+                            priority=TaskPriority.RECRUIT,
+                            action=auto_recruit_task,
+                            base_seconds=interval_seconds,
+                            std_dev=interval_seconds * 0.15,
+                            min_seconds=max(30.0, interval_seconds * 0.5),
+                            max_seconds=interval_seconds * 1.5,
+                        )
 
         # Agenda a primeira execução após 10 segundos
         scheduler.schedule(

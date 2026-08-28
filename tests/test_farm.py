@@ -7,7 +7,7 @@ envio de ondas com modelos A e B, fallback via Praça de Reunião e configuraç�
 import asyncio
 import sys
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 if sys.platform == "win32":
     try:
@@ -222,21 +222,153 @@ class TestFarmConfig(unittest.TestCase):
     def test_farm_config_defaults_and_parsing(self):
         f_cfg = FarmConfig(
             enabled=True,
-            mode="am_farm",
+            mode="radar",
             template="B",
             max_distance=12.5,
             skip_losses=True,
             skip_wall=True,
+            skip_active_targets=True,
             interval_minutes=8.0,
             custom_targets=[(450, 550), (451, 551)],
             custom_troops={"spear": 10, "spy": 2},
         )
         self.assertTrue(f_cfg.enabled)
+        self.assertEqual(f_cfg.mode, "radar")
         self.assertEqual(f_cfg.template, "B")
         self.assertEqual(f_cfg.max_distance, 12.5)
+        self.assertTrue(f_cfg.skip_active_targets)
         self.assertEqual(len(f_cfg.custom_targets), 2)
         self.assertEqual(f_cfg.custom_troops["spear"], 10)
 
 
+class TestRadarFarming(unittest.IsolatedAsyncioTestCase):
+    def test_allocate_dynamic_squads(self):
+        from engine.actions.farm import allocate_dynamic_squads
+
+        available = UnitsCount(spear=23, spy=4, axe=10)
+        squad_template = UnitsCount(spear=5, spy=1)
+        targets = [(501, 501), (502, 502), (503, 503), (504, 504), (505, 505)]
+
+        # Temos 23 lanças e 4 espiões -> com (5 lanças + 1 espião), conseguimos min(23//5=4, 4//1=4) = 4 esquadrões
+        allocations = allocate_dynamic_squads(
+            available_units=available,
+            squad_template=squad_template,
+            targets=targets,
+        )
+
+        self.assertEqual(len(allocations), 4)
+        for i, (target, squad) in enumerate(allocations):
+            self.assertEqual(target, targets[i])
+            self.assertEqual(squad.spear, 5)
+            self.assertEqual(squad.spy, 1)
+
+    def test_allocate_dynamic_squads_with_max_limit(self):
+        from engine.actions.farm import allocate_dynamic_squads
+
+        available = UnitsCount(spear=100, spy=20)
+        squad_template = UnitsCount(spear=10, spy=2)
+        targets = [(501, 501), (502, 502), (503, 503), (504, 504)]
+
+        # Limitar a 2 esquadrões
+        allocations = allocate_dynamic_squads(
+            available_units=available,
+            squad_template=squad_template,
+            targets=targets,
+            max_squads=2,
+        )
+        self.assertEqual(len(allocations), 2)
+
+    def test_allocate_dynamic_squads_insufficient_troops(self):
+        from engine.actions.farm import allocate_dynamic_squads
+
+        available = UnitsCount(spear=3, spy=0)
+        squad_template = UnitsCount(spear=5, spy=1)
+        targets = [(501, 501)]
+
+        allocations = allocate_dynamic_squads(
+            available_units=available,
+            squad_template=squad_template,
+            targets=targets,
+        )
+        self.assertEqual(len(allocations), 0)
+
+    async def test_get_radar_farm_plan(self):
+        from engine.actions.map import MapVillage
+        from engine.actions.place import CommandMovement, PlaceState
+        from engine.core.account import TribalAccount
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.current_village_id = 12345
+        account.villages = {12345: MagicMock(x=500, y=500)}
+
+        farm_manager = FarmManager()
+        farm_manager.map_manager = MagicMock()
+
+        # 3 aldeias bárbaras vizinhas
+        barbs = [
+            MapVillage(id=1, x=501, y=501, name="Bárbara 1", distance=1.4, is_barbarian=True),
+            MapVillage(id=2, x=502, y=502, name="Bárbara 2", distance=2.8, is_barbarian=True),
+            MapVillage(id=3, x=503, y=503, name="Bárbara 3", distance=4.2, is_barbarian=True),
+        ]
+        farm_manager.map_manager.scan_nearby_barbarians = AsyncMock(return_value=barbs)
+
+        # Aldeia tem 15 lanças e 3 espiões; já existe um ataque a caminho de (501|501)
+        place_state = PlaceState(
+            village_id=12345,
+            units=UnitsCount(spear=15, spy=3),
+            commands=[CommandMovement(command_id="1", movement_type="attack", target_name="Bárbara 1", target_coords="(501|501)")],
+        )
+        farm_manager.place_manager.get_state = AsyncMock(return_value=place_state)
+
+        plan = await farm_manager.get_radar_farm_plan(
+            account=account,
+            radius=15.0,
+            squad_template=UnitsCount(spear=5, spy=1),
+            skip_active_targets=True,
+            village_id=12345,
+        )
+
+        self.assertEqual(plan.total_barbarians_found, 3)
+        # Como (501|501) já está a ser atacada, os alvos elegíveis são (502|502) e (503|503)
+        self.assertEqual(len(plan.eligible_targets), 2)
+        # Com 15 lanças, conseguimos abastecer 2 esquadrões (para os 2 alvos elegíveis)
+        self.assertEqual(len(plan.squads_assigned), 2)
+        self.assertEqual(plan.squads_assigned[0][0], (502, 502))
+        self.assertEqual(plan.squads_assigned[1][0], (503, 503))
+
+    async def test_run_radar_farm_cycle(self):
+        from engine.actions.farm import RadarFarmPlan
+        from engine.core.account import TribalAccount
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.current_village_id = 12345
+
+        farm_manager = FarmManager()
+        plan = RadarFarmPlan(
+            village_id=12345,
+            total_barbarians_found=2,
+            eligible_targets=[(502, 502), (503, 503)],
+            squads_assigned=[
+                ((502, 502), UnitsCount(spear=5, spy=1)),
+                ((503, 503), UnitsCount(spear=5, spy=1)),
+            ],
+            total_carrying_capacity=250,
+        )
+        farm_manager.get_radar_farm_plan = AsyncMock(return_value=plan)
+        farm_manager.place_manager.send_command = AsyncMock(return_value=True)
+
+        with patch("asyncio.sleep", AsyncMock()):
+            result = await farm_manager.run_radar_farm_cycle(
+                account=account,
+                radius=15.0,
+                village_id=12345,
+            )
+
+            self.assertEqual(result["sent_attacks"], 2)
+            self.assertEqual(result["total_targets"], 2)
+            self.assertEqual(farm_manager.place_manager.send_command.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
+

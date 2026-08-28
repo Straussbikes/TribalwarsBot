@@ -7,10 +7,11 @@ ordens de evolução, cancelamento e execução automática de planos de evoluç
 import asyncio
 from dataclasses import dataclass, field
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
+import urllib.parse
 
 from engine.core.account import TribalAccount
-from engine.core.exceptions import SessionExpiredError
+from engine.core.exceptions import BotProtectionError, SessionExpiredError
 from engine.core.models import Resources, TaskPriority
 from engine.core.scheduler import TaskScheduler
 
@@ -167,6 +168,40 @@ MAX_BUILDING_LEVELS: Dict[str, int] = {
     BuildingType.WALL: 20,
 }
 
+# Custos base e multiplicador padrão por nível de edifício
+BASE_BUILDING_COSTS: Dict[str, Dict[str, Any]] = {
+    BuildingType.WOOD: {"wood": 90, "stone": 80, "iron": 70, "pop": 5, "factor": 1.25},
+    BuildingType.STONE: {"wood": 65, "stone": 100, "iron": 40, "pop": 10, "factor": 1.275},
+    BuildingType.IRON: {"wood": 75, "stone": 65, "iron": 100, "pop": 10, "factor": 1.25},
+    BuildingType.MAIN: {"wood": 90, "stone": 80, "iron": 70, "pop": 5, "factor": 1.26},
+    BuildingType.BARRACKS: {"wood": 200, "stone": 170, "iron": 90, "pop": 7, "factor": 1.26},
+    BuildingType.STABLE: {"wood": 270, "stone": 240, "iron": 260, "pop": 8, "factor": 1.26},
+    BuildingType.GARAGE: {"wood": 300, "stone": 240, "iron": 260, "pop": 8, "factor": 1.26},
+    BuildingType.CHURCH: {"wood": 16000, "stone": 20000, "iron": 5000, "pop": 5000, "factor": 1.26},
+    BuildingType.CHURCH_F: {"wood": 160, "stone": 200, "iron": 50, "pop": 5, "factor": 1.0},
+    BuildingType.SNOB: {"wood": 15000, "stone": 25000, "iron": 10000, "pop": 80, "factor": 2.0},
+    BuildingType.SMITH: {"wood": 220, "stone": 180, "iron": 240, "pop": 20, "factor": 1.26},
+    BuildingType.PLACE: {"wood": 10, "stone": 40, "iron": 10, "pop": 0, "factor": 1.0},
+    BuildingType.STATUE: {"wood": 220, "stone": 220, "iron": 220, "pop": 10, "factor": 1.0},
+    BuildingType.MARKET: {"wood": 100, "stone": 100, "iron": 100, "pop": 20, "factor": 1.2},
+    BuildingType.FARM: {"wood": 45, "stone": 40, "iron": 30, "pop": 0, "factor": 1.3},
+    BuildingType.STORAGE: {"wood": 60, "stone": 50, "iron": 40, "pop": 0, "factor": 1.265},
+    BuildingType.HIDE: {"wood": 50, "stone": 60, "iron": 50, "pop": 2, "factor": 1.25},
+    BuildingType.WALL: {"wood": 50, "stone": 100, "iron": 20, "pop": 5, "factor": 1.26},
+}
+
+
+def estimate_building_cost(building: str, target_level: int) -> Tuple[int, int, int, int]:
+    """Calcula os custos estimados (madeira, argila, ferro, população) para o nível pretendido."""
+    base = BASE_BUILDING_COSTS.get(building, {"wood": 100, "stone": 100, "iron": 100, "pop": 5, "factor": 1.25})
+    factor = float(base.get("factor", 1.25))
+    lvl_exp = max(0, target_level - 1)
+    wood = int(round(base["wood"] * (factor ** lvl_exp)))
+    stone = int(round(base["stone"] * (factor ** lvl_exp)))
+    iron = int(round(base["iron"] * (factor ** lvl_exp)))
+    pop = int(round(base.get("pop", 5) * (1.17 ** lvl_exp)))
+    return wood, stone, iron, pop
+
 
 @dataclass
 class QueueOrder:
@@ -176,7 +211,18 @@ class QueueOrder:
     building_name: str
     target_level: int
     timer_str: str = ""
+    timer_seconds: Optional[int] = None
     cancel_url: str = ""
+    instant_build_url: Optional[str] = None
+
+    @property
+    def is_instant_free_ready(self) -> bool:
+        """Verifica se a ordem pode ser concluída gratuitamente (< 3 min = 180s ou link presente)."""
+        if self.instant_build_url:
+            return True
+        if self.timer_seconds is not None and 0 < self.timer_seconds <= 180:
+            return True
+        return False
 
 
 @dataclass
@@ -192,6 +238,12 @@ class BuildingUpgrade:
     can_build: bool = False
     error_reason: Optional[str] = None
     build_url: Optional[str] = None
+
+
+
+# Aliases para compatibilidade
+BuildingQueueItem = QueueOrder
+BuildingUpgradeInfo = BuildingUpgrade
 
 
 @dataclass
@@ -381,7 +433,9 @@ class MainBuildingManager:
                     building_name=b_name,
                     target_level=int(q.get("target_level", 1)),
                     timer_str=str(q.get("timer_str", "")),
+                    timer_seconds=q.get("timer_seconds"),
                     cancel_url=str(q.get("cancel_url", "")),
+                    instant_build_url=q.get("instant_build_url"),
                 )
             )
 
@@ -417,42 +471,139 @@ class MainBuildingManager:
         building: str,
         village_id: Optional[int] = None,
         force: bool = True,
+        build_url: Optional[str] = None,
     ) -> bool:
         """
         Executa a ordem de construção de um edifício no Edifício Principal.
-        Envia a requisição com injeção do token CSRF 'h' e headers móveis.
+        Envia a requisição com injeção do token CSRF 'h', 'page=mobile' e headers móveis.
+        Verifica rigorosamente se a ordem foi adicionada à fila do jogo.
         """
         b_canon = self.normalize_building_id(building)
+        b_name = BUILDING_NAMES.get(b_canon, b_canon)
         logger.info(
-            f"[{account.world}] A enviar ordem de construção para: '{b_canon}' "
-            f"({BUILDING_NAMES.get(b_canon, b_canon)})"
+            f"[{account.world}] 🔨 A enviar ordem de construção para: '{b_name}' ({b_canon})"
         )
 
         try:
-            # Envia via upgrade_building padrão mobile/desktop com CSRF token
-            extra_params = {
-                "action": "upgrade_building",
+            # 1. Parâmetros padrão de melhoria (action=build é o padrão nativo do Tribal Wars)
+            extra_params: Dict[str, Any] = {
+                "action": "build",
                 "id": b_canon,
-                "type": "main",
                 "force": "1" if force else "0",
-                "h": account.csrf_token or "",
             }
+            if account.csrf_token:
+                extra_params["h"] = account.csrf_token
+
+            # Se build_url fornecido pelo parser contiver parâmetros específicos (ex: extraído do jogo)
+            if build_url and "?" in build_url:
+                try:
+                    parsed_url = urllib.parse.urlparse(build_url)
+                    parsed_qs = urllib.parse.parse_qs(parsed_url.query)
+                    for k, v in parsed_qs.items():
+                        if v and k not in ("village", "screen"):
+                            extra_params[k] = v[0]
+                except Exception as parse_err:
+                    logger.debug(f"[{account.world}] Erro ao parsear build_url '{build_url}': {parse_err}")
+
+            if account.csrf_token and "h" not in extra_params:
+                extra_params["h"] = account.csrf_token
+
             html = await account.get_screen(
                 screen="main",
                 village_id=village_id,
                 extra_params=extra_params,
                 apply_jitter=True,
             )
-            # Verifica se o edifício entrou na fila ou se os recursos foram deduzidos
-            levels = parse_building_levels(html, account.last_game_data)
+
+            # Verifica se o edifício entrou na fila
             queue = parse_build_queue(html)
-            logger.info(
-                f"[{account.world}] Ordem para '{b_canon}' enviada. "
-                f"Itens em fila atualizados: {len(queue)}"
+            in_queue = any(
+                q.get("building") == b_canon
+                or self.normalize_building_id(q.get("building_raw", "")) == b_canon
+                or q.get("building_raw") == b_name
+                for q in queue
             )
-            return True
+
+            if not in_queue:
+                # 2. Fallback resiliente: alguns mundos/versões utilizam action=upgrade_building
+                alt_action = "upgrade_building" if extra_params.get("action") == "build" else "build"
+                logger.debug(
+                    f"[{account.world}] Ordem não confirmada na fila com action={extra_params.get('action')}. "
+                    f"A tentar fallback com action={alt_action} para '{b_canon}'..."
+                )
+                extra_params["action"] = alt_action
+                html = await account.get_screen(
+                    screen="main",
+                    village_id=village_id,
+                    extra_params=extra_params,
+                    apply_jitter=True,
+                )
+                queue = parse_build_queue(html)
+                in_queue = any(
+                    q.get("building") == b_canon
+                    or self.normalize_building_id(q.get("building_raw", "")) == b_canon
+                    or q.get("building_raw") == b_name
+                    for q in queue
+                )
+
+            if not in_queue:
+                # 3. Fallback POST: mundos com proteção CSRF estrita via requisição POST
+                logger.debug(
+                    f"[{account.world}] A tentar envio de ordem de construção via POST para '{b_canon}'..."
+                )
+                post_data = {
+                    "action": "build",
+                    "id": b_canon,
+                    "force": "1" if force else "0",
+                }
+                if account.csrf_token:
+                    post_data["h"] = account.csrf_token
+                try:
+                    html = await account.post_action(
+                        screen="main",
+                        action="build",
+                        post_data=post_data,
+                        village_id=village_id,
+                    )
+                    queue = parse_build_queue(html)
+                    in_queue = any(
+                        q.get("building") == b_canon
+                        or self.normalize_building_id(q.get("building_raw", "")) == b_canon
+                        or q.get("building_raw") == b_name
+                        for q in queue
+                    )
+                except Exception as post_err:
+                    logger.debug(f"[{account.world}] Fallback POST falhou: {post_err}")
+
+            if in_queue or len(queue) > 0:
+                logger.info(
+                    f"[{account.world}] ✅ Ordem para '{b_name}' ({b_canon}) confirmada na fila! "
+                    f"Itens em fila: {len(queue)}"
+                )
+                return True
+            else:
+                # Deteção de mensagens de erro do jogo no HTML
+                err_msg = "Não entrou na fila de construção"
+                if "Não há recursos suficientes" in html or "Recursos insuficientes" in html:
+                    err_msg = "Recursos insuficientes"
+                elif "Armazém muito pequeno" in html:
+                    err_msg = "Armazém muito pequeno"
+                elif "Fila de construção cheia" in html:
+                    err_msg = "Fila de construção cheia"
+                elif "População máxima atingida" in html or "precisa de mais fazenda" in html.lower():
+                    err_msg = "População insuficiente"
+                elif "Edifício totalmente construído" in html:
+                    err_msg = "Nível máximo já atingido"
+                elif "Requisitos não preenchidos" in html:
+                    err_msg = "Requisitos tecnológicos não preenchidos"
+
+                logger.warning(
+                    f"[{account.world}] ⚠️ Ordem para '{b_name}' ({b_canon}) NÃO foi colocada na fila. Motivo: {err_msg}."
+                )
+                return False
+
         except Exception as e:
-            logger.error(f"[{account.world}] Falha ao construir '{b_canon}': {e}")
+            logger.error(f"[{account.world}] ❌ Falha ao construir '{b_canon}': {e}")
             return False
 
     async def cancel_order(
@@ -534,28 +685,57 @@ class MainBuildingManager:
                     continue
 
                 # 3. Verifica informações de upgrade
-                upgrade_info = state.upgrades.get(b)
-                if upgrade_info:
-                    # Verifica se temos recursos suficientes
-                    if resources.can_afford(
-                        wood=upgrade_info.wood,
-                        stone=upgrade_info.stone,
-                        iron=upgrade_info.iron,
-                        pop=upgrade_info.pop,
-                    ):
-                        return upgrade_info
-                    else:
-                        b_name = BUILDING_NAMES.get(b, b)
-                        logger.info(
-                            f"Próximo alvo do plano: '{b_name}' ({b}) para Nível {current_virt + 1}. "
-                            f"Recursos: {resources.wood}/{upgrade_info.wood} M, "
-                            f"{resources.stone}/{upgrade_info.stone} A, "
-                            f"{resources.iron}/{upgrade_info.iron} F (Pop: {resources.free_pop}/{upgrade_info.pop})"
-                        )
-                        return None
+                # Se o edifício já tem construções na fila (current_virt > nível real),
+                # calculamos o custo para o próximo nível virtual (current_virt + 1)
+                curr_real = state.buildings.get(b, 0)
+                if current_virt > curr_real or b not in state.upgrades:
+                    e_wood, e_stone, e_iron, e_pop = estimate_building_cost(b, current_virt + 1)
+                    upgrade_info = BuildingUpgrade(
+                        building=b,
+                        current_level=current_virt,
+                        target_level=current_virt + 1,
+                        wood=e_wood,
+                        stone=e_stone,
+                        iron=e_iron,
+                        pop=e_pop,
+                        can_build=True,
+                    )
                 else:
-                    # Se não temos a linha no HTML (ex.: ainda não desbloqueado)
+                    upgrade_info = state.upgrades[b]
+
+                # Verifica se a capacidade máxima de armazém comporta o custo
+                if (
+                    resources.storage_max > 0
+                    and (
+                        upgrade_info.wood > resources.storage_max
+                        or upgrade_info.stone > resources.storage_max
+                        or upgrade_info.iron > resources.storage_max
+                    )
+                ):
+                    b_name = BUILDING_NAMES.get(b, b)
+                    logger.warning(
+                        f"[{state.village_id}] Armazém ({resources.storage_max}) insuficiente para "
+                        f"'{b_name}' Nível {current_virt + 1} (Custo máx: {max(upgrade_info.wood, upgrade_info.stone, upgrade_info.iron)})."
+                    )
                     continue
+
+                # Verifica se temos recursos suficientes
+                if resources.can_afford(
+                    wood=upgrade_info.wood,
+                    stone=upgrade_info.stone,
+                    iron=upgrade_info.iron,
+                    pop=upgrade_info.pop,
+                ):
+                    return upgrade_info
+                else:
+                    b_name = BUILDING_NAMES.get(b, b)
+                    logger.info(
+                        f"Próximo alvo do plano: '{b_name}' ({b}) para Nível {current_virt + 1}. "
+                        f"Recursos: {resources.wood}/{upgrade_info.wood} M, "
+                        f"{resources.stone}/{upgrade_info.stone} A, "
+                        f"{resources.iron}/{upgrade_info.iron} F (Pop: {resources.free_pop}/{upgrade_info.pop})"
+                    )
+                    return None
 
         if not any_unreached:
             logger.info(f"Todas as {len(plan)} metas do plano de construção ativo foram alcançadas!")
@@ -563,6 +743,133 @@ class MainBuildingManager:
             logger.debug("Existem metas pendentes no plano que ainda aguardam pré-requisitos.")
         return None
 
+    def get_upcoming_plan(
+        self,
+        state: MainBuildingState,
+        plan: List[Tuple[str, int]],
+        resources: Optional[Resources] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Calcula a lista detalhada de passos do plano de construção,
+        indicando para cada um se está concluído, em andamento na fila,
+        se é o próximo alvo imediato ou pendente.
+        """
+        items: List[Dict[str, Any]] = []
+        virt_levels = state.virtual_levels.copy()
+        found_next = False
+
+        # Mapeia ordens da fila para consulta rápida: (building, target_level)
+        queue_map = {(q.building, q.target_level): q for q in state.queue}
+
+        for idx, (b_raw, target_lvl) in enumerate(plan):
+            b = self.normalize_building_id(b_raw)
+            b_name = BUILDING_NAMES.get(b, b)
+            curr_lvl = state.buildings.get(b, 0)
+            virt_lvl = virt_levels.get(b, 0)
+
+            status = "pending"
+            missing_reqs = []
+            upgrade_info = state.upgrades.get(b)
+
+            if curr_lvl >= target_lvl:
+                status = "completed"
+            elif (b, target_lvl) in queue_map:
+                status = "in_progress"
+            else:
+                # Verifica pré-requisitos com base nos níveis virtuais
+                reqs = BUILDING_REQUIREMENTS.get(b, {})
+                for req_b, req_lvl in reqs.items():
+                    if virt_levels.get(req_b, 0) < req_lvl:
+                        req_name = BUILDING_NAMES.get(req_b, req_b)
+                        missing_reqs.append(f"{req_name} Nível {req_lvl}")
+
+                if missing_reqs:
+                    status = "blocked"
+                elif not found_next:
+                    status = "next"
+                    found_next = True
+
+            # Custos estimados
+            if upgrade_info and curr_lvl == target_lvl - 1:
+                wood = upgrade_info.wood
+                stone = upgrade_info.stone
+                iron = upgrade_info.iron
+                pop = upgrade_info.pop
+            else:
+                wood, stone, iron, pop = estimate_building_cost(b, target_lvl)
+
+            can_afford = False
+            if resources:
+                can_afford = resources.can_afford(wood, stone, iron, pop)
+
+            items.append({
+                "step": idx + 1,
+                "building": b,
+                "building_name": b_name,
+                "target_level": target_lvl,
+                "current_level": curr_lvl,
+                "virtual_level": virt_lvl,
+                "status": status,
+                "wood": wood,
+                "stone": stone,
+                "iron": iron,
+                "pop": pop,
+                "can_afford": can_afford,
+                "missing_requirements": missing_reqs,
+            })
+
+        return items
+
+    async def check_and_complete_instant_builds(
+        self, account: TribalAccount, village_id: Optional[int] = None
+    ) -> List[str]:
+        """
+        Verifica a fila de construção e executa a conclusão gratuita imediata
+        para qualquer ordem com menos de 3 minutos restantes (180s) ou botão de conclusão grátis.
+        """
+        completed: List[str] = []
+        v_id = village_id or account.current_village_id or 0
+        try:
+            state = await self.get_state(account, village_id=v_id)
+            for order in state.queue:
+                if order.is_instant_free_ready:
+                    logger.info(
+                        f"[{account.world}] ⚡ A executar conclusão gratuita (< 3 min) para '{order.building_name}' (Ordem #{order.order_id}, Restante: {order.timer_str or f'{order.timer_seconds}s'})..."
+                    )
+                    success = False
+                    if order.instant_build_url:
+                        url = order.instant_build_url
+                        if "h=" not in url and account.csrf_token:
+                            sep = "&" if "?" in url else "?"
+                            url = f"{url}{sep}h={account.csrf_token}"
+                        full_url = url if url.startswith("http") else f"https://{account.host}/{url.lstrip('/')}"
+                        try:
+                            await account.get(full_url, apply_jitter=True)
+                            success = True
+                        except Exception as e:
+                            logger.debug(f"Erro ao concluir via URL: {e}")
+
+                    if not success:
+                        try:
+                            extra_params = {
+                                "action": "instant_build",
+                                "id": order.order_id,
+                                "h": account.csrf_token or "",
+                            }
+                            await account.get_screen("main", village_id=v_id, extra_params=extra_params, apply_jitter=True)
+                            success = True
+                        except Exception as e2:
+                            logger.debug(f"Erro ao concluir via action=instant_build: {e2}")
+
+                    if success:
+                        completed.append(order.building)
+                        logger.info(
+                            f"[{account.world}] ✅ Construção de '{order.building_name}' concluída instantaneamente com sucesso!"
+                        )
+                        await asyncio.sleep(0.3)
+        except Exception as e:
+            logger.debug(f"Erro ao verificar conclusões instantâneas: {e}")
+        return completed
 
     async def run_auto_build_cycle(
         self,
@@ -573,43 +880,66 @@ class MainBuildingManager:
     ) -> Optional[str]:
         """
         Executa um ciclo completo de verificação e evolução automática:
-        1. Obtém o estado do Edifício Principal.
-        2. Avalia o próximo candidato conforme o plano e recursos disponíveis.
-        3. Envia o comando de construção se elegível.
-        Retorna o identificador do edifício construído, ou None.
+        1. Executa conclusão gratuita (< 3 min) se houver ordens prontas.
+        2. Obtém o estado do Edifício Principal.
+        3. Avalia o próximo candidato conforme o plano e recursos disponíveis.
+        4. Envia o comando de construção e avança na fila até ao limite configurado.
+        Retorna o identificador do último edifício colocado na fila, ou None.
         """
-        state = await self.get_state(account, village_id=village_id)
+        v_id = village_id or account.current_village_id or 0
+
+        # 1. Verifica e conclui ordens gratuitas (< 3 min)
+        await self.check_and_complete_instant_builds(account, village_id=v_id)
+
+        state = await self.get_state(account, village_id=v_id)
         limit = max_queue if max_queue is not None else state.max_queue_size
         logger.info(
-            f"[{account.world}] A avaliar Edifício Principal (Fila atual: {state.queue_count}/{limit})."
-        )
-        candidate = self.get_next_build_candidate(
-            state=state,
-            plan=plan,
-            resources=account.resources,
-            max_queue=max_queue,
+            f"[{account.world}] A avaliar Edifício Principal (Aldeia {v_id}, Fila: {state.queue_count}/{limit})."
         )
 
-        if candidate:
+        last_built = None
+        while state.queue_count < limit:
+            curr_v = account.villages.get(v_id) if v_id else account.current_village
+            resources = curr_v.resources if curr_v else account.resources
+
+            candidate = self.get_next_build_candidate(
+                state=state,
+                plan=plan,
+                resources=resources,
+                max_queue=limit,
+            )
+
+            if not candidate:
+                break
+
             success = await self.build_building(
                 account=account,
                 building=candidate.building,
-                village_id=village_id,
+                village_id=v_id,
+                build_url=getattr(candidate, "build_url", None),
             )
+
             if success:
+                last_built = candidate.building
                 b_name = BUILDING_NAMES.get(candidate.building, candidate.building)
                 logger.info(
                     f"[{account.world}] ✅ Sucesso ao colocar na fila: "
                     f"'{b_name}' para Nível {candidate.target_level}!"
                 )
-                return candidate.building
-        return None
+                # Se ainda houver vagas, re-lê o estado para avançar com o próximo do plano
+                if state.queue_count + 1 < limit:
+                    state = await self.get_state(account, village_id=v_id)
+                else:
+                    break
+            else:
+                break
+
+        return last_built
 
     # Alias para compatibilidade de API
     run_build_cycle = run_auto_build_cycle
 
     def schedule_auto_build(
-
         self,
         scheduler: TaskScheduler,
         account: TribalAccount,
@@ -617,8 +947,17 @@ class MainBuildingManager:
         max_queue: int = 2,
         village_id: Optional[int] = None,
         interval_seconds: float = 60.0,
+        enabled_check: Optional[Callable[[], bool]] = None,
     ) -> None:
+        logger.info(
+            f"[{account.world}] Construção Automática agendada a cada ~{interval_seconds}s "
+            f"(Aldeia: {village_id or 'ativa'}, {len(plan)} passos no plano)."
+        )
+
         async def auto_build_task():
+            if enabled_check and not enabled_check():
+                return
+
             try:
                 # Atualiza recursos antes de tentar construir
                 await account.refresh_state(village_id=village_id)
@@ -628,16 +967,12 @@ class MainBuildingManager:
                     max_queue=max_queue,
                     village_id=village_id,
                 )
-            except SessionExpiredError:
-                logger.warning(
-                    f"[{account.world}] Sessão expirada. Utilize o botão '🔑 Fazer Login' no Cockpit para renovar o acesso."
-                )
+            except (BotProtectionError, SessionExpiredError):
+                raise
             except Exception as e:
                 logger.warning(f"Erro no ciclo de auto-build: {e}")
-
-
             finally:
-                # Reagenda continuamente para o próximo ciclo
+                # Reagenda continuamente para o próximo ciclo se o motor estiver em execução
                 if scheduler.is_running and not scheduler.is_paused:
                     scheduler.schedule_human_like(
                         name=f"AutoBuild-Village-{village_id or 'active'}",
@@ -654,6 +989,6 @@ class MainBuildingManager:
             name=f"AutoBuild-Village-{village_id or 'active'}",
             priority=TaskPriority.BUILD,
             action=auto_build_task,
-            delay_seconds=5.0,
+            delay_seconds=3.0,
         )
 

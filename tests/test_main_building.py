@@ -338,9 +338,8 @@ class TestMainBuildingAsyncActions(unittest.IsolatedAsyncioTestCase):
             screen="main",
             village_id=None,
             extra_params={
-                "action": "upgrade_building",
+                "action": "build",
                 "id": "wood",
-                "type": "main",
                 "force": "1",
                 "h": "csrf_token_abc",
             },
@@ -407,7 +406,202 @@ class TestMainBuildingAsyncActions(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(upgrades["wood"]["iron"], 50)
         self.assertTrue(upgrades["wood"]["can_build"])
 
+    def test_get_upcoming_plan(self):
+        """Valida que get_upcoming_plan calcula corretamente os estados completed, in_progress, next e pending."""
+        from engine.actions.main_building import MainBuildingState, BuildingQueueItem, BuildingUpgradeInfo
+
+        state = MainBuildingState(
+            village_id=12345,
+            buildings={"main": 3, "wood": 2, "stone": 1, "iron": 0},
+            queue=[
+                BuildingQueueItem(
+                    order_id="order_1",
+                    building="stone",
+                    building_name="Poço de Argila",
+                    target_level=2,
+                    timer_str="0:02:15",
+                )
+            ],
+            upgrades={
+                "wood": BuildingUpgradeInfo(building="wood", current_level=2, target_level=3, wood=100, stone=120, iron=80, pop=1, can_build=True),
+                "iron": BuildingUpgradeInfo(building="iron", current_level=0, target_level=1, wood=75, stone=65, iron=70, pop=1, can_build=True),
+            },
+        )
+
+        plan = [
+            ("wood", 1),   # current is 2 -> completed
+            ("wood", 2),   # current is 2 -> completed
+            ("stone", 2),  # in queue -> in_progress
+            ("iron", 1),   # not in queue, prereqs met -> next
+            ("wood", 3),   # pending
+        ]
+
+        manager = MainBuildingManager()
+        upcoming = manager.get_upcoming_plan(state, plan)
+
+        self.assertEqual(len(upcoming), 5)
+        self.assertEqual(upcoming[0]["status"], "completed")
+        self.assertEqual(upcoming[1]["status"], "completed")
+        self.assertEqual(upcoming[2]["status"], "in_progress")
+        self.assertEqual(upcoming[3]["status"], "next")
+        self.assertEqual(upcoming[4]["status"], "pending")
+        self.assertEqual(upcoming[3]["wood"], 75)
+
+    def test_get_village_template_config(self):
+        from engine.config.settings import BotConfig, BuildingConfig, VillageConfig
+        cfg = BotConfig(
+            building=BuildingConfig(template="rush_resources"),
+            villages={
+                "101": VillageConfig(category="attack"),
+                "102": VillageConfig(category="defense"),
+                "103": VillageConfig(building_template="custom"),
+            }
+        )
+        self.assertEqual(cfg.get_village_template(), "RUSH_RESOURCES")
+        self.assertEqual(cfg.get_village_template("101"), "MILITARY_RUSH")
+        self.assertEqual(cfg.get_village_template("102"), "BALANCED")
+        self.assertEqual(cfg.get_village_template("103"), "CUSTOM")
+
+
+class TestMainBuildingBugFixes(unittest.IsolatedAsyncioTestCase):
+    async def test_build_building_with_build_url_query_parsing(self):
+        """Valida que parâmetros customizados de build_url são parseados e enviados corretamente."""
+        from engine.core.account import TribalAccount
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.csrf_token = "csrf_token_abc"
+        account.get_screen = AsyncMock(return_value=SAMPLE_MAIN_HTML)
+
+        manager = MainBuildingManager()
+        custom_url = "/game.php?village=12345&screen=main&action=build&id=wood&force=1&h=url_token_999&client_time=1700000000"
+
+        res = await manager.build_building(account, "wood", build_url=custom_url)
+        self.assertTrue(res)
+
+        # Verifica se os parâmetros extraídos do build_url foram passados
+        account.get_screen.assert_called_with(
+            screen="main",
+            village_id=None,
+            extra_params={
+                "action": "build",
+                "id": "wood",
+                "force": "1",
+                "h": "url_token_999",
+                "client_time": "1700000000",
+            },
+            apply_jitter=True,
+        )
+
+    async def test_build_building_fallback_to_build(self):
+        """Valida que se upgrade_building não adicionar à fila, é tentado fallback com action=build."""
+        from engine.core.account import TribalAccount
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.csrf_token = "csrf_token_abc"
+
+        empty_queue_html = "<html><body><table id='buildings'></table></body></html>"
+        success_queue_html = SAMPLE_MAIN_HTML
+
+        # 1ª chamada retorna fila vazia, 2ª chamada (fallback) retorna fila com ordem
+        account.get_screen = AsyncMock(side_effect=[empty_queue_html, success_queue_html])
+
+        manager = MainBuildingManager()
+        res = await manager.build_building(account, "wood")
+        self.assertTrue(res)
+        self.assertEqual(account.get_screen.call_count, 2)
+
+    async def test_build_building_failure_detected(self):
+        """Valida que quando uma ordem falha e não entra na fila, retorna False."""
+        from engine.core.account import TribalAccount
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.csrf_token = "csrf_token_abc"
+
+        error_html = """
+        <html><body>
+            <div class="error_box">Não há recursos suficientes</div>
+            <table id="buildings"></table>
+        </body></html>
+        """
+        account.get_screen = AsyncMock(return_value=error_html)
+
+        manager = MainBuildingManager()
+        res = await manager.build_building(account, "iron")
+        self.assertFalse(res)
+
+    def test_get_next_build_candidate_scales_cost_for_virtual_levels(self):
+        """Valida que para edifícios já em fila (virtual > real), o custo é calculado para o próximo nível virtual."""
+        manager = MainBuildingManager()
+
+        # Aldeia tem Bosque nível 1, mas já está na fila evoluindo para nível 2 (virtual = 2)
+        state = MainBuildingState(
+            village_id=12345,
+            buildings={"wood": 1, "stone": 1, "iron": 1, "main": 3, "storage": 5, "farm": 5},
+            queue=[
+                QueueOrder(order_id="101", building="wood", building_name="Bosque", target_level=2),
+            ],
+            upgrades={
+                "wood": BuildingUpgrade(building="wood", current_level=1, target_level=2, wood=63, stone=77, iron=50, pop=1, can_build=True),
+            },
+            max_queue_size=2,
+        )
+
+        plan = [(BuildingType.WOOD, 3)]
+        # Recursos abundantes
+        resources = Resources(wood=5000, stone=5000, iron=5000, storage_max=10000, pop=10, pop_max=100)
+
+        candidate = manager.get_next_build_candidate(state, plan, resources)
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.building, "wood")
+        self.assertEqual(candidate.target_level, 3)
+        self.assertGreater(candidate.wood, 63)
+
+    async def test_check_and_complete_instant_builds(self):
+        """Valida que ordens com menos de 3 min (180s) disparam a conclusão gratuita instantânea."""
+        from engine.core.account import TribalAccount
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.csrf_token = "csrf_token_abc"
+
+        queue_under_3min_html = """
+        <table id="buildqueue" class="vis">
+            <tr class="lit buildorder_wood">
+                <td>Bosque (Nível 9)</td>
+                <td><span class="timer">0:01:45</span></td>
+                <td><a href="/game.php?action=cancel&id=54321">cancelar</a></td>
+                <td><a class="btn-instant-free" href="/game.php?screen=main&action=instant_build&id=54321&h=csrf_token_abc">Concluir Grátis</a></td>
+            </tr>
+        </table>
+        <table id="buildings"></table>
+        """
+        account.get_screen = AsyncMock(return_value=queue_under_3min_html)
+        account.get = AsyncMock(return_value="<html>OK</html>")
+
+        manager = MainBuildingManager()
+        completed = await manager.check_and_complete_instant_builds(account, village_id=12345)
+
+        self.assertIn("wood", completed)
+        account.get.assert_called_once()
+
+    def test_parse_build_queue_instant_and_timer_seconds(self):
+        """Valida a extração de timer_seconds e instant_build_url pelo parser."""
+        html = """
+        <table id="buildqueue">
+            <tr>
+                <td>Edifício Principal (Nível 10)</td>
+                <td><span class="timer">0:02:15</span></td>
+                <td><a href="/game.php?action=cancel&id=9999">cancelar</a></td>
+                <td><a href="/game.php?screen=main&action=instant_finish&id=9999&h=csrf">Completar</a></td>
+            </tr>
+        </table>
+        """
+        queue = parse_build_queue(html)
+        self.assertEqual(len(queue), 1)
+        self.assertEqual(queue[0]["timer_seconds"], 135)
+        self.assertIsNotNone(queue[0]["instant_build_url"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

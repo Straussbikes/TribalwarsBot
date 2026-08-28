@@ -81,6 +81,9 @@ def create_app(
         main_logger = logging.getLogger("TribalEngine")
         main_logger.addHandler(ws_handler)
 
+        desktop_logger = logging.getLogger("TribalDesktop")
+        desktop_logger.addHandler(ws_handler)
+
     # 5. Monta a interface estática do Frontend se a pasta existir
     frontend_dir = Path(__file__).resolve().parent.parent.parent / "frontend"
     if not frontend_dir.exists():

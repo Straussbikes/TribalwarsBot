@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class BuildingConfig:
     """Configurações da rotina do Edifício Principal."""
+    enabled: bool = True
     template: str = "rush_resources"  # 'rush_resources', 'balanced', 'military_rush', 'custom'
     max_queue: int = 2                 # Máximo de construções sem custos adicionais
     interval_seconds: float = 75.0     # Intervalo médio entre verificações
@@ -32,11 +33,12 @@ class BuildingConfig:
 class FarmConfig:
     """Configurações da rotina de Micro-Farming."""
     enabled: bool = False
-    mode: str = "am_farm"              # 'am_farm' (Assistente de Farm) ou 'place' (Praça de Reunião)
+    mode: str = "am_farm"              # 'am_farm' (Assistente de Farm), 'place' (Praça de Reunião) ou 'radar' (Radar de Bárbaras)
     template: str = "A"                # 'A' ou 'B'
     max_distance: float = 15.0         # Raio máximo de ataque em campos
     skip_losses: bool = True           # Ignorar aldeias com relatórios amarelos/vermelhos
     skip_wall: bool = True             # Ignorar aldeias com muralha > 0
+    skip_active_targets: bool = True   # Não enviar ataques repetidos a bárbaras que já tenham ataques a caminho
     interval_minutes: float = 10.0     # Frequência de envio de ondas em minutos
     custom_targets: List[Tuple[int, int]] = field(default_factory=list)
     custom_troops: Dict[str, int] = field(default_factory=lambda: {"spear": 5, "spy": 1})
@@ -45,14 +47,56 @@ class FarmConfig:
     map_cache_ttl_hours: float = 12.0  # Validade da cache de aldeias bárbaras mapeadas
 
 
+DEFAULT_ATTACK_MODEL: Dict[str, int] = {
+    "spear": 0,
+    "sword": 0,
+    "axe": 6000,
+    "archer": 0,
+    "spy": 50,
+    "light": 3000,
+    "marcher": 0,
+    "heavy": 0,
+    "ram": 250,
+    "catapult": 10,
+}
+
+DEFAULT_DEFENSE_MODEL: Dict[str, int] = {
+    "spear": 7000,
+    "sword": 7000,
+    "axe": 0,
+    "archer": 0,
+    "spy": 50,
+    "light": 0,
+    "marcher": 0,
+    "heavy": 1000,
+    "ram": 0,
+    "catapult": 0,
+}
+
+
 @dataclass
 class RecruitmentConfig:
-    """Configurações da rotina de Recrutamento Militar."""
+    """Configurações da rotina de Recrutamento Militar e Modelos de Tropas (Ataque/Defesa)."""
     enabled: bool = False
+    models: Dict[str, Dict[str, int]] = field(
+        default_factory=lambda: {
+            "attack": DEFAULT_ATTACK_MODEL.copy(),
+            "defense": DEFAULT_DEFENSE_MODEL.copy(),
+        }
+    )
     targets: Dict[str, int] = field(default_factory=lambda: {"spear": 50, "sword": 50, "axe": 50})
-    batch_sizes: Dict[str, int] = field(default_factory=lambda: {"spear": 10, "sword": 10, "axe": 10, "light": 5})
+    batch_sizes: Dict[str, int] = field(default_factory=lambda: {"spear": 10, "sword": 10, "axe": 10, "light": 5, "heavy": 5, "ram": 2, "catapult": 2})
     min_free_pop: int = 10
     interval_minutes: float = 5.0
+
+
+@dataclass
+class ArbitrageConfig:
+    """Configurações da rotina de Arbitragem Económica & Fila Sempre Ativa (Item 2.12)."""
+    enabled: bool = False
+    emergency_queue_seconds: float = 900.0  # 15 minutos (limiar de ativação de micro-lotes de emergência)
+    min_military_batch: int = 2             # Quantidade mínima de tropas para micro-lotes
+    interval_seconds: float = 60.0          # Intervalo de avaliação da concorrência
 
 
 @dataclass
@@ -84,6 +128,28 @@ class VillageConfig:
 
 
 @dataclass
+class MarketConfig:
+    """Configurações da rotina do Mercado e Balanceamento de Recursos."""
+    enabled: bool = False
+    interval_minutes: float = 30.0
+    auto_balance: bool = True           # Balanceamento automático entre aldeias da conta
+    reserve_margin: float = 0.20        # Margem de reserva mínima na doadora (20% do armazém)
+    overflow_threshold: float = 0.90    # Considera doadora urgente se recursos >= 90% do armazém
+    deficit_threshold: float = 0.30     # Considera recetora se recursos <= 30% do armazém
+    min_transfer_amount: int = 1000     # Mínimo para transferência (1 mercador = 1000 recursos)
+    auto_trade_offers: bool = False     # Criar ofertas 1:1 no mercado próprio para trocas de excedente local
+    max_merchant_ratio: float = 0.80    # Percentagem máxima de mercadores livres a comprometer por ciclo
+
+    @property
+    def auto_balance_enabled(self) -> bool:
+        return self.auto_balance
+
+    @auto_balance_enabled.setter
+    def auto_balance_enabled(self, val: bool) -> None:
+        self.auto_balance = val
+
+
+@dataclass
 class BotConfig:
     """Configuração global consolidada do bot."""
     world: str = "pt117"
@@ -94,7 +160,9 @@ class BotConfig:
     building: BuildingConfig = field(default_factory=BuildingConfig)
     farm: FarmConfig = field(default_factory=FarmConfig)
     recruitment: RecruitmentConfig = field(default_factory=RecruitmentConfig)
+    arbitrage: ArbitrageConfig = field(default_factory=ArbitrageConfig)
     quest: QuestConfig = field(default_factory=QuestConfig)
+    market: MarketConfig = field(default_factory=MarketConfig)
     villages: Dict[str, VillageConfig] = field(default_factory=dict)
 
     def get_active_build_plan(self, village_id: Optional[Any] = None) -> List[Tuple[str, int]]:
@@ -107,12 +175,13 @@ class BotConfig:
             v_cfg = self.villages[str(village_id)]
             if v_cfg.building_template:
                 tmpl = v_cfg.building_template.lower().strip()
-            elif v_cfg.category == "attack":
-                tmpl = "military_rush"
-            elif v_cfg.category == "defense":
-                tmpl = "balanced"
-            elif v_cfg.category == "balanced":
-                tmpl = "rush_resources"
+            elif tmpl not in ("custom", "custom_plan"):
+                if v_cfg.category == "attack":
+                    tmpl = "military_rush"
+                elif v_cfg.category == "defense":
+                    tmpl = "balanced"
+                elif v_cfg.category == "balanced":
+                    tmpl = "rush_resources"
 
         if tmpl == "balanced":
             return BALANCED_TEMPLATE
@@ -123,15 +192,51 @@ class BotConfig:
         return RUSH_RESOURCES_TEMPLATE
 
     def get_village_recruitment_targets(self, village_id: Optional[Any] = None) -> Dict[str, int]:
-        """Retorna as metas de recrutamento da aldeia conforme a sua categoria."""
+        """
+        Retorna as metas de recrutamento da aldeia conforme o seu modelo (Ataque/Defesa).
+        O bot segue o modelo definido para a categoria da aldeia na gestão de multi-aldeias.
+        """
         from engine.core.models import VillageCategory, CATEGORY_RECRUITMENT_TARGETS
         if village_id and str(village_id) in self.villages:
             v_cfg = self.villages[str(village_id)]
             if v_cfg.recruitment_targets:
                 return v_cfg.recruitment_targets
-            cat = VillageCategory(v_cfg.category) if v_cfg.category in ("attack", "defense", "balanced") else VillageCategory.BALANCED
-            return CATEGORY_RECRUITMENT_TARGETS.get(cat, self.recruitment.targets)
+            cat = str(v_cfg.category).lower().strip() if v_cfg.category else "defense"
+            if hasattr(self.recruitment, "models") and cat in self.recruitment.models:
+                return self.recruitment.models[cat]
+            if cat == "attack" and "attack" in self.recruitment.models:
+                return self.recruitment.models["attack"]
+            if cat == "defense" and "defense" in self.recruitment.models:
+                return self.recruitment.models["defense"]
+            try:
+                v_cat = VillageCategory(cat)
+                return CATEGORY_RECRUITMENT_TARGETS.get(v_cat, self.recruitment.targets)
+            except Exception:
+                pass
+
+        # Aldeia ativa / Geral: se houver modelo configurado, usa modelo de defesa ou targets
+        if hasattr(self.recruitment, "models") and "defense" in self.recruitment.models:
+            return self.recruitment.models["defense"]
         return self.recruitment.targets
+
+    def get_village_template(self, village_id: Optional[Any] = None) -> str:
+        """
+        Retorna o identificador do template de construção ativo para a aldeia
+        (ex: 'RUSH_RESOURCES', 'BALANCED', 'MILITARY_RUSH', 'CUSTOM').
+        """
+        tmpl = self.building.template.lower().strip()
+        if village_id and str(village_id) in self.villages:
+            v_cfg = self.villages[str(village_id)]
+            if v_cfg.building_template:
+                tmpl = v_cfg.building_template.lower().strip()
+            elif tmpl not in ("custom", "custom_plan"):
+                if v_cfg.category == "attack":
+                    tmpl = "military_rush"
+                elif v_cfg.category == "defense":
+                    tmpl = "balanced"
+                elif v_cfg.category == "balanced":
+                    tmpl = "rush_resources"
+        return tmpl.upper()
 
     @property
     def effective_building_plan(self) -> List[Tuple[str, int]]:
@@ -171,6 +276,7 @@ def load_config(config_file: str = "config.json") -> BotConfig:
 
     # 2. Carrega configurações do Edifício Principal
     b_data = data.get("building", {})
+    enabled = bool(b_data.get("enabled", True))
     template = b_data.get("template", "rush_resources")
     max_queue = int(b_data.get("max_queue", 2))
     interval_seconds = float(b_data.get("interval_seconds", 75.0))
@@ -183,6 +289,7 @@ def load_config(config_file: str = "config.json") -> BotConfig:
             custom_plan.append((str(item[0]).strip().lower(), int(item[1])))
 
     building_config = BuildingConfig(
+        enabled=enabled,
         template=template,
         max_queue=max_queue,
         interval_seconds=interval_seconds,
@@ -211,6 +318,7 @@ def load_config(config_file: str = "config.json") -> BotConfig:
         max_distance=float(f_data.get("max_distance", 15.0)),
         skip_losses=bool(f_data.get("skip_losses", True)),
         skip_wall=bool(f_data.get("skip_wall", True)),
+        skip_active_targets=bool(f_data.get("skip_active_targets", True)),
         interval_minutes=float(f_data.get("interval_minutes", 10.0)),
         custom_targets=custom_targets,
         custom_troops=custom_troops,
@@ -219,16 +327,26 @@ def load_config(config_file: str = "config.json") -> BotConfig:
         map_cache_ttl_hours=float(f_data.get("map_cache_ttl_hours", 12.0)),
     )
 
-    # 4. Carrega configurações de Recrutamento Militar
+    # 4. Carrega configurações de Recrutamento Militar e Modelos de Tropas
     r_data = data.get("recruitment", {})
-    raw_r_targets = r_data.get("targets", {"spear": 50, "sword": 50, "axe": 50})
+    raw_models = r_data.get("models", {})
+    r_models = {
+        "attack": DEFAULT_ATTACK_MODEL.copy(),
+        "defense": DEFAULT_DEFENSE_MODEL.copy(),
+    }
+    if isinstance(raw_models, dict):
+        for m_name, m_dict in raw_models.items():
+            if isinstance(m_dict, dict):
+                r_models[str(m_name).lower().strip()] = {str(k): int(v) for k, v in m_dict.items()}
+
+    raw_r_targets = r_data.get("targets", r_models["defense"])
     r_targets = (
         {str(k): int(v) for k, v in raw_r_targets.items()}
         if isinstance(raw_r_targets, dict)
         else {}
     )
 
-    raw_r_batches = r_data.get("batch_sizes", {"spear": 10, "sword": 10, "axe": 10, "light": 5})
+    raw_r_batches = r_data.get("batch_sizes", {"spear": 10, "sword": 10, "axe": 10, "light": 5, "heavy": 5, "ram": 2, "catapult": 2})
     r_batches = (
         {str(k): int(v) for k, v in raw_r_batches.items()}
         if isinstance(raw_r_batches, dict)
@@ -237,13 +355,23 @@ def load_config(config_file: str = "config.json") -> BotConfig:
 
     recruitment_config = RecruitmentConfig(
         enabled=bool(r_data.get("enabled", False)),
+        models=r_models,
         targets=r_targets,
         batch_sizes=r_batches,
         min_free_pop=int(r_data.get("min_free_pop", 10)),
         interval_minutes=float(r_data.get("interval_minutes", 5.0)),
     )
 
-    # 5. Carrega configurações de Autenticação Automática
+    # 5. Carrega configurações de Arbitragem Económica & Fila Sempre Ativa (Item 2.12)
+    arb_data = data.get("arbitrage", {})
+    arbitrage_config = ArbitrageConfig(
+        enabled=bool(arb_data.get("enabled", False)),
+        emergency_queue_seconds=float(arb_data.get("emergency_queue_seconds", 900.0)),
+        min_military_batch=int(arb_data.get("min_military_batch", 2)),
+        interval_seconds=float(arb_data.get("interval_seconds", 60.0)),
+    )
+
+    # 6. Carrega configurações de Autenticação Automática
     a_data = data.get("auth", {})
     auth_config = AuthConfig(
         username=str(a_data.get("username", os.environ.get("TW_USERNAME", ""))).strip(),
@@ -253,7 +381,7 @@ def load_config(config_file: str = "config.json") -> BotConfig:
         keep_alive_interval_minutes=float(a_data.get("keep_alive_interval_minutes", 15.0)),
     )
 
-    # 6. Carrega configurações de Missões, Bónus Diário e Inventário
+    # 7. Carrega configurações de Missões, Bónus Diário e Inventário
     q_data = data.get("quest", {})
     quest_config = QuestConfig(
         enabled=bool(q_data.get("enabled", True)),
@@ -263,7 +391,24 @@ def load_config(config_file: str = "config.json") -> BotConfig:
         interval_minutes=float(q_data.get("interval_minutes", 30.0)),
     )
 
-    # 7. Carrega configurações e categorização de Aldeias
+    # 8. Carrega configurações do Mercado
+    m_data = data.get("market", {})
+    auto_bal = m_data.get("auto_balance", m_data.get("auto_balance_enabled", True))
+    res_margin = m_data.get("reserve_margin", m_data.get("reserve_margin_percent", 0.20))
+    max_merch = m_data.get("max_merchant_ratio", m_data.get("max_merchants_percent", 0.80))
+    market_config = MarketConfig(
+        enabled=bool(m_data.get("enabled", False)),
+        interval_minutes=float(m_data.get("interval_minutes", 30.0)),
+        auto_balance=bool(auto_bal),
+        reserve_margin=float(res_margin),
+        overflow_threshold=float(m_data.get("overflow_threshold", 0.90)),
+        deficit_threshold=float(m_data.get("deficit_threshold", 0.30)),
+        min_transfer_amount=int(m_data.get("min_transfer_amount", 1000)),
+        auto_trade_offers=bool(m_data.get("auto_trade_offers", False)),
+        max_merchant_ratio=float(max_merch),
+    )
+
+    # 9. Carrega configurações e categorização de Aldeias
     v_data = data.get("villages", {})
     villages_config = {}
     if isinstance(v_data, dict):
@@ -284,7 +429,9 @@ def load_config(config_file: str = "config.json") -> BotConfig:
         building=building_config,
         farm=farm_config,
         recruitment=recruitment_config,
+        arbitrage=arbitrage_config,
         quest=quest_config,
+        market=market_config,
         villages=villages_config,
     )
 

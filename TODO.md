@@ -52,6 +52,8 @@
 - [x] Modelos de evolução pré-definidos (`RUSH_RESOURCES_TEMPLATE`, `BALANCED_TEMPLATE`, `MILITARY_RUSH_TEMPLATE`).
 - [x] Controlador `MainBuildingManager` com disparo de `build` e `cancel` com token CSRF (`h`).
 - [x] Rotina periódica contínua de auto-build com feedback imediato e ciclos humanos.
+- [x] **Controlo Modular de Auto-Construção:** Switch LIGADO/DESLIGADO, ajuste dinâmico de intervalo em segundos e fila máxima via REST e UI.
+- [x] Monitorização em tempo real da fila ativa de construção com cronómetro regressivo e cancelamento direto.
 - [x] Sistema de configuração flexível via `config.json` e propriedade compatível `effective_building_plan`.
 - [x] Suíte de testes unitários dedicada (12 testes do Edifício Principal + 2 de configuração).
 
@@ -72,11 +74,11 @@
   - [x] Lista configurável de aldeias bárbaras por coordenadas ou raio de distância.
   - [x] Envio automático de micro-grupos de saque (ex.: 5 lanceiros ou 2 cavalarias leves).
 - [x] Critérios de segurança: paragem imediata do farm caso as tropas sofram baixas (`skip_losses`) ou a muralha inimiga suba (`skip_wall`).
-- [x] Suíte de testes unitários para Micro-Farming (6 testes dedicados).
-- [ ] **Radar de Bárbaras & Saque Recorrente Contínuo:**
-  - [ ] Auto-descoberta de aldeias bárbaras num determinado raio através da leitura do mapa (`screen=map` ou dados de mapa).
-  - [ ] Cálculo e ordenação automática por distância euclidiana/manhattan.
-  - [ ] Agendamento em loop contínuo para manter as micro-tropas sempre a saquear com alocação dinâmica de unidades disponíveis.
+- [x] **Radar de Bárbaras & Saque Recorrente Contínuo:**
+  - [x] Auto-descoberta de aldeias bárbaras num determinado raio através da leitura do mapa (`screen=map` ou dados de mapa `village.txt`).
+  - [x] Cálculo e ordenação automática por distância euclidiana/manhattan.
+  - [x] Agendamento em loop contínuo para manter as micro-tropas sempre a saquear com alocação dinâmica de unidades disponíveis (`allocate_dynamic_squads`, `run_radar_farm_cycle`, `schedule_continuous_radar_farm`).
+- [x] Suíte de testes unitários dedicada (11 testes cobrindo Assistente de Farm, modelos A/B, filtros, fallback da Praça, alocação de esquadrões e radar contínuo).
 
 ### 2.4. Coleta de Recursos / Scavenging (`screen=place&mode=scavenge`)
 - [ ] Leitura do estado de desbloqueio das 4 categorias de coleta (Lazy, Humble, Clever, Great).
@@ -90,6 +92,9 @@
 - [x] Configuração de metas de exército (ex.: lanceiros, espadachins, cavalaria leve).
 - [x] Recrutamento inteligente em pequenos lotes contínuos para preservação de recursos.
 - [x] Validação de limite de população livre da Fazenda antes de recrutar (`min_free_pop`).
+- [x] **Controlo Modular de Auto-Recrutamento:** Switch LIGADO/DESLIGADO, ajuste dinâmico de intervalo em minutos e limites de população via REST e UI.
+- [x] Monitorização em tempo real das **Filas Ativas de Treino** (Quartel, Estábulo, Oficina) com quantidade de tropas, hora de conclusão e cronómetro decrescente.
+- [x] Templates táticos de recrutamento 1-clique (Ataque Nuke, Defesa Bunker, Rush Farm, Equilibrado, Limpar).
 - [x] Suíte de testes unitários para Recrutamento Militar (5 testes dedicados).
 
 ### 2.6. Academia & Cunha de Moedas (`screen=snob`)
@@ -98,12 +103,12 @@
 - [ ] Recrutamento automático de Nobres mediante configuração do utilizador.
 
 ### 2.7. Mercado & Balanceamento de Recursos (`screen=market`)
-- [ ] Leitura de mercadores disponíveis e mercadores em trânsito.
-- [ ] **Algoritmo de Balanceamento Automático de Recursos:**
-  - [ ] Cálculo de médias e desvios de recursos entre todas as aldeias da mesma conta.
-  - [ ] Identificação automática de aldeias doadoras (excedente ou risco de transbordamento de armazém) e aldeias recetoras (défice para construções ou recrutamento urgente).
-  - [ ] Despacho automatizado de mercadores para transferência equilibrada de recursos entre aldeias.
-- [ ] Criação de ofertas no mercado local para troca automática de recursos excedentes por recursos em carência.
+- [x] Leitura de mercadores disponíveis e mercadores em trânsito.
+- [x] **Algoritmo de Balanceamento Automático de Recursos:**
+  - [x] Cálculo de médias e desvios de recursos entre todas as aldeias da mesma conta.
+  - [x] Identificação automática de aldeias doadoras (excedente ou risco de transbordamento de armazém) e aldeias recetoras (défice para construções ou recrutamento urgente).
+  - [x] Despacho automatizado de mercadores para transferência equilibrada de recursos entre aldeias (quantização de 1.000 por mercador e proteção contra transbordamento).
+- [x] Criação de ofertas no mercado local para troca automática de recursos excedentes por recursos em carência.
 
 ### 2.8. Sistema de Defesa & Alarme de Ataques (Prioridade 0 / Alertas)
 - [ ] Monitorização em tempo real de ataques a chegar à aldeia (`incomings`).
@@ -163,12 +168,13 @@
   - [x] Suíte de testes unitários dedicada (8 testes cobrindo parsing de mapa, distância euclidiana, bárbaras/bónus, cache em disco e onda de saques).
 
 ### 2.12. Algoritmo de Arbitragem Económica & Orquestração (Construção vs. Recrutamento)
-- [ ] **Filosofia "Fila Sempre Ativa":** Manter as filas do Edifício Principal e dos edifícios militares (Quartel, Estábulo, Oficina) permanentemente em execução contínua sem tempo ocioso.
-- [ ] **Decisão Inteligente em Concorrência de Recursos:**
-  - [ ] Monitorização dos temporizadores e tempos restantes de conclusão de cada fila ativa.
-  - [ ] Priorização de emergência: se uma fila estiver prestes a esgotar o tempo restante, direcionar os recursos disponíveis prioritariamente para mantê-la ativa.
-  - [ ] Recrutamento dinâmico em micro-lotes: recrutar quantidades menores de tropas (ex.: 2 a 5 unidades) para manter os edifícios militares a trabalhar sem canibalizar o custo do próximo nível de edifício planeado.
-  - [ ] Projeção de fluxo de caixa em tempo real: cálculo preditivo baseado na taxa de produção horária da aldeia e recursos estimados a chegar de saques e transferências de mercadores.
+- [x] **Filosofia "Fila Sempre Ativa":** Manter as filas do Edifício Principal e dos edifícios militares (Quartel, Estábulo, Oficina) permanentemente em execução contínua sem tempo ocioso.
+- [x] **Decisão Inteligente em Concorrência de Recursos:**
+  - [x] Monitorização dos temporizadores e tempos restantes de conclusão de cada fila ativa (`build_queue_time_left`, `military_queues_time_left`).
+  - [x] Priorização de emergência: se uma fila estiver prestes a esgotar o tempo restante, direcionar os recursos disponíveis prioritariamente para mantê-la ativa.
+  - [x] Recrutamento dinâmico em micro-lotes: recrutar quantidades menores de tropas (ex.: 2 a 5 unidades) para manter os edifícios militares a trabalhar sem canibalizar o custo do próximo nível de edifício planeado.
+  - [x] Projeção de fluxo de caixa em tempo real: cálculo preditivo baseado na taxa de produção horária da aldeia e recursos estimados a chegar de saques e transferências de mercadores.
+  - [x] Suíte de testes unitários dedicada (7 testes cobrindo temporizadores, projeção de caixa, concorrência, micro-lotes e agendamento).
 
 ---
 
@@ -214,14 +220,16 @@
   - [x] Dashboard com visual moderno (Dark Mode, Glassmorphism, Google Fonts Outfit & Inter, paleta Neon Cyber).
   - [x] **HUD Timer de Alta Precisão:** Relógio digital no topo da aplicação exibindo horas, minutos, segundos e microssegundos (`HH:MM:SS.uuuuuu`) a 60 FPS com `requestAnimationFrame`.
   - [x] Visão geral da aldeia: cartões de recursos em tempo real, capacidade do Armazém e População livre.
-  - [x] Fila de construção em tempo real com contagem decrescente ativa e estimativa de custos para o próximo edifício.
-  - [x] Painel de controlo de módulos com botões de ação imediata (Pausar/Retomar, Construir Agora, Farm Agora, Recrutar Agora).
+  - [x] **Controlo Modular por Domínio & Filas em Tempo Real:**
+    - [x] Barra superior simplificada com ações globais essenciais (Login, Atualizar, Missões, Pausar/Retomar e Farm).
+    - [x] Aba Edifícios & Fila (`#tab-building`): Switch toggle para Ligar/Desligar Auto-Construção, seletor de intervalo, disparo imediato e monitor da fila ativa com contagem decrescente e cancelamento.
+    - [x] Aba Recrutamento & Tropas (`#tab-military`): Switch toggle para Ligar/Desligar Auto-Recrutamento, seletor de intervalo, disparo imediato, templates 1-clique e card de Filas Ativas de Treino (Quartel, Estábulo, Oficina).
   - [x] Consola de logs ao vivo via streaming WebSocket com busca por texto, filtros de severidade, auto-scroll e limpeza.
   - [x] Painel de configurações visuais com gravação instantânea e recarregamento a quente no `config.json`.
-- [ ] **Visualizador de Mapa Interativo Integrado (Embedded Game Map)**
-  - [ ] Renderização do mapa do mundo/continente com suporte a zoom e arrasto direto no Cockpit.
-  - [ ] Destaque de aldeias próprias, bárbaras no raio de farm e aldeias de jogadores vizinhos.
-  - [ ] Ações rápidas de clique no mapa para envio de saque ou marcação de alvos.
+- [x] **Visualizador de Mapa Interativo Integrado (Embedded Game Map)**
+  - [x] Renderização 2D nativa canvas da grelha de mapa do mundo/continente com suporte a zoom e arrasto direto no Cockpit.
+  - [x] Destaque de aldeias próprias, bárbaras no raio de farm e aldeias de jogadores vizinhos.
+  - [x] Ações rápidas de clique no mapa para envio de saque ou marcação de alvos.
 - [x] **Shell Desktop Nativa Edge WebView2**
   - [x] Execução como aplicação desktop nativa via Edge WebView2 (`engine/desktop_launcher.py` ou `python -m engine.main --gui`).
   - [x] Servidor Sidecar serve a interface web diretamente em `http://127.0.0.1:8000/` (`python -m engine.main --api`).
@@ -229,12 +237,12 @@
 - [x] **Modal de Alerta & Resolução de Captchas Anti-Bot**
   - [x] Overlay modal de emergência ativado instantaneamente por evento WebSocket (`CAPTCHA_ALERT`) com aviso sonoro sintetizado.
   - [x] Botão para abertura direta da janela do jogo para resolução humana e botão para retoma automática do motor.
-- [ ] **Painel de Métricas & Estatísticas de Eficiência (Dashboard HUD)**
-  - [ ] Registo persistente de recursos farmados por hora e por dia (Madeira, Argila, Ferro e Total).
-  - [ ] Gráfico visual de rendimento de farm ao longo do tempo (últimas 24h e 7 dias).
-  - [ ] Contador acumulado de aldeias saqueadas e tropas recrutadas por unidade.
-  - [ ] Histórico de comandos enviados e taxa de sucesso/baixas.
-  - [ ] Endpoints dedicados na Sidecar API (`GET /api/stats/summary` e `GET /api/stats/history`) alimentando o frontend em tempo real.
+- [x] **Painel de Métricas & Estatísticas de Eficiência (Dashboard HUD)**
+  - [x] Registo persistente de recursos farmados por hora e por dia (Madeira, Argila, Ferro e Total).
+  - [x] Gráfico visual de rendimento de farm ao longo do tempo (últimas 24h e 7 dias com HTML5 Canvas nativo).
+  - [x] Contador acumulado de aldeias saqueadas e tropas recrutadas por unidade.
+  - [x] Histórico de comandos enviados e taxa de sucesso/baixas.
+  - [x] Endpoints dedicados na Sidecar API (`GET /api/stats/summary`, `GET /api/stats/history`, `POST /api/stats/reset`) alimentando o frontend em tempo real e via WebSockets (`STATS_UPDATED`).
 - [x] **Visualizador de Mapa Réplica Interativo do Tribos (Frontend Cockpit)**
   - [x] Réplica visual fiel da grelha de mapa original do Tribal Wars (mesma disposição de coordenadas X|Y, réguas cartográficas, células discretas de terreno e ícones de aldeias).
   - [x] Navegação fluida: arrastar com o rato (*pan*), zoom com a roda ou botões (+/-), HUD D-pad direcional (▲, ◄, 🎯, ►, ▼), centralizar na aldeia ativa e busca rápida por coordenadas.

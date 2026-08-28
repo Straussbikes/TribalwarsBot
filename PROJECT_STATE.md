@@ -2,8 +2,8 @@
 
 > **Propósito deste ficheiro:** Manter o histórico de progresso, decisões arquiteturais, mapa de ficheiros e diretrizes de desenvolvimento para que qualquer sessão de IA recupere o contexto instantaneamente com consumo mínimo de tokens e sem perda de continuidade.
 
-**Última Atualização:** 2026-08-27  
-**Estado Geral:** Fases 1, 3 e 4 Concluídas | Missões (2.10) e Mapa Tático (2.11) Concluídos com Formato Oficial (/map.php, TWMap.sectorPrefech e CSV) | Aba de Mapa Tático 2D Interativo no Cockpit | Matriz de 12 Unidades Militares e Auto-Claim de Missões no Frontend | 107 Testes Unitários Automatizados (100% OK)  
+**Última Atualização:** 2026-08-28  
+**Estado Geral:** Fases 1, 3 e 4 Concluídas | Modelos Dinâmicos de Recrutamento (Ataque, Defesa e Customizados com Persistência em config.json), Sincronização e Persistência de Categorias Multi-Aldeias, Conexão Dinâmica de min_transfer_amount no Mercado, Conclusão Gratuita de Edifícios (< 3 min), Módulo de Pesquisas Tecnológicas no Ferreiro (SmithManager), Telemetria de Rede | 198 Testes Unitários Automatizados (100% OK)  
 **Ambiente Validado:** macOS 12+ / Windows 11 / Python 3.11-3.14 / `curl_cffi` 0.16.2 / `fastapi` 0.141.1 / `uvicorn` 0.52.4 / `pywebview` 6.2 (Edge WebView2 & Cocoa WebKit) / Git Branch: `main`
 
 ---
@@ -20,6 +20,10 @@
 * **Fluxo de Autenticação Manual & Interceção de Rede:**
   * Modo 100% manual e seguro: o utilizador faz login diretamente no ecrã nativo do Tribal Wars (resolvendo captchas humanos se surgirem).
   * **Intercetor de Rede em Tempo Real:** O WebView2 captura instantaneamente os cookies `sid` (incluindo `HttpOnly`) dos cabeçalhos HTTP (`request_sent` e `response_received`), persistindo no `config.json` e renovando a sessão `curl_cffi` via `account.update_sid()`.
+* **Controlo Modular, Arbitragem Económica & Filas em Tempo Real:**
+  * Controles dedicados de ativação/desativação de **Construção Automática**, **Recrutamento Automático** e **Arbitragem Económica** integrados nas respetivas abas com parâmetros de intervalo dinâmicos.
+  * **Filosofia "Fila Sempre Ativa" (Item 2.12):** Diagnóstico das 4 filas (Edifício Principal, Quartel, Estábulo, Oficina) com projeção de fluxo de caixa em tempo real, priorização de emergência e micro-lotes para evitar qualquer segundo ocioso sem canibalizar recursos do próximo edifício planeado.
+  * **Radar de Bárbaras & Saque Recorrente (Item 2.3):** Varredura contínua de aldeias bárbaras vizinhas via grelha de mapa com alocação dinâmica de micro-esquadrões de tropas disponíveis.
 * **HUD Timer de Ultra-Alta Precisão:** Relógio digital no topo da aplicação exibindo horas, minutos, segundos e microssegundos (`HH:MM:SS.uuuuuu`) a 60 FPS com `requestAnimationFrame` e `performance.now()`.
 
 ---
@@ -29,9 +33,9 @@
 | Fase | Descrição | Status | Detalhes |
 |---|---|---|---|
 | **Fase 1** | **Fundação do Core & Rede** | ✅ Concluída | Estrutura modular, `TribalAccount`, `TaskScheduler`, parsers, anti-bot e 10 testes unitários. |
-| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main`, `place`, `farm`, `recruitment`, `quest` e `map` (Mapa Tático & Scanner de Bárbaras) concluídos. Scavenging, Snob, Mercado & Balanceamento, Defesa/Dodge e Arbitragem planeados. |
+| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (auto-build + filas), `place`, `farm` (Radar de Bárbaras e Assistente de Farm), `recruitment` (auto-recruit + filas ativas), `quest`, `map`, `market` (balanceamento) e `economic_arbitrage` (Fila Sempre Ativa) concluídos. Scavenging, Snob e Defesa/Dodge planeados. |
 | **Fase 3** | **Camada Sidecar IPC, Multi-Aldeia & Perfis** | ✅ Concluída | FastAPI REST, WebSockets, autenticação efêmera, proxies, perfis, `MultiWorldManager` (orquestrador concorrente paralelo) e `MultiVillageCoordinator` (gestão de múltiplas aldeias com categorização Ataque/Defesa/Balanceado e balanceamento de recursos). |
-| **Fase 4** | **Shell Desktop & Frontend Nativo** | 🔄 Em Expansão | Cockpit Dark Glassmorphism, HUD timer, réplica interativa do mapa 2D, seletor de mundos na barra superior e aba consolidada de multi-aldeia com recursos agregados. |
+| **Fase 4** | **Shell Desktop & Frontend Nativo** | 🔄 Em Expansão | Cockpit Dark Glassmorphism, HUD timer, réplica interativa do mapa 2D, seletor de mundos na barra superior, monitor de filas ativas e controlos modulares nas abas de domínio. |
 | **Fase 5** | **Empacotamento & Release** | 📋 Pendente | Empacotamento executável com PyInstaller e instalador desktop. |
 
 ---
@@ -45,7 +49,7 @@ TribalwarsBot/
 ├── README.md                        # Documentação pública e instruções rápidas
 ├── pyproject.toml                   # Configuração de empacotamento e dependências Python
 ├── requirements.txt                 # Dependências diretas (curl_cffi, pydantic, fastapi, uvicorn, pywebview)
-├── config.json                      # Configuração personalizável (mundo, sid, templates, fila, farm, recrutamento)
+├── config.json                      # Configuração personalizável (mundo, sid, templates, fila, farm, recrutamento, arbitragem)
 ├── profiles.json                    # Perfis de contas encriptados (ProfileManager)
 │
 ├── engine/                          # Python Core Engine
@@ -68,23 +72,26 @@ TribalwarsBot/
 │   │   ├── parsers.py               # Extração de game_data, CSRF, recursos, bot protect, níveis, fila, tropas, AF e multi-aldeia
 │   │   └── timing.py                # get_human_delay (gaussiano), get_click_jitter
 │   ├── actions/                     # Handlers por ecrã (Fase 2)
-│   │   ├── __init__.py              # Exporta MainBuildingManager, PlaceManager, FarmManager, RecruitmentManager
+│   │   ├── __init__.py              # Exporta MainBuildingManager, PlaceManager, FarmManager, RecruitmentManager, MarketManager, EconomicArbitrageManager
 │   │   ├── main_building.py         # MainBuildingManager: leitura, níveis virtuais, auto-build, cancelamento
 │   │   ├── place.py                 # PlaceManager: leitura de tropas, capacidade de saque, comandos em 2 etapas
-│   │   ├── farm.py                  # FarmManager: Assistente de Farm (A/B), filtros de segurança, fallback Praça
+│   │   ├── farm.py                  # FarmManager: Assistente de Farm (A/B), Radar de Bárbaras e alocação dinâmica de esquadrões (Item 2.3)
 │   │   ├── recruitment.py           # RecruitmentManager: Quartel, Estábulo e Oficina em lotes graduais
+│   │   ├── economic_arbitrage.py    # EconomicArbitrageManager: Filosofia "Fila Sempre Ativa" e projeção de fluxo de caixa (Item 2.12)
 │   │   ├── quest.py                 # QuestManager: Missões, baú diário e inventário manual (Item 2.10)
-│   │   └── map.py                   # MapManager: Mapa Tático, Scanner de Bárbaras e Map-Driven Farming (Item 2.11)
+│   │   ├── map.py                   # MapManager: Mapa Tático, Scanner de Bárbaras e Map-Driven Farming (Item 2.11)
+│   │   ├── market.py                # MarketManager: Gestão do Mercado, Leitura de Mercadores, Balanceamento de Recursos e Ofertas (Item 2.7)
+│   │   └── village_coordinator.py   # MultiVillageCoordinator: Orquestrador Multi-Aldeia com categorização e balanceamento
 │   ├── api/                         # Camada de comunicação Sidecar IPC (Fase 3)
 │   │   ├── __init__.py              # Exporta EngineContext, create_app, start_sidecar_server
 │   │   ├── auth.py                  # Token efêmero criptográfico, verificação HTTP/WS e .sidecar_auth.json
-│   │   ├── context.py               # EngineContext: orquestração de estado, multi-aldeia, perfis, proxy e websockets
+│   │   ├── context.py               # EngineContext: orquestração de estado, arbitragem económica, radar farm e websockets
 │   │   ├── websocket.py             # WebSocketLogHandler (streaming de logs) e endpoint /ws com broadcast
-│   │   ├── routes.py                # Endpoints REST (/api/status, /api/config, /api/account/*, /api/profiles/*, /api/proxy/*)
+│   │   ├── routes.py                # Endpoints REST (/api/status, /api/arbitrage/*, /api/farm/radar/*, /api/profiles/*)
 │   │   └── server.py                # create_app (CORS tauri://localhost) e start_sidecar_server (uvicorn)
 │   ├── config/                      # Configurações e carregamento de perfis
 │   │   ├── __init__.py
-│   │   └── settings.py              # BotConfig, BuildingConfig, FarmConfig, RecruitmentConfig, AuthConfig, load_config
+│   │   └── settings.py              # BotConfig, BuildingConfig, FarmConfig, RecruitmentConfig, ArbitrageConfig, load_config
 │   ├── desktop_launcher.py          # Desktop Launcher: janela nativa, interceção adaptada ao SO e monitor de login
 │   └── main.py                      # Ponto de entrada CLI, Sidecar e Desktop (--gui, --api, --port)
 │   │
@@ -97,19 +104,24 @@ TribalwarsBot/
 │       ├── websocket.js             # Conexão WebSocket em tempo real e sintetizador sonoro de alertas
 │       └── app.js                   # Controlador da interface, cronómetro de alta resolução e streaming de logs
 │
-├── tests/                           # Suíte de testes unitários automatizados (81 testes, 100% OK)
+├── tests/                           # Suíte de testes unitários automatizados (178 testes, 100% OK)
 │   ├── __init__.py
 │   ├── test_core.py                 # 10 testes cobrindo models, timing, parsers, account e scheduler
 │   ├── test_main_building.py        # 12 testes cobrindo níveis, fila mobile/desktop, templates, auto-build e cancelamento
 │   ├── test_config.py               # 2 testes cobrindo parsing de config.json e seleção de templates
 │   ├── test_place.py                # 10 testes cobrindo tropas, capacidade de carga, comandos e envio em 2 etapas
-│   ├── test_farm.py                 # 6 testes cobrindo Assistente de Farm, modelos A/B, filtros e fallback
+│   ├── test_farm.py                 # 11 testes cobrindo Assistente de Farm, modelos A/B, filtros, alocação de esquadrões e radar contínuo
 │   ├── test_recruitment.py          # 5 testes cobrindo filas de treino, metas, lotes e reserva de população
-│   ├── test_api.py                  # 16 testes cobrindo auth, REST, WebSockets, quest e map endpoints e static files
+│   ├── test_arbitrage.py            # 7 testes cobrindo temporizadores, projeção de fluxo de caixa, concorrência e micro-lotes
+│   ├── test_api.py                  # 22 testes cobrindo auth, REST, WebSockets, building/recruitment toggles, quest, map e arbitragem
 │   ├── test_auth.py                 # 7 testes cobrindo extração de cookies, persistência e auto-login
 │   ├── test_platform.py             # 6 testes cobrindo adaptadores Windows/macOS/Linux e anti-hijack
 │   ├── test_profiles.py             # 4 testes cobrindo persistência de perfis e ofuscação de senhas
 │   ├── test_multi_village.py        # 3 testes cobrindo extração multi-aldeia e alternância de contexto
+│   ├── test_multi_world.py          # 2 testes cobrindo orquestração multi-mundo paralela
+│   ├── test_village_coordinator.py  # 5 testes cobrindo categorização de aldeias e balanceamento de recursos
+│   ├── test_market.py               # 12 testes cobrindo mercado, ofertas e rotinas de balanceamento
+│   ├── test_stats.py                # 11 testes cobrindo histórico de farm, comandos, KPIs e persistência
 │   ├── test_proxy.py                # 2 testes cobrindo diagnóstico ativo de proxies
 │   ├── test_quest.py                # 13 testes cobrindo missões, segurança de armazém/pop, baú diário e inventário manual
 │   └── test_map.py                  # 8 testes cobrindo parsing de mapa, distância euclidiana, bárbaras/bónus, cache e farm
@@ -138,13 +150,14 @@ TribalwarsBot/
 
 ## 5. Como Validar o Estado Atual
 
-Para rodar a suíte completa de 75 testes automatizados:
+Para rodar a suíte completa de 184 testes automatizados:
 ```powershell
 python -m unittest discover tests -v
 ```
-*Status esperado:* `Ran 75 tests in ~1.0s - OK`.
+*Status esperado:* `Ran 184 tests in ~3.8s - OK`.
 
 Para iniciar a aplicação desktop completa com interface gráfica nativa:
 ```powershell
 python -m engine.main --gui
 ```
+

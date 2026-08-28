@@ -31,6 +31,15 @@ from engine.actions.farm import (
     FarmAssistantState,
     FarmManager,
     FarmTarget,
+    RadarFarmPlan,
+    allocate_dynamic_squads,
+)
+from engine.actions.economic_arbitrage import (
+    ArbitrageActionType,
+    ArbitrageDecision,
+    CashFlowProjection,
+    EconomicArbitrageManager,
+    parse_timer_to_seconds,
 )
 from engine.actions.recruitment import (
     BUILDING_UNITS,
@@ -48,6 +57,13 @@ from engine.actions.quest import (
     QuestReward,
     QuestState,
 )
+from engine.actions.smith import (
+    ResearchOrder,
+    SmithManager,
+    SmithState,
+    SmithUnitInfo,
+    parse_smith_page,
+)
 from engine.actions.map import (
     MapData,
     MapManager,
@@ -56,17 +72,28 @@ from engine.actions.map import (
     calculate_distance,
     parse_map_screen_data,
 )
+from engine.actions.market import (
+    MarketManager,
+    MarketOffer,
+    MarketState,
+    MerchantMovement,
+    TransferOrder,
+)
 from engine.actions.village_coordinator import MultiVillageCoordinator
 
 __all__ = [
     "MultiVillageCoordinator",
+    "ArbitrageActionType",
+    "ArbitrageDecision",
     "BALANCED_TEMPLATE",
     "BUILDING_NAMES",
     "BUILDING_REQUIREMENTS",
     "BUILDING_UNITS",
     "CARRY_CAPACITY",
+    "CashFlowProjection",
     "CommandMovement",
     "DailyBonusState",
+    "EconomicArbitrageManager",
     "FarmAssistantState",
     "FarmManager",
     "FarmTarget",
@@ -80,6 +107,12 @@ __all__ = [
     "MapManager",
     "MapState",
     "MapVillage",
+    "MarketManager",
+    "MarketOffer",
+    "MarketState",
+    "MerchantMovement",
+    "RadarFarmPlan",
+    "TransferOrder",
     "NAME_TO_BUILDING",
     "POP_COST",
     "PlaceManager",
@@ -98,6 +131,8 @@ __all__ = [
     "UNIT_TO_BUILDING",
     "UnitType",
     "UnitsCount",
+    "allocate_dynamic_squads",
     "calculate_distance",
     "parse_map_screen_data",
+    "parse_timer_to_seconds",
 ]

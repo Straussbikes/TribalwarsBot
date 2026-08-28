@@ -5,9 +5,11 @@ headers móveis Android, gestão de estado, renovação de tokens e interceção
 """
 
 import asyncio
+from collections import deque
 import logging
+import time
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from curl_cffi.requests import AsyncSession, Response
 
@@ -30,6 +32,7 @@ from engine.utils.parsers import (
     is_bot_protection_present,
     is_session_expired,
     parse_available_units,
+    parse_building_levels,
 )
 
 from engine.utils.timing import get_click_jitter
@@ -96,6 +99,10 @@ class TribalAccount:
         self.villages: Dict[int, VillageData] = {}
         self.csrf_token: Optional[str] = None
         self.last_game_data: Optional[Dict[str, Any]] = None
+
+        # Histórico e telemetria de requisições de rede
+        self._req_counter: int = 0
+        self.request_history: deque = deque(maxlen=100)
 
         # Sessão HTTP curl_cffi
         self._session: Optional[AsyncSession] = None
@@ -171,6 +178,15 @@ class TribalAccount:
         if self.current_village_id and self.current_village_id in self.villages:
             return self.villages[self.current_village_id].resources
         return Resources()
+
+    @resources.setter
+    def resources(self, res: Resources) -> None:
+        """Define os recursos da aldeia ativa atual."""
+        v_id = self.current_village_id or 0
+        if v_id in self.villages:
+            self.villages[v_id].resources = res
+        else:
+            self.villages[v_id] = VillageData(id=v_id, resources=res)
 
     @property
     def current_village(self) -> Optional[VillageData]:
@@ -277,6 +293,44 @@ class TribalAccount:
             except Exception:
                 pass
 
+        # 5. Atualização dos Níveis de Edifícios da aldeia ativa
+        if self.current_village_id and self.current_village_id in self.villages:
+            try:
+                blds = parse_building_levels(html, game_data)
+                if blds:
+                    self.villages[self.current_village_id].buildings.update(blds)
+            except Exception:
+                pass
+
+
+    def _record_request(
+        self,
+        req_id: int,
+        method: str,
+        url: str,
+        params: Dict[str, Any],
+        status_code: int,
+        duration_ms: float,
+        size_bytes: int,
+        error: Optional[str] = None,
+    ) -> None:
+        """Regista no histórico em memória para diagnóstico e telemetria."""
+        self.request_history.append({
+            "id": req_id,
+            "timestamp": time.time(),
+            "method": method,
+            "url": url,
+            "params": params,
+            "status_code": status_code,
+            "duration_ms": round(duration_ms, 1),
+            "size_bytes": size_bytes,
+            "error": error,
+        })
+
+    def get_recent_requests(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Retorna as requisições HTTP mais recentes registadas."""
+        history = list(self.request_history)
+        return history[-limit:]
 
     async def get_screen(
         self,
@@ -288,31 +342,79 @@ class TribalAccount:
         """
         Navega até um ecrã do jogo (ex.: 'screen=main', 'screen=place', 'screen=barracks')
         assegurando sempre 'page=mobile' e parâmetros de identificação.
+        Emite logs detalhados e telemetria de cada requisição.
         """
         if apply_jitter:
             await asyncio.sleep(get_click_jitter())
 
         async with self._lock:
+            self._req_counter += 1
+            req_id = self._req_counter
+
             v_id = village_id or self.current_village_id
             params: Dict[str, Any] = {
-                "page": "mobile",
                 "screen": screen,
+                "page": "mobile",
             }
             if v_id:
                 params["village"] = v_id
             if extra_params:
                 params.update(extra_params)
 
+            # Se a requisição contiver 'action', garante que o token CSRF ('h') está presente
+            if "action" in params and ("h" not in params or not params["h"]):
+                if not self.csrf_token:
+                    logger.warning(f"[{self.world}] Token CSRF ausente. A atualizar estado antes de executar a ação...")
+                    await self._refresh_state_internal()
+                if self.csrf_token:
+                    params["h"] = self.csrf_token
+
+            query_str = urlencode({k: str(v) for k, v in params.items()})
+            full_url = f"{self.base_url}?{query_str}"
+            logger.info(
+                f"[{self.world}] 🌐 [REQ #{req_id}] GET {self.base_url}?{query_str}"
+            )
+
+            start_t = time.monotonic()
             try:
                 response = await self.session.get(
                     self.base_url,
                     params=params,
                 )
             except Exception as e:
-                logger.error(f"Erro de conexão ao obter screen '{screen}': {e}")
+                duration_ms = (time.monotonic() - start_t) * 1000
+                self._record_request(
+                    req_id=req_id,
+                    method="GET",
+                    url=full_url,
+                    params=params,
+                    status_code=0,
+                    duration_ms=duration_ms,
+                    size_bytes=0,
+                    error=str(e),
+                )
+                logger.error(f"[{self.world}] ❌ [REQ #{req_id}] Erro de conexão após {duration_ms:.0f}ms ao obter screen '{screen}': {e}")
                 raise NetworkTimeoutError(f"Falha de conexão com {self.host}: {e}") from e
 
+            duration_ms = (time.monotonic() - start_t) * 1000
             html = response.text
+            size_bytes = len(response.content) if hasattr(response, "content") else len(html.encode("utf-8"))
+            size_str = f"{size_bytes / 1024:.1f} KB" if size_bytes >= 1024 else f"{size_bytes} B"
+
+            logger.info(
+                f"[{self.world}] 📥 [RESP #{req_id}] HTTP {response.status_code} ({duration_ms:.0f}ms, {size_str}) - screen={screen}"
+            )
+
+            self._record_request(
+                req_id=req_id,
+                method="GET",
+                url=full_url,
+                params=params,
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+                size_bytes=size_bytes,
+            )
+
             self._inspect_response(response, html)
             self._update_state_from_html(html, str(response.url))
             return html
@@ -320,7 +422,7 @@ class TribalAccount:
     async def post_action(
         self,
         screen: str,
-        action: str,
+        action: Optional[str] = None,
         data: Optional[Dict[str, Any]] = None,
         village_id: Optional[int] = None,
         extra_params: Optional[Dict[str, Any]] = None,
@@ -328,23 +430,29 @@ class TribalAccount:
     ) -> str:
         """
         Executa uma ação HTTP POST (ex.: enviar ataque, colocar edifício na fila),
-        injetando automaticamente o token CSRF ('h') obrigatório.
+        injetando automaticamente o token CSRF ('h') obrigatório e 'page=mobile'.
+        Emite logs detalhados e telemetria da requisição.
         """
         if apply_jitter:
             await asyncio.sleep(get_click_jitter())
 
         async with self._lock:
+            self._req_counter += 1
+            req_id = self._req_counter
+
             if not self.csrf_token:
-                logger.warning("Token CSRF ausente. A atualizar estado antes da ação...")
+                logger.warning(f"[{self.world}] Token CSRF ausente. A atualizar estado antes da ação...")
                 await self._refresh_state_internal()
 
             v_id = village_id or self.current_village_id
             params: Dict[str, Any] = {
-                "page": "mobile",
                 "screen": screen,
-                "action": action,
-                "h": self.csrf_token,
+                "page": "mobile",
             }
+            if action:
+                params["action"] = action
+            if self.csrf_token:
+                params["h"] = self.csrf_token
             if v_id:
                 params["village"] = v_id
             if extra_params:
@@ -360,6 +468,13 @@ class TribalAccount:
                 "Referer": f"{self.base_url}?village={v_id}&screen={screen}&page=mobile",
             }
 
+            query_str = urlencode({k: str(v) for k, v in params.items()})
+            full_url = f"{self.base_url}?{query_str}"
+            logger.info(
+                f"[{self.world}] 🌐 [REQ #{req_id}] POST {self.base_url}?{query_str} | Data: {post_data}"
+            )
+
+            start_t = time.monotonic()
             try:
                 response = await self.session.post(
                     self.base_url,
@@ -368,17 +483,46 @@ class TribalAccount:
                     headers=headers,
                 )
             except Exception as e:
-                logger.error(f"Erro de conexão ao executar action '{action}': {e}")
+                duration_ms = (time.monotonic() - start_t) * 1000
+                self._record_request(
+                    req_id=req_id,
+                    method="POST",
+                    url=full_url,
+                    params=params,
+                    status_code=0,
+                    duration_ms=duration_ms,
+                    size_bytes=0,
+                    error=str(e),
+                )
+                logger.error(f"[{self.world}] ❌ [REQ #{req_id}] Erro de conexão após {duration_ms:.0f}ms ao executar action '{action}': {e}")
                 raise NetworkTimeoutError(f"Falha de rede ao enviar ação {action}: {e}") from e
 
+            duration_ms = (time.monotonic() - start_t) * 1000
             html = response.text
+            size_bytes = len(response.content) if hasattr(response, "content") else len(html.encode("utf-8"))
+            size_str = f"{size_bytes / 1024:.1f} KB" if size_bytes >= 1024 else f"{size_bytes} B"
+
+            logger.info(
+                f"[{self.world}] 📥 [RESP #{req_id}] HTTP {response.status_code} ({duration_ms:.0f}ms, {size_str}) - action={action}"
+            )
+
+            self._record_request(
+                req_id=req_id,
+                method="POST",
+                url=full_url,
+                params=params,
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+                size_bytes=size_bytes,
+            )
+
             self._inspect_response(response, html)
             self._update_state_from_html(html, str(response.url))
             return html
 
     async def _refresh_state_internal(self) -> None:
         """Atualização interna sem bloqueio extra de lock."""
-        params = {"page": "mobile", "screen": "main"}
+        params = {"screen": "main", "page": "mobile"}
         if self.current_village_id:
             params["village"] = self.current_village_id
 
@@ -388,7 +532,7 @@ class TribalAccount:
             self._inspect_response(response, html)
             self._update_state_from_html(html, str(response.url))
         except Exception as e:
-            logger.error(f"Falha ao atualizar estado: {e}")
+            logger.error(f"[{self.world}] Falha ao atualizar estado interno: {e}")
             raise
 
     async def refresh_state(self, village_id: Optional[int] = None) -> VillageData:

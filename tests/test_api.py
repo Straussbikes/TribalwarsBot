@@ -261,6 +261,27 @@ class TestApiSidecar(unittest.TestCase):
             self.assertEqual(farm_res.status_code, 200)
             self.assertEqual(farm_res.json()["status"], "scheduled")
 
+        # 5. GET /api/map/data
+        with patch.object(self.context.map_manager, "load_cache", return_value=([], 0.0)), \
+             patch.object(self.context.map_manager, "fetch_map_data", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = mock_villages
+            data_res = self.client.get("/api/map/data?x=571&y=485&radius=10", headers={"X-Engine-Token": self.token})
+            self.assertEqual(data_res.status_code, 200)
+            self.assertEqual(data_res.json()["status"], "success")
+            self.assertEqual(data_res.json()["total_barbarians"], 1)
+
+        # 6. POST /api/map/farm-target
+        target_res = self.client.post("/api/map/farm-target", json={"x": 570, "y": 480}, headers={"X-Engine-Token": self.token})
+        self.assertEqual(target_res.status_code, 200)
+        self.assertEqual(target_res.json()["status"], "success")
+
+        # 7. POST /api/map/quick-attack
+        with patch.object(self.context.place_manager, "send_attack", new_callable=AsyncMock) as mock_att:
+            mock_att.return_value = True
+            att_res = self.client.post("/api/map/quick-attack", json={"target_x": 570, "target_y": 480, "spear": 5}, headers={"X-Engine-Token": self.token})
+            self.assertEqual(att_res.status_code, 200)
+            self.assertEqual(att_res.json()["status"], "success")
+
     def test_bot_protect_resume_clears_alert(self):
         """POST /api/bot-protect/resume retoma o agendador e limpa alertas de captcha."""
         self.context.last_captcha_alert = {"world": "pt117", "url": "http://..."}
@@ -383,7 +404,297 @@ class TestApiSidecar(unittest.TestCase):
         bal_res = self.client.get("/api/account/villages/balance", headers={"X-Engine-Token": self.token})
         self.assertEqual(bal_res.status_code, 200)
 
+    def test_market_toggle_endpoint(self):
+        """Testa o endpoint POST /api/market/toggle para ativar/desativar mercado e balanceamento."""
+        # Desativa o mercado
+        t_res1 = self.client.post(
+            "/api/market/toggle",
+            json={"enabled": False, "auto_balance_enabled": False},
+            headers={"X-Engine-Token": self.token},
+        )
+        self.assertEqual(t_res1.status_code, 200)
+        self.assertEqual(t_res1.json()["status"], "success")
+
+        # Verifica status atualizado
+        cfg_res = self.client.get("/api/config", headers={"X-Engine-Token": self.token})
+        self.assertEqual(cfg_res.status_code, 200)
+        market_cfg = cfg_res.json().get("market", {})
+        self.assertFalse(market_cfg.get("enabled"))
+        self.assertFalse(market_cfg.get("auto_balance_enabled"))
+
+        # Reativa o mercado
+        t_res2 = self.client.post(
+            "/api/market/toggle",
+            json={"enabled": True, "auto_balance_enabled": True},
+            headers={"X-Engine-Token": self.token},
+        )
+        self.assertEqual(t_res2.status_code, 200)
+        self.assertEqual(t_res2.json()["status"], "success")
+
+        cfg_res2 = self.client.get("/api/config", headers={"X-Engine-Token": self.token})
+        self.assertTrue(cfg_res2.json().get("market", {}).get("enabled"))
+
+    def test_building_state_and_cancel_endpoints(self):
+        """Testa os endpoints GET /api/building/state e POST /api/building/cancel/{order_id}."""
+        # Mock do get_building_state no contexto
+        from unittest.mock import AsyncMock
+        self.context.get_building_state = AsyncMock(return_value={
+            "status": "success",
+            "village_id": 6810,
+            "template": "custom",
+            "queue": [],
+            "buildings": {"wood": 1, "stone": 1},
+            "upcoming": [
+                {"step": 1, "building": "wood", "building_name": "Bosque", "target_level": 2, "status": "next"}
+            ],
+            "next_target": {"building": "wood", "building_name": "Bosque", "target_level": 2},
+            "plan_total": 10,
+            "completed_count": 2,
+        })
+        self.context.cancel_building_order = AsyncMock(return_value={
+            "status": "success",
+            "message": "Ordem cancelada.",
+        })
+
+        # 1. GET /api/building/state
+        b_res = self.client.get("/api/building/state", headers={"X-Engine-Token": self.token})
+        self.assertEqual(b_res.status_code, 200)
+        b_data = b_res.json()
+        self.assertEqual(b_data["status"], "success")
+        self.assertEqual(b_data["village_id"], 6810)
+        self.assertIn("upcoming", b_data)
+        self.assertEqual(len(b_data["upcoming"]), 1)
+
+        # 2. POST /api/building/cancel/12345
+        c_res = self.client.post("/api/building/cancel/12345", headers={"X-Engine-Token": self.token})
+        self.assertEqual(c_res.status_code, 200)
+        self.assertEqual(c_res.json()["status"], "success")
+
+    def test_building_toggle_endpoint(self):
+        """Testa o endpoint POST /api/building/toggle."""
+        t_res = self.client.post(
+            "/api/building/toggle",
+            json={"enabled": False, "interval_seconds": 90, "max_queue": 3},
+            headers={"X-Engine-Token": self.token},
+        )
+        self.assertEqual(t_res.status_code, 200)
+        self.assertEqual(t_res.json()["status"], "success")
+
+        cfg_res = self.client.get("/api/config", headers={"X-Engine-Token": self.token})
+        bld_cfg = cfg_res.json().get("building", {})
+        self.assertFalse(bld_cfg.get("enabled"))
+        self.assertEqual(bld_cfg.get("interval_seconds"), 90)
+        self.assertEqual(bld_cfg.get("max_queue"), 3)
+
+        # Reativa
+        t_res2 = self.client.post(
+            "/api/building/toggle",
+            json={"enabled": True, "interval_seconds": 60},
+            headers={"X-Engine-Token": self.token},
+        )
+        self.assertEqual(t_res2.status_code, 200)
+        cfg_res2 = self.client.get("/api/config", headers={"X-Engine-Token": self.token})
+        self.assertTrue(cfg_res2.json().get("building", {}).get("enabled"))
+        self.assertEqual(cfg_res2.json().get("building", {}).get("interval_seconds"), 60)
+
+    def test_recruitment_state_and_toggle_endpoints(self):
+        """Testa GET /api/recruitment/state e POST /api/recruitment/toggle."""
+        from unittest.mock import AsyncMock
+        self.context.get_recruitment_state = AsyncMock(return_value={
+            "status": "success",
+            "village_id": 6810,
+            "enabled": True,
+            "interval_minutes": 5.0,
+            "min_free_pop": 10,
+            "targets": {"spear": 50, "sword": 50},
+            "batch_sizes": {"spear": 10, "sword": 10},
+            "active_orders": [
+                {
+                    "building": "barracks",
+                    "unit": "spear",
+                    "unit_name": "Lanceiro",
+                    "count": 10,
+                    "timer_str": "00:05:30",
+                    "finish_time": "15:45:00",
+                }
+            ],
+            "total_in_queue": {"spear": 10},
+            "troops_home": {"spear": 20, "sword": 10},
+            "available_units": ["spear", "sword", "axe"],
+        })
+
+        # 1. GET /api/recruitment/state
+        r_res = self.client.get("/api/recruitment/state", headers={"X-Engine-Token": self.token})
+        self.assertEqual(r_res.status_code, 200)
+        r_data = r_res.json()
+        self.assertEqual(r_data["status"], "success")
+        self.assertEqual(len(r_data["active_orders"]), 1)
+        self.assertEqual(r_data["active_orders"][0]["unit"], "spear")
+
+        # 2. POST /api/recruitment/toggle
+        t_res = self.client.post(
+            "/api/recruitment/toggle",
+            json={"enabled": False, "interval_minutes": 10, "min_free_pop": 25},
+            headers={"X-Engine-Token": self.token},
+        )
+        self.assertEqual(t_res.status_code, 200)
+        self.assertEqual(t_res.json()["status"], "success")
+
+        cfg_res = self.client.get("/api/config", headers={"X-Engine-Token": self.token})
+        rec_cfg = cfg_res.json().get("recruitment", {})
+        self.assertFalse(rec_cfg.get("enabled"))
+        self.assertEqual(rec_cfg.get("interval_minutes"), 10)
+        self.assertEqual(rec_cfg.get("min_free_pop"), 25)
+
+    def test_arbitrage_api_endpoints(self):
+        """Testa GET /api/arbitrage/state, POST /api/arbitrage/evaluate e POST /api/arbitrage/toggle."""
+        from unittest.mock import AsyncMock
+        self.context.get_arbitrage_state = AsyncMock(return_value={
+            "status": "success",
+            "enabled": True,
+            "decision": {
+                "village_id": 6810,
+                "action_type": "build",
+                "reason": "Construção de Bosque priorizada",
+            },
+        })
+        self.context.trigger_arbitrage_cycle = AsyncMock(return_value={
+            "status": "success",
+            "message": "Ciclo de Arbitragem executado",
+            "decision": {"action_type": "build"},
+        })
+
+        # 1. GET /api/arbitrage/state
+        res = self.client.get("/api/arbitrage/state", headers={"X-Engine-Token": self.token})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "success")
+        self.assertEqual(res.json()["decision"]["action_type"], "build")
+
+        # 2. POST /api/arbitrage/evaluate
+        eval_res = self.client.post("/api/arbitrage/evaluate", headers={"X-Engine-Token": self.token})
+        self.assertEqual(eval_res.status_code, 200)
+        self.assertEqual(eval_res.json()["status"], "success")
+
+        # 3. POST /api/arbitrage/toggle
+        t_res = self.client.post(
+            "/api/arbitrage/toggle",
+            json={"enabled": True, "interval_seconds": 45, "emergency_queue_seconds": 600},
+            headers={"X-Engine-Token": self.token},
+        )
+        self.assertEqual(t_res.status_code, 200)
+        self.assertEqual(t_res.json()["status"], "success")
+        self.assertTrue(self.context.config.arbitrage.enabled)
+        self.assertEqual(self.context.config.arbitrage.interval_seconds, 45)
+
+    def test_radar_farm_api_endpoints(self):
+        """Testa POST /api/farm/radar/plan e POST /api/farm/radar/run."""
+        from unittest.mock import AsyncMock
+        self.context.get_radar_farm_plan = AsyncMock(return_value={
+            "status": "success",
+            "village_id": 6810,
+            "total_barbarians_found": 5,
+            "eligible_targets_count": 3,
+            "squads_assigned_count": 3,
+            "total_carrying_capacity": 375,
+            "squads": [{"target": "(501|501)", "units": {"spear": 5}}],
+        })
+        self.context.trigger_radar_farm_cycle = AsyncMock(return_value={
+            "status": "success",
+            "message": "Onda de Radar Farming concluída: 3 ataques despachados.",
+            "data": {"sent_attacks": 3},
+        })
+
+        # 1. POST /api/farm/radar/plan
+        plan_res = self.client.post(
+            "/api/farm/radar/plan",
+            json={"radius": 12.0, "squad_troops": {"spear": 5, "spy": 1}},
+            headers={"X-Engine-Token": self.token},
+        )
+        self.assertEqual(plan_res.status_code, 200)
+        self.assertEqual(plan_res.json()["status"], "success")
+        self.assertEqual(plan_res.json()["squads_assigned_count"], 3)
+
+        # 2. POST /api/farm/radar/run
+        run_res = self.client.post(
+            "/api/farm/radar/run",
+            json={"radius": 12.0, "squad_troops": {"spear": 5, "spy": 1}},
+            headers={"X-Engine-Token": self.token},
+        )
+        self.assertEqual(run_res.status_code, 200)
+        self.assertEqual(run_res.json()["status"], "success")
+        self.assertEqual(run_res.json()["data"]["sent_attacks"], 3)
+
+    def test_get_network_requests_endpoint(self):
+        """Testa GET /api/network/requests."""
+        # Insere uma requisição simulada no histórico
+        self.account._record_request(
+            req_id=1,
+            method="GET",
+            url="https://pt117.tribalwars.com.pt/game.php?screen=main&page=mobile",
+            params={"screen": "main", "page": "mobile"},
+            status_code=200,
+            duration_ms=120.5,
+            size_bytes=45000,
+        )
+
+        res = self.client.get(
+            "/api/network/requests",
+            headers={"X-Engine-Token": self.token},
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["method"], "GET")
+        self.assertEqual(data[0]["status_code"], 200)
+        self.assertIn("page=mobile", data[0]["url"])
+
+    def test_account_villages_and_recruitment_models_api(self):
+        """Testa GET /api/account/villages e endpoints de modelos de recrutamento."""
+        from unittest.mock import AsyncMock
+
+        self.context.sync_and_get_all_villages = AsyncMock(return_value={
+            "world": "pt117",
+            "count": 1,
+            "villages": [{"id": 6810, "name": "Minha Aldeia", "category": "attack"}],
+            "balance": {"total_villages": 1},
+        })
+
+        # 1. GET /api/account/villages
+        v_res = self.client.get("/api/account/villages", headers={"X-Engine-Token": self.token})
+        self.assertEqual(v_res.status_code, 200)
+        v_data = v_res.json()
+        self.assertEqual(v_data["count"], 1)
+        self.assertEqual(v_data["villages"][0]["category"], "attack")
+
+        # 2. GET /api/recruitment/models
+        m_get = self.client.get("/api/recruitment/models", headers={"X-Engine-Token": self.token})
+        self.assertEqual(m_get.status_code, 200)
+        self.assertIn("attack", m_get.json()["models"])
+
+        # 3. POST /api/recruitment/models com modelos customizados
+        with patch.object(self.context, "update_config_and_save", return_value={"status": "success"}):
+            m_post = self.client.post(
+                "/api/recruitment/models",
+                json={
+                    "models": {
+                        "attack": {"axe": 6500, "light": 3000},
+                        "defense": {"spear": 8000, "sword": 8000},
+                        "fast_nuke": {"axe": 7000, "light": 3500},
+                    }
+                },
+                headers={"X-Engine-Token": self.token},
+            )
+            self.assertEqual(m_post.status_code, 200)
+            self.assertEqual(m_post.json()["status"], "success")
+
+            # 4. DELETE /api/recruitment/models/fast_nuke
+            m_del = self.client.delete("/api/recruitment/models/fast_nuke", headers={"X-Engine-Token": self.token})
+            self.assertEqual(m_del.status_code, 200)
+            self.assertEqual(m_del.json()["status"], "success")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

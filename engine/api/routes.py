@@ -7,7 +7,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from engine.api.auth import TokenVerifier
 from engine.api.context import EngineContext
@@ -26,7 +26,43 @@ class ConfigUpdateRequest(BaseModel):
     farm: Optional[Dict[str, Any]] = None
     recruitment: Optional[Dict[str, Any]] = None
     quest: Optional[Dict[str, Any]] = None
+    market: Optional[Dict[str, Any]] = None
     villages: Optional[Dict[str, Any]] = None
+
+
+class MarketToggleRequest(BaseModel):
+    enabled: Optional[bool] = None
+    auto_balance_enabled: Optional[bool] = None
+
+
+class BuildingToggleRequest(BaseModel):
+    enabled: Optional[bool] = None
+    interval_seconds: Optional[float] = None
+    max_queue: Optional[int] = None
+
+
+class RecruitmentToggleRequest(BaseModel):
+    enabled: Optional[bool] = None
+    interval_minutes: Optional[float] = None
+    min_free_pop: Optional[int] = None
+
+
+class RecruitmentModelsRequest(BaseModel):
+    attack: Optional[Dict[str, int]] = None
+    defense: Optional[Dict[str, int]] = None
+    models: Optional[Dict[str, Dict[str, int]]] = None
+
+
+class ArbitrageToggleRequest(BaseModel):
+    enabled: Optional[bool] = None
+    interval_seconds: Optional[float] = None
+    emergency_queue_seconds: Optional[float] = None
+
+
+class RadarFarmRequest(BaseModel):
+    radius: Optional[float] = None
+    squad_troops: Optional[Dict[str, int]] = None
+    village_id: Optional[int] = None
 
 
 class ActionResponse(BaseModel):
@@ -78,6 +114,24 @@ class WorldSwitchRequest(BaseModel):
 class VillageCategoryRequest(BaseModel):
     village_id: int
     category: str
+
+
+class MarketSendRequest(BaseModel):
+    source_village_id: int
+    target_village_id: int
+    wood: int = 0
+    stone: int = 0
+    iron: int = 0
+
+
+class MarketOfferRequest(BaseModel):
+    village_id: int
+    sell_res: str
+    sell_amount: int
+    buy_res: str
+    buy_amount: int
+    max_time: int = 10
+    multi: int = 1
 
 
 def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> APIRouter:
@@ -252,13 +306,6 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         res = context.resume_scheduler()
         return ActionResponse(status="resumed", message="Agendador retomado após resolução de verificação anti-bot.")
 
-    @router.get("/account/villages")
-    async def get_villages():
-        """Lista todas as aldeias pertencentes à conta."""
-        villages = [v.to_dict() for v in context.account.villages.values()] if context.account else []
-        curr_id = context.account.current_village_id if context.account else None
-        return {"villages": villages, "current_village_id": curr_id}
-
     @router.post("/account/switch-village")
     async def switch_village(payload: SwitchVillageRequest):
         """Alterna a aldeia ativa no bot."""
@@ -381,6 +428,101 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         res = await context.trigger_map_farm_wave()
         return ActionResponse(status=res["status"], message=res.get("message"), task_id=res.get("task_id"))
 
+    @router.get("/map/data")
+    async def get_map_data(x: Optional[int] = None, y: Optional[int] = None, radius: float = 15.0, refresh: bool = False):
+        """Compatibilidade para MapViewer / Cockpit map queries."""
+        if not context.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        curr_v = context.account.current_village
+        cx = x if x is not None else (curr_v.x if curr_v else 500)
+        cy = y if y is not None else (curr_v.y if curr_v else 500)
+        try:
+            villages = []
+            is_cached = False
+            if not refresh:
+                cached_villages, _ = context.map_manager.load_cache(context.account.world)
+                if cached_villages:
+                    for v in cached_villages:
+                        v.distance = context.map_manager.calculate_distance(cx, cy, v.x, v.y)
+                    villages = [v for v in cached_villages if v.distance <= radius + 5]
+                    if villages:
+                        is_cached = True
+
+            if not villages:
+                villages = await context.map_manager.fetch_map_data(
+                    account=context.account,
+                    center_x=cx,
+                    center_y=cy,
+                    radius=radius,
+                )
+                if villages:
+                    context.map_manager.save_cache(context.account.world, villages)
+
+            # Filtra aldeias no raio pedido
+            filtered = [v for v in villages if v.distance <= radius]
+            total_barbs = sum(1 for v in filtered if v.is_barbarian)
+            total_players = len(filtered) - total_barbs
+            return {
+                "status": "success",
+                "center": {"x": cx, "y": cy},
+                "radius": radius,
+                "count": len(filtered),
+                "total_barbarians": total_barbs,
+                "total_players": total_players,
+                "cached": is_cached,
+                "villages": [v.to_dict() for v in filtered],
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    @router.post("/map/farm-target")
+    async def add_farm_target(payload: AddFarmTargetRequest):
+        """Adiciona coordenadas aos alvos customizados de micro-farming."""
+        coords = f"{payload.x}|{payload.y}"
+        custom_targets = context.config.farm.custom_targets
+        target_pair = [payload.x, payload.y]
+        if target_pair not in custom_targets and (payload.x, payload.y) not in custom_targets:
+            custom_targets.append(target_pair)
+            context.update_config_and_save({"farm": {"custom_targets": custom_targets}})
+        return {
+            "status": "success",
+            "message": f"Alvo {coords} adicionado à lista de farming.",
+            "custom_targets": custom_targets,
+        }
+
+    @router.post("/map/quick-attack")
+    async def send_quick_attack(payload: QuickAttackRequest):
+        """Envia um ataque rápido manual para as coordenadas indicadas."""
+        if not context.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        try:
+            from engine.actions.place import UnitsCount
+            troops = UnitsCount(
+                spear=payload.spear,
+                sword=payload.sword,
+                axe=payload.axe,
+                spy=payload.spy,
+                light=payload.light,
+            )
+            v_id = context.account.current_village_id
+            target_coords = f"{payload.target_x}|{payload.target_y}"
+            res = await context.place_manager.send_attack(
+                account=context.account,
+                target_coords=target_coords,
+                units=troops,
+                village_id=v_id,
+            )
+            if res:
+                cmd_id = getattr(res, "command_id", "cmd_ok")
+                return {
+                    "status": "success",
+                    "message": f"Ataque enviado para {target_coords}!",
+                    "command_id": cmd_id,
+                }
+            return {"status": "error", "message": f"Não foi possível enviar ataque para {target_coords}."}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
     # --- Rotas Multi-Mundo Simultâneo ---
 
     @router.get("/worlds")
@@ -462,6 +604,186 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
             spy=payload.spy,
             light=payload.light,
         )
+
+    # --- Endpoints do Mercado & Balanceamento de Recursos ---
+
+    @router.get("/market/state")
+    async def get_market_state(village_id: Optional[int] = None):
+        """Retorna o estado do mercado (mercadores, movimentos e ofertas) da aldeia."""
+        return await context.get_market_state(village_id=village_id)
+
+    @router.post("/market/send", response_model=ActionResponse)
+    async def send_market_resources(payload: MarketSendRequest):
+        """Envia recursos entre duas aldeias via mercadores."""
+        res = await context.send_market_resources(
+            source_village_id=payload.source_village_id,
+            target_village_id=payload.target_village_id,
+            wood=payload.wood,
+            stone=payload.stone,
+            iron=payload.iron,
+        )
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    @router.get("/market/balance/plan")
+    def get_resource_balancing_plan():
+        """Retorna a análise de médias e as transferências planeadas para balancear a conta."""
+        return context.get_resource_balancing_plan()
+
+    @router.post("/market/balance/trigger")
+    async def trigger_resource_balancing():
+        """Dispara a execução imediata de um ciclo de balanceamento de recursos entre aldeias."""
+        return await context.trigger_resource_balancing()
+
+    @router.post("/market/offer", response_model=ActionResponse)
+    async def create_market_offer(payload: MarketOfferRequest):
+        """Cria uma oferta de troca de recursos no mercado da aldeia."""
+        res = await context.create_market_offer(
+            village_id=payload.village_id,
+            sell_res=payload.sell_res,
+            sell_amount=payload.sell_amount,
+            buy_res=payload.buy_res,
+            buy_amount=payload.buy_amount,
+            max_time=payload.max_time,
+            multi=payload.multi,
+        )
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    @router.post("/market/toggle", response_model=ActionResponse)
+    async def toggle_market(payload: MarketToggleRequest):
+        """Ativa ou desativa as funcionalidades e auto-balanceamento do mercado."""
+        update_data = {}
+        if payload.enabled is not None:
+            update_data["enabled"] = payload.enabled
+        if payload.auto_balance_enabled is not None:
+            update_data["auto_balance_enabled"] = payload.auto_balance_enabled
+        res = context.update_config_and_save({"market": update_data})
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    @router.get("/building/state")
+    async def get_building_state(village_id: Optional[int] = None):
+        """Retorna o estado da fila de construção e a lista de próximos edifícios a serem upados."""
+        return await context.get_building_state(village_id=village_id)
+
+    @router.post("/building/cancel/{order_id}", response_model=ActionResponse)
+    async def cancel_building_order(order_id: str, village_id: Optional[int] = None):
+        """Cancela uma ordem de construção em andamento."""
+        res = await context.cancel_building_order(order_id, village_id=village_id)
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    @router.post("/building/toggle", response_model=ActionResponse)
+    async def toggle_building(payload: BuildingToggleRequest):
+        """Ativa/desativa a construção automática e ajusta parâmetros de fila."""
+        res = context.toggle_building_module(
+            enabled=payload.enabled,
+            interval_seconds=payload.interval_seconds,
+            max_queue=payload.max_queue,
+        )
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    @router.get("/recruitment/state")
+    async def get_recruitment_state(village_id: Optional[int] = None):
+        """Retorna o estado do recrutamento militar, tropas em treino e unidades disponíveis."""
+        return await context.get_recruitment_state(village_id=village_id)
+
+    @router.post("/recruitment/toggle", response_model=ActionResponse)
+    async def toggle_recruitment(payload: RecruitmentToggleRequest):
+        """Ativa/desativa o recrutamento automático contínuo."""
+        res = context.toggle_recruitment_module(
+            enabled=payload.enabled,
+            interval_minutes=payload.interval_minutes,
+            min_free_pop=payload.min_free_pop,
+        )
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    @router.get("/recruitment/models")
+    async def get_recruitment_models():
+        """Retorna todos os modelos de tropas configurados (Ataque, Defesa e Customizados)."""
+        return context.get_recruitment_models()
+
+    @router.post("/recruitment/models", response_model=ActionResponse)
+    async def save_recruitment_models(payload: RecruitmentModelsRequest):
+        """Salva os modelos de tropas (Ataque, Defesa e Customizados) no config.json."""
+        res = context.save_recruitment_models(
+            attack=payload.attack,
+            defense=payload.defense,
+            models=payload.models,
+        )
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    @router.delete("/recruitment/models/{name}", response_model=ActionResponse)
+    async def delete_recruitment_model(name: str):
+        """Remove um modelo de tropas customizado do config.json."""
+        res = context.delete_recruitment_model(name)
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    # --- Endpoints de Arbitragem Económica & Fila Sempre Ativa (Item 2.12) ---
+
+    @router.get("/arbitrage/state")
+    async def get_arbitrage_state(village_id: Optional[int] = None):
+        """Retorna a avaliação de arbitragem económica, diagnóstico das 4 filas e fluxo de caixa."""
+        return await context.get_arbitrage_state(village_id=village_id)
+
+    @router.post("/arbitrage/evaluate")
+    async def trigger_arbitrage_evaluation(village_id: Optional[int] = None):
+        """Dispara a execução imediata de um ciclo de arbitragem económica para a aldeia."""
+        return await context.trigger_arbitrage_cycle(village_id=village_id)
+
+    @router.post("/arbitrage/toggle", response_model=ActionResponse)
+    async def toggle_arbitrage(payload: ArbitrageToggleRequest):
+        """Ativa/desativa a rotina de arbitragem económica contínua."""
+        res = context.toggle_arbitrage_module(
+            enabled=payload.enabled,
+            interval_seconds=payload.interval_seconds,
+            emergency_queue_seconds=payload.emergency_queue_seconds,
+        )
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    # --- Endpoints de Radar de Bárbaras & Saque Recorrente (Item 2.3) ---
+
+    @router.post("/farm/radar/plan")
+    async def get_radar_farm_plan(payload: RadarFarmRequest):
+        """Calcula o plano de alocação de micro-esquadrões de saque para as bárbaras mais próximas."""
+        return await context.get_radar_farm_plan(
+            radius=payload.radius,
+            squad_troops=payload.squad_troops,
+            village_id=payload.village_id,
+        )
+
+    @router.post("/farm/radar/run")
+    async def run_radar_farm(payload: RadarFarmRequest):
+        """Dispara uma onda imediata de Radar Farming com alocação dinâmica de tropas."""
+        return await context.trigger_radar_farm_cycle(
+            radius=payload.radius,
+            squad_troops=payload.squad_troops,
+            village_id=payload.village_id,
+        )
+
+    # --- Endpoints de Estatísticas & Rendimento ---
+
+    @router.get("/stats/summary")
+    def get_stats_summary(world: Optional[str] = None):
+        """Retorna resumo consolidado de estatísticas e KPIs de eficiência."""
+        return context.get_stats_summary(world=world)
+
+    @router.get("/stats/history")
+    def get_stats_history(
+        hours: int = 24, days: int = 7, world: Optional[str] = None
+    ):
+        """Retorna séries temporais para gráficos e histórico de comandos/saques."""
+        return context.get_stats_history(hours=hours, days=days, world=world)
+
+    @router.post("/stats/reset", response_model=ActionResponse)
+    def reset_stats(world: Optional[str] = None):
+        """Reinicia as métricas e histórico de estatísticas do mundo."""
+        res = context.reset_stats(world=world)
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    # --- Endpoints de Rede & Diagnóstico de Requisições ---
+
+    @router.get("/network/requests")
+    def get_network_requests(limit: int = 50):
+        """Retorna histórico de requisições HTTP efetuadas pelo bot com telemetria."""
+        return context.get_network_requests(limit=limit)
 
     return router
 

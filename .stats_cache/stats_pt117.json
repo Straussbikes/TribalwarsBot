@@ -1,0 +1,339 @@
+{
+  "world": "pt117",
+  "created_at": 1787923327.2929397,
+  "last_updated": 1787936879.8283627,
+  "total_wood": 0,
+  "total_stone": 0,
+  "total_iron": 0,
+  "total_attacks_sent": 20,
+  "total_attacks_successful": 19,
+  "total_villages_farmed": 0,
+  "troops_recruited_by_unit": {},
+  "buildings_constructed_count": 0,
+  "hourly_buckets": {
+    "2026-08-28 13:00": {
+      "hour_key": "2026-08-28 13:00",
+      "timestamp": 1787918400.0,
+      "wood": 0,
+      "stone": 0,
+      "iron": 0,
+      "total": 0,
+      "attacks_count": 14,
+      "attacks_successful": 0,
+      "villages_farmed": 0,
+      "troops_recruited": 0
+    },
+    "2026-08-28 16:00": {
+      "hour_key": "2026-08-28 16:00",
+      "timestamp": 1787929200.0,
+      "wood": 0,
+      "stone": 0,
+      "iron": 0,
+      "total": 0,
+      "attacks_count": 5,
+      "attacks_successful": 0,
+      "villages_farmed": 0,
+      "troops_recruited": 0
+    },
+    "2026-08-28 17:00": {
+      "hour_key": "2026-08-28 17:00",
+      "timestamp": 1787932800.0,
+      "wood": 0,
+      "stone": 0,
+      "iron": 0,
+      "total": 0,
+      "attacks_count": 1,
+      "attacks_successful": 1,
+      "villages_farmed": 0,
+      "troops_recruited": 0
+    }
+  },
+  "recent_loot_events": [],
+  "recent_commands": [
+    {
+      "timestamp": 1787936879.8283627,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787935769.7043152,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787935738.537152,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787935720.6921756,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787935639.992975,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787935097.4183047,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787925530.02312,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787925349.4939375,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787925325.89667,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787924816.6601284,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787924476.7096794,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787924443.1971767,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787923958.9305162,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787923879.7089968,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787923857.9525185,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787923439.868389,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787923414.985577,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787923391.6825573,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": false,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1787923327.3601472,
+      "command_type": "attack",
+      "target_coords": "502|503",
+      "units": {
+        "spear": 5,
+        "sword": 0,
+        "axe": 0,
+        "spy": 1,
+        "light": 0
+      },
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    }
+  ]
+}

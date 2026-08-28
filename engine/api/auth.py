@@ -10,7 +10,7 @@ from pathlib import Path
 import secrets
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Query, Security, status
+from fastapi import HTTPException, Query, Security, status
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
 logger = logging.getLogger(__name__)

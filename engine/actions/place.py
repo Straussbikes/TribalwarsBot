@@ -280,7 +280,7 @@ class PlaceManager:
         try:
             html = await account.post_action(
                 screen="place",
-                action="",
+                action=None,
                 data=post_data,
                 village_id=v_id,
                 extra_params={"try": "confirm"},
@@ -358,7 +358,11 @@ class PlaceManager:
         2. Submete o formulário de preparação.
         3. Valida e despacha a confirmação final.
         """
-        target_x, target_y = target_coords
+        if isinstance(target_coords, str) and "|" in target_coords:
+            tx_s, ty_s = target_coords.split("|", 1)
+            target_x, target_y = int(tx_s), int(ty_s)
+        else:
+            target_x, target_y = target_coords
 
         # 1. Validação de tropas existentes
         state = await self.get_state(account, village_id=village_id)
@@ -416,3 +420,6 @@ class PlaceManager:
             confirmation_data=prep,
             village_id=village_id,
         )
+
+    # Alias para compatibilidade de API
+    send_attack = send_command

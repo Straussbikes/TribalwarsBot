@@ -84,17 +84,9 @@
         <button class="btn btn-warning btn-sm" id="btn-toggle-scheduler">
           <span>⏸</span> Pausar
         </button>
-        <div class="btn-group" style="display: inline-flex; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border-glass);">
-          <button class="btn btn-primary btn-sm" id="btn-build-now" title="Força a execução de um ciclo imediato de construção" style="border-radius: 0; border: none; border-right: 1px solid rgba(255,255,255,0.15);">
-            <span>🔨</span> Construir
-          </button>
-          <button class="btn btn-secondary btn-sm" id="btn-farm-now" title="Dispara uma onda imediata do Assistente de Farm" style="border-radius: 0; border: none; border-right: 1px solid rgba(255,255,255,0.15);">
-            <span>🌾</span> Farm
-          </button>
-          <button class="btn btn-secondary btn-sm" id="btn-recruit-now" title="Dispara verificação imediata de recrutamento militar" style="border-radius: 0; border: none;">
-            <span>🪖</span> Recrutar
-          </button>
-        </div>
+        <button class="btn btn-secondary btn-sm" id="btn-farm-now" title="Dispara uma onda imediata do Assistente de Farm">
+          <span>🌾</span> Farm
+        </button>
       </div>
     </header>
 
@@ -119,8 +111,11 @@
         <button class="nav-tab" data-tab="tab-villages" id="tab-btn-villages">
           <span class="tab-icon">🏰</span> Multi-Aldeia
         </button>
-        <button class="nav-tab" data-tab="tab-map" id="tab-btn-map">
-          <span class="tab-icon">🗺️</span> Mapa do Mundo
+        <button class="nav-tab" data-tab="tab-market" id="tab-btn-market">
+          <span class="tab-icon">⚖️</span> Mercado
+        </button>
+        <button class="nav-tab" data-tab="tab-stats" id="tab-btn-stats">
+          <span class="tab-icon">📈</span> Estatísticas & Rendimento
         </button>
         <button class="nav-tab" data-tab="tab-terminal" id="tab-btn-terminal">
           <span class="tab-icon">🖥</span> Terminal de Logs
@@ -287,48 +282,197 @@
             </div>
           </section>
 
-          <!-- Card: Assistente de Farm & Micro-Farming -->
+          <!-- Card: Assistente de Farm & Rendimento -->
           <section class="glass-card col-6">
             <div class="card-header">
               <div class="card-title">
-                <span class="icon">🌾</span> Assistente de Farm (AF)
+                <span class="icon">🌾</span> Assistente de Farm & Rendimento
               </div>
-              <div class="badge" style="color: var(--neon-amber)">Modelo A/B Ativo</div>
+              <button class="btn btn-secondary btn-sm" id="btn-dashboard-view-stats" style="font-size: 0.75rem; padding: 2px 8px; border-color: rgba(6,182,212,0.4); color: var(--neon-cyan);">
+                📈 Ver Gráficos →
+              </button>
             </div>
-            <div style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.6">
-              <p>• <strong>Modo de Ataque:</strong> Submissão direta de micro-ataques com tempos gaussianos.</p>
-              <p>• <strong>Filtros Ativos:</strong> Deteção de perdas totais/parciais e verificação de nível de muralha.</p>
-              <p>• <strong>Proteção Anti-Dormência:</strong> Micro-jitter e dispersão de cliques humanos.</p>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+              <div style="background: rgba(15,23,42,0.6); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <div style="font-size: 0.72rem; color: var(--text-muted);">Saque Últimas 24h</div>
+                <div style="font-size: 1.15rem; font-weight: 700; color: #fff; font-family: var(--font-mono);" id="dash-loot-24h">0</div>
+                <div style="font-size: 0.7rem; color: var(--neon-emerald);" id="dash-hourly-rate">+0 / hora</div>
+              </div>
+              <div style="background: rgba(15,23,42,0.6); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <div style="font-size: 0.72rem; color: var(--text-muted);">Taxa de Sucesso</div>
+                <div style="font-size: 1.15rem; font-weight: 700; color: var(--neon-cyan); font-family: var(--font-mono);" id="dash-success-rate">100%</div>
+                <div style="font-size: 0.7rem; color: var(--text-muted);"><span id="dash-attacks-24h">0</span> comandos hoje</div>
+              </div>
+            </div>
+            <div style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.5">
+              <span>• Micro-farming automático com distribuição gaussiana e proteção anti-bot.</span>
             </div>
           </section>
 
         </div>
       </main>
 
-      <!-- Panel 2: Edifícios & Template -->
+      <!-- Panel 2: Edifícios & Fila de Construção -->
       <main class="tab-content" id="tab-building">
-        <div class="glass-card" style="max-width: 1000px; margin: 0 auto">
-          <div class="card-header">
-            <div class="card-title">
-              <span class="icon">🏛</span> Gestão de Evolução do Edifício Principal
+        <div style="display: flex; flex-direction: column; gap: 18px; max-width: 1100px; margin: 0 auto;">
+          <!-- Toolbar Superior de Edifícios -->
+          <div class="card">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span class="icon" style="font-size: 1.4rem;">🏛️</span>
+                <div>
+                  <h3 style="margin: 0; font-size: 1.1rem; color: #fff;">Edifícios & Fila de Construção</h3>
+                  <span style="font-size: 0.78rem; color: var(--text-muted);">
+                    Plano de evolução automatizado, próximos alvos e monitorização da fila
+                  </span>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 0.8rem; color: var(--text-muted);">Template:</span>
+                  <span id="bld-template-badge" class="badge" style="background: rgba(6,182,212,0.2); color: var(--neon-cyan); font-weight: 700; font-size: 0.8rem;">
+                    CUSTOM
+                  </span>
+                </div>
+                <!-- Switch Ligar/Desligar Auto-Construção -->
+                <label class="switch-container" style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-main); cursor: pointer; background: rgba(15,23,42,0.6); padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                  <input type="checkbox" id="bld-auto-toggle" style="accent-color: var(--neon-cyan); cursor: pointer; width: 16px; height: 16px;" checked>
+                  <span>Auto-Construção</span>
+                  <span id="bld-badge-status" class="badge" style="font-size: 0.7rem; background: rgba(16,185,129,0.2); color: var(--neon-emerald); font-weight: 700;">ATIVO</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 4px; background: rgba(15,23,42,0.6); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                  <span style="font-size: 0.75rem; color: var(--text-muted);">Intervalo:</span>
+                  <input type="number" id="bld-interval-seconds" value="75" min="15" max="600" style="width: 50px; background: transparent; border: none; color: #fff; font-family: var(--font-mono); font-size: 0.8rem; text-align: right;">
+                  <span style="font-size: 0.72rem; color: var(--text-muted);">s</span>
+                </div>
+                <button class="btn btn-secondary" id="btn-refresh-building-tab" style="padding: 6px 12px; font-size: 0.8rem;">
+                  <span>🔄</span> Atualizar
+                </button>
+                <button class="btn btn-primary" id="btn-trigger-build-tab" style="padding: 6px 14px; font-size: 0.8rem; background: linear-gradient(135deg, var(--neon-cyan), var(--neon-emerald));">
+                  <span>🔨</span> Construir Agora
+                </button>
+              </div>
+            </div>
+
+            <!-- Métricas Principais -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 15px;">
+              <!-- Fila Atual -->
+              <div class="glass-card" style="padding: 14px 16px; border: 1px solid var(--border-glass);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Fila de Construção</span>
+                  <span style="font-size: 1.1rem;">⏳</span>
+                </div>
+                <div style="display: flex; align-items: baseline; gap: 6px;">
+                  <strong id="bld-queue-count" style="font-size: 1.4rem; font-family: var(--font-mono); color: var(--neon-cyan);">0</strong>
+                  <span style="font-size: 0.9rem; color: var(--text-muted);">/ <span id="bld-max-queue">2</span> ordens</span>
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 6px;">
+                  Status: <span id="bld-queue-status-text" style="color: var(--neon-emerald); font-weight: 600;">Disponível</span>
+                </div>
+              </div>
+
+              <!-- Próximo Alvo Imediato -->
+              <div class="glass-card" style="padding: 14px 16px; border: 1px solid var(--border-glass);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Próximo Alvo Imediato</span>
+                  <span style="font-size: 1.1rem;">🎯</span>
+                </div>
+                <div>
+                  <strong id="bld-next-target-name" style="font-size: 0.95rem; color: #fff;">A avaliar plano...</strong>
+                </div>
+                <div id="bld-next-target-cost" style="font-size: 0.75rem; color: var(--neon-cyan); margin-top: 6px; font-family: var(--font-mono);">
+                  -
+                </div>
+              </div>
+
+              <!-- Progresso do Plano -->
+              <div class="glass-card" style="padding: 14px 16px; border: 1px solid var(--border-glass);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Progresso do Plano</span>
+                  <span style="font-size: 1.1rem;">📈</span>
+                </div>
+                <div style="display: flex; align-items: baseline; gap: 6px;">
+                  <strong id="bld-progress-pct" style="font-size: 1.4rem; font-family: var(--font-mono); color: var(--neon-emerald);">0%</strong>
+                  <span style="font-size: 0.85rem; color: var(--text-muted);">(<span id="bld-progress-completed">0</span>/<span id="bld-progress-total">0</span> metas)</span>
+                </div>
+                <div class="progress-bar-wrap" style="height: 6px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; margin-top: 8px;">
+                  <div id="bld-progress-bar" style="height: 100%; width: 0%; background: linear-gradient(90deg, var(--neon-cyan), var(--neon-emerald)); transition: width 0.3s ease;"></div>
+                </div>
+              </div>
             </div>
           </div>
-          <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 20px">
-            O bot calcula os níveis virtuais em tempo real (nível atual + ordens na fila de construção) e executa o plano configurado sem penalidades de recursos.
-          </p>
-          <div class="next-target-box" id="next-target-box">
-            <div>
-              <div class="next-target-label">Próximo Alvo no Plano de Construção</div>
-              <div class="next-target-value" id="next-target-name">Poço de Argila (stone) para Nível 2</div>
+
+          <!-- Card: Fila de Construção em Andamento -->
+          <div class="card">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="icon">🏗️</span>
+                <span style="font-weight: 700;">Construções em Andamento na Aldeia</span>
+                <span id="bld-active-queue-badge" class="badge" style="font-size: 0.75rem;">0</span>
+              </div>
             </div>
-            <div class="next-target-cost" id="next-target-cost">
-              Custo: 83 Madeira | 63 Argila | 50 Ferro
+            <div id="bld-active-queue-container" style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+              <div style="text-align: center; padding: 16px; color: var(--text-muted); font-size: 0.85rem;">
+                Nenhuma ordem em execução no momento. O bot iniciará a próxima construção assim que houver recursos.
+              </div>
+            </div>
+          </div>
+
+          <!-- Card: Sequência de Próximos Edifícios a Serem Upados -->
+          <div class="card">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="icon">📋</span>
+                <div>
+                  <span style="font-weight: 700; font-size: 0.95rem;">Próximos Edifícios a Serem Upados (Roadmap do Plano)</span>
+                  <span id="bld-upcoming-count-badge" class="badge" style="background: rgba(6,182,212,0.2); color: var(--neon-cyan); margin-left: 6px; font-size: 0.75rem;">0 passos</span>
+                </div>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <button class="btn btn-secondary btn-sm" id="btn-filter-plan-pending" style="font-size: 0.75rem; padding: 3px 8px;">
+                  Apenas Pendentes
+                </button>
+                <button class="btn btn-secondary btn-sm" id="btn-filter-plan-all" style="font-size: 0.75rem; padding: 3px 8px;">
+                  Plano Completo
+                </button>
+              </div>
+            </div>
+
+            <div class="table-responsive" style="border: 1px solid var(--border-subtle); border-radius: 8px; max-height: 440px; overflow-y: auto; margin-top: 10px;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 0.84rem; text-align: left;">
+                <thead style="background: rgba(30, 41, 59, 0.9); position: sticky; top: 0; z-index: 10;">
+                  <tr style="border-bottom: 1px solid var(--border-subtle);">
+                    <th style="padding: 10px 12px; width: 50px;">#</th>
+                    <th style="padding: 10px 12px;">Edifício</th>
+                    <th style="padding: 10px 12px;">Nível Atual ➔ Alvo</th>
+                    <th style="padding: 10px 12px;">Custo Estimado</th>
+                    <th style="padding: 10px 12px; text-align: center;">Estado</th>
+                  </tr>
+                </thead>
+                <tbody id="bld-upcoming-table-body">
+                  <tr>
+                    <td colspan="5" style="padding: 20px; text-align: center; color: var(--text-muted);">
+                      A carregar sequência de evolução de edifícios...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Card: Grelha de Níveis Atuais dos Edifícios -->
+          <div class="card">
+            <div class="card-header">
+              <span class="icon">🏛️</span> Níveis de Todos os Edifícios na Aldeia
+            </div>
+            <div id="bld-village-levels-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin-top: 10px;">
+              <!-- Injetado via JS -->
             </div>
           </div>
         </div>
       </main>
 
-      <!-- Panel 3: Recrutamento & Objetivos de Tropas -->
+      <!-- Panel 3: Recrutamento & Modelos de Tropas -->
       <main class="tab-content" id="tab-military">
         <div class="glass-card" style="max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px;">
           
@@ -336,351 +480,86 @@
           <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
             <div>
               <div class="card-title" style="display: flex; align-items: center; gap: 10px;">
-                <span class="icon">⚔</span> Metas de Tropas & Estratégia Militar
-                <span id="badge-rec-status" class="badge" style="font-size: 0.72rem; background: rgba(100,116,139,0.25); color: #94a3b8;">INATIVO</span>
+                <span class="icon">⚔️</span> Modelos de Tropas (Ataque & Defesa)
               </div>
               <p style="color: var(--text-muted); font-size: 0.82rem; margin-top: 4px;">
-                Define os objetivos de tropas da aldeia ativa ou aplica templates táticos (Ataque, Defesa, Farm). O bot treina em lotes contínuos respeitando a população da Fazenda.
+                Define os alvos de tropas para aldeias de Ataque e Defesa. O bot seguirá estes modelos automaticamente na página de Múltiplas Aldeias.
               </p>
             </div>
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-              <label class="switch-container" style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-main); cursor: pointer; background: rgba(15,23,42,0.6); padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border-subtle);">
-                <input type="checkbox" id="rec-enabled" style="accent-color: var(--neon-cyan); cursor: pointer; width: 16px; height: 16px;">
-                <span>Auto-Recrutamento Ativo</span>
-              </label>
-              <button class="btn btn-primary btn-sm" id="btn-save-recruitment">
-                <span>💾</span> Guardar Metas
+              <button class="btn btn-secondary" id="btn-refresh-rec-tab" style="padding: 6px 14px; font-size: 0.82rem;">
+                <span>🔄</span> Atualizar
               </button>
-              <button class="btn btn-secondary btn-sm" id="btn-trigger-recruit-tab">
-                <span>🪖</span> Recrutar Agora
+              <button class="btn btn-primary" id="btn-save-recruitment" style="padding: 6px 18px; font-size: 0.85rem; font-weight: 700;">
+                <span>💾</span> Guardar Modelos
               </button>
             </div>
           </div>
 
-          <!-- Barra de Templates Táticos Rápidos (1-Clique) -->
-          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 14px 18px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
-              <span style="font-size: 0.78rem; font-weight: 700; text-transform: uppercase; color: var(--neon-cyan); letter-spacing: 0.5px;">
-                🎯 Templates Táticos Pré-Definidos (1-Clique):
-              </span>
-              <span style="font-size: 0.75rem; color: var(--text-muted);">
-                Aplica instantaneamente proporções otimizadas para a aldeia
-              </span>
+          <!-- Card: Tropas em Treino no Momento (Filas Ativas de Produção) -->
+          <div class="card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 16px 20px;">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="icon" style="font-size: 1.2rem;">🪖</span>
+                <span style="font-weight: 700; font-size: 0.95rem;">Tropas a Ser Produzidas no Momento (Fila Ativa)</span>
+                <span id="rec-active-queue-badge" class="badge" style="background: rgba(6,182,212,0.2); color: var(--neon-cyan); font-size: 0.75rem;">0 ordens</span>
+              </div>
             </div>
-            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button class="btn btn-secondary btn-sm" id="btn-tmpl-nuke" title="Foco ofensivo: 6.000 Machados, 3.000 Cavalaria Leve, 250 Aríetes, 100 Espiões">
-                <span>⚔️</span> Ataque Nuke
-              </button>
-              <button class="btn btn-secondary btn-sm" id="btn-tmpl-defense" title="Bunker defensivo de apoio rápido: 7.000 Lanças, 7.000 Espadas, 1.000 Cavalaria Pesada, 100 Espiões">
-                <span>🛡️</span> Defesa Bunker
-              </button>
-              <button class="btn btn-secondary btn-sm" id="btn-tmpl-farm" title="Especialista em Saque: 200 Machados, 20 Espiões, 200 Cavalaria Leve">
-                <span>🌾</span> Rush Farm
-              </button>
-              <button class="btn btn-secondary btn-sm" id="btn-tmpl-balanced" title="Exército equilibrado early-game: 150 Lanças, 150 Espadas, 300 Machados, 30 Espiões, 100 Leves">
-                <span>⚖️</span> Equilibrado
-              </button>
-              <button class="btn btn-secondary btn-sm" id="btn-tmpl-clear" style="color: #f87171; border-color: rgba(239,68,68,0.4);" title="Zerar todas as metas de tropas">
-                <span>🧹</span> Limpar Metas
-              </button>
+            <div id="rec-active-queue-container" style="display: flex; flex-direction: column; gap: 8px;">
+              <div style="text-align: center; padding: 18px; color: var(--text-muted); font-size: 0.85rem;">
+                Nenhuma tropa a ser produzida no momento.
+              </div>
             </div>
           </div>
 
-          <!-- Grelhas de Unidades por Edifício -->
-          <div style="display: flex; flex-direction: column; gap: 14px;">
+          <!-- Card: Definição dos Modelos de Tropas (Ataque, Defesa & Customizados) -->
+          <div class="card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 18px 20px;">
             
-            <!-- Grupo: Quartel (Infantaria) -->
-            <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 14px 16px;">
-              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-                <h4 style="margin: 0; font-size: 0.9rem; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
-                  <span>🗡️</span> Quartel (Infantaria)
-                </h4>
-                <span style="font-size: 0.75rem; color: var(--text-muted);">Edifício de Treino de Infantaria</span>
+            <!-- Barra Superior de Modelos: Abas Dinâmicas + Botão Adicionar -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;" id="rec-models-tabs-container">
+                <!-- Abas injetadas dinamicamente via JS (Ataque, Defesa, Customizados) -->
               </div>
-              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
-                <!-- Spear -->
-                <div class="unit-rec-card" data-unit="spear">
-                  <div class="unit-rec-header">
-                    <span class="unit-rec-icon">🗡️</span>
-                    <div>
-                      <div class="unit-rec-name">Lanceiro</div>
-                      <div class="unit-rec-pop">1 pop / unid.</div>
-                    </div>
-                    <span class="unit-rec-curr badge" id="rec-curr-spear">0</span>
-                  </div>
-                  <div class="unit-rec-progress-wrap">
-                    <div class="unit-rec-progress-bar" id="rec-bar-spear" style="width: 0%;"></div>
-                  </div>
-                  <div class="unit-rec-inputs">
-                    <div>
-                      <label>Meta Alvo</label>
-                      <input type="number" class="form-control rec-input" id="rec-target-spear" value="0" min="0">
-                    </div>
-                    <div>
-                      <label>Lote / Ciclo</label>
-                      <input type="number" class="form-control rec-input" id="rec-batch-spear" value="10" min="1">
-                    </div>
-                  </div>
-                </div>
-                <!-- Sword -->
-                <div class="unit-rec-card" data-unit="sword">
-                  <div class="unit-rec-header">
-                    <span class="unit-rec-icon">🛡️</span>
-                    <div>
-                      <div class="unit-rec-name">Espadachim</div>
-                      <div class="unit-rec-pop">1 pop / unid.</div>
-                    </div>
-                    <span class="unit-rec-curr badge" id="rec-curr-sword">0</span>
-                  </div>
-                  <div class="unit-rec-progress-wrap">
-                    <div class="unit-rec-progress-bar" id="rec-bar-sword" style="width: 0%;"></div>
-                  </div>
-                  <div class="unit-rec-inputs">
-                    <div>
-                      <label>Meta Alvo</label>
-                      <input type="number" class="form-control rec-input" id="rec-target-sword" value="0" min="0">
-                    </div>
-                    <div>
-                      <label>Lote / Ciclo</label>
-                      <input type="number" class="form-control rec-input" id="rec-batch-sword" value="10" min="1">
-                    </div>
-                  </div>
-                </div>
-                <!-- Axe -->
-                <div class="unit-rec-card" data-unit="axe">
-                  <div class="unit-rec-header">
-                    <span class="unit-rec-icon">🪓</span>
-                    <div>
-                      <div class="unit-rec-name">Viking / Bárbaro</div>
-                      <div class="unit-rec-pop">1 pop / unid.</div>
-                    </div>
-                    <span class="unit-rec-curr badge" id="rec-curr-axe">0</span>
-                  </div>
-                  <div class="unit-rec-progress-wrap">
-                    <div class="unit-rec-progress-bar" id="rec-bar-axe" style="width: 0%;"></div>
-                  </div>
-                  <div class="unit-rec-inputs">
-                    <div>
-                      <label>Meta Alvo</label>
-                      <input type="number" class="form-control rec-input" id="rec-target-axe" value="200" min="0">
-                    </div>
-                    <div>
-                      <label>Lote / Ciclo</label>
-                      <input type="number" class="form-control rec-input" id="rec-batch-axe" value="15" min="1">
-                    </div>
-                  </div>
-                </div>
-                <!-- Archer -->
-                <div class="unit-rec-card" data-unit="archer">
-                  <div class="unit-rec-header">
-                    <span class="unit-rec-icon">🏹</span>
-                    <div>
-                      <div class="unit-rec-name">Arqueiro</div>
-                      <div class="unit-rec-pop">1 pop / unid.</div>
-                    </div>
-                    <span class="unit-rec-curr badge" id="rec-curr-archer">0</span>
-                  </div>
-                  <div class="unit-rec-progress-wrap">
-                    <div class="unit-rec-progress-bar" id="rec-bar-archer" style="width: 0%;"></div>
-                  </div>
-                  <div class="unit-rec-inputs">
-                    <div>
-                      <label>Meta Alvo</label>
-                      <input type="number" class="form-control rec-input" id="rec-target-archer" value="0" min="0">
-                    </div>
-                    <div>
-                      <label>Lote / Ciclo</label>
-                      <input type="number" class="form-control rec-input" id="rec-batch-archer" value="10" min="1">
-                    </div>
-                  </div>
+
+              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <!-- Botão Adicionar Modelo Customizado -->
+                <button type="button" class="btn btn-secondary" id="btn-add-custom-model" style="padding: 6px 14px; font-size: 0.82rem; border-color: rgba(6, 182, 212, 0.5); color: var(--neon-cyan);">
+                  <span>➕</span> Adicionar Modelo
+                </button>
+
+                <!-- Botão Eliminar Modelo Ativo (para customizados) -->
+                <button type="button" class="btn btn-outline" id="btn-delete-active-model" style="display: none; padding: 6px 12px; font-size: 0.82rem; border-color: rgba(239, 68, 68, 0.5); color: #fca5a5;">
+                  <span>🗑️</span> Eliminar Modelo
+                </button>
+
+                <!-- Indicador de População Total do Modelo Selecionado -->
+                <div class="glass-card" style="padding: 6px 14px; border: 1px solid var(--border-glass); display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 0.78rem; color: var(--text-muted);">População Total:</span>
+                  <strong id="rec-model-total-pop" style="font-size: 1.05rem; font-family: var(--font-mono); color: var(--neon-cyan);">0 pop</strong>
                 </div>
               </div>
             </div>
 
-            <!-- Grupo: Estábulo (Cavalaria) -->
-            <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 14px 16px;">
-              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-                <h4 style="margin: 0; font-size: 0.9rem; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
-                  <span>🐎</span> Estábulo (Cavalaria & Reconhecimento)
-                </h4>
-                <span style="font-size: 0.75rem; color: var(--text-muted);">Edifício de Montaria</span>
-              </div>
-              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
-                <!-- Spy -->
-                <div class="unit-rec-card" data-unit="spy">
-                  <div class="unit-rec-header">
-                    <span class="unit-rec-icon">👁️</span>
-                    <div>
-                      <div class="unit-rec-name">Espião</div>
-                      <div class="unit-rec-pop">2 pop / unid.</div>
-                    </div>
-                    <span class="unit-rec-curr badge" id="rec-curr-spy">0</span>
-                  </div>
-                  <div class="unit-rec-progress-wrap">
-                    <div class="unit-rec-progress-bar" id="rec-bar-spy" style="width: 0%;"></div>
-                  </div>
-                  <div class="unit-rec-inputs">
-                    <div>
-                      <label>Meta Alvo</label>
-                      <input type="number" class="form-control rec-input" id="rec-target-spy" value="20" min="0">
-                    </div>
-                    <div>
-                      <label>Lote / Ciclo</label>
-                      <input type="number" class="form-control rec-input" id="rec-batch-spy" value="5" min="1">
-                    </div>
-                  </div>
-                </div>
-                <!-- Light -->
-                <div class="unit-rec-card" data-unit="light">
-                  <div class="unit-rec-header">
-                    <span class="unit-rec-icon">🐎</span>
-                    <div>
-                      <div class="unit-rec-name">Cavalaria Leve</div>
-                      <div class="unit-rec-pop">4 pop / unid.</div>
-                    </div>
-                    <span class="unit-rec-curr badge" id="rec-curr-light">0</span>
-                  </div>
-                  <div class="unit-rec-progress-wrap">
-                    <div class="unit-rec-progress-bar" id="rec-bar-light" style="width: 0%;"></div>
-                  </div>
-                  <div class="unit-rec-inputs">
-                    <div>
-                      <label>Meta Alvo</label>
-                      <input type="number" class="form-control rec-input" id="rec-target-light" value="200" min="0">
-                    </div>
-                    <div>
-                      <label>Lote / Ciclo</label>
-                      <input type="number" class="form-control rec-input" id="rec-batch-light" value="5" min="1">
-                    </div>
-                  </div>
-                </div>
-                <!-- Marcher -->
-                <div class="unit-rec-card" data-unit="marcher">
-                  <div class="unit-rec-header">
-                    <span class="unit-rec-icon">🏹🐎</span>
-                    <div>
-                      <div class="unit-rec-name">Arqueiro a Cavalo</div>
-                      <div class="unit-rec-pop">5 pop / unid.</div>
-                    </div>
-                    <span class="unit-rec-curr badge" id="rec-curr-marcher">0</span>
-                  </div>
-                  <div class="unit-rec-progress-wrap">
-                    <div class="unit-rec-progress-bar" id="rec-bar-marcher" style="width: 0%;"></div>
-                  </div>
-                  <div class="unit-rec-inputs">
-                    <div>
-                      <label>Meta Alvo</label>
-                      <input type="number" class="form-control rec-input" id="rec-target-marcher" value="0" min="0">
-                    </div>
-                    <div>
-                      <label>Lote / Ciclo</label>
-                      <input type="number" class="form-control rec-input" id="rec-batch-marcher" value="5" min="1">
-                    </div>
-                  </div>
-                </div>
-                <!-- Heavy -->
-                <div class="unit-rec-card" data-unit="heavy">
-                  <div class="unit-rec-header">
-                    <span class="unit-rec-icon">🛡️🐎</span>
-                    <div>
-                      <div class="unit-rec-name">Cavalaria Pesada</div>
-                      <div class="unit-rec-pop">6 pop / unid.</div>
-                    </div>
-                    <span class="unit-rec-curr badge" id="rec-curr-heavy">0</span>
-                  </div>
-                  <div class="unit-rec-progress-wrap">
-                    <div class="unit-rec-progress-bar" id="rec-bar-heavy" style="width: 0%;"></div>
-                  </div>
-                  <div class="unit-rec-inputs">
-                    <div>
-                      <label>Meta Alvo</label>
-                      <input type="number" class="form-control rec-input" id="rec-target-heavy" value="0" min="0">
-                    </div>
-                    <div>
-                      <label>Lote / Ciclo</label>
-                      <input type="number" class="form-control rec-input" id="rec-batch-heavy" value="5" min="1">
-                    </div>
-                  </div>
-                </div>
-              </div>
+            <!-- Banner Informativo do Modelo Ativo -->
+            <div id="rec-model-info-banner" style="margin-bottom: 14px; padding: 10px 14px; background: rgba(239, 68, 68, 0.08); border-left: 3px solid #ef4444; border-radius: 4px; font-size: 0.82rem; color: #fca5a5;">
+              <!-- Atualizado dinamicamente via JS -->
             </div>
 
-            <!-- Grupo: Oficina (Armas de Cerco) -->
-            <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 14px 16px;">
-              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-                <h4 style="margin: 0; font-size: 0.9rem; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
-                  <span>🚪</span> Oficina (Armas de Cerco)
-                </h4>
-                <span style="font-size: 0.75rem; color: var(--text-muted);">Edifício de Máquinas</span>
-              </div>
-              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
-                <!-- Ram -->
-                <div class="unit-rec-card" data-unit="ram">
-                  <div class="unit-rec-header">
-                    <span class="unit-rec-icon">🚪</span>
-                    <div>
-                      <div class="unit-rec-name">Aríete</div>
-                      <div class="unit-rec-pop">5 pop / unid.</div>
-                    </div>
-                    <span class="unit-rec-curr badge" id="rec-curr-ram">0</span>
-                  </div>
-                  <div class="unit-rec-progress-wrap">
-                    <div class="unit-rec-progress-bar" id="rec-bar-ram" style="width: 0%;"></div>
-                  </div>
-                  <div class="unit-rec-inputs">
-                    <div>
-                      <label>Meta Alvo</label>
-                      <input type="number" class="form-control rec-input" id="rec-target-ram" value="0" min="0">
-                    </div>
-                    <div>
-                      <label>Lote / Ciclo</label>
-                      <input type="number" class="form-control rec-input" id="rec-batch-ram" value="2" min="1">
-                    </div>
-                  </div>
-                </div>
-                <!-- Catapult -->
-                <div class="unit-rec-card" data-unit="catapult">
-                  <div class="unit-rec-header">
-                    <span class="unit-rec-icon">🪨</span>
-                    <div>
-                      <div class="unit-rec-name">Catapulta</div>
-                      <div class="unit-rec-pop">8 pop / unid.</div>
-                    </div>
-                    <span class="unit-rec-curr badge" id="rec-curr-catapult">0</span>
-                  </div>
-                  <div class="unit-rec-progress-wrap">
-                    <div class="unit-rec-progress-bar" id="rec-bar-catapult" style="width: 0%;"></div>
-                  </div>
-                  <div class="unit-rec-inputs">
-                    <div>
-                      <label>Meta Alvo</label>
-                      <input type="number" class="form-control rec-input" id="rec-target-catapult" value="0" min="0">
-                    </div>
-                    <div>
-                      <label>Lote / Ciclo</label>
-                      <input type="number" class="form-control rec-input" id="rec-batch-catapult" value="2" min="1">
-                    </div>
-                  </div>
-                </div>
-              </div>
+            <!-- Grelha de Unidades do Modelo Ativo -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px;" id="grid-model-active-units">
+              <!-- Cards de Unidades injetados dinamicamente via JS -->
             </div>
 
           </div>
 
-          <!-- Parâmetros de Segurança e Cadência -->
-          <div style="display: flex; gap: 16px; align-items: center; justify-content: flex-end; padding: 12px 16px; background: rgba(15,23,42,0.6); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); flex-wrap: wrap;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <label for="rec-min-free-pop" style="font-size: 0.8rem; color: var(--text-muted);">Reserva Mínima Fazenda:</label>
-              <input type="number" id="rec-min-free-pop" class="form-control" style="width: 70px; padding: 4px 8px; font-size: 0.82rem;" value="10" min="0">
-              <span style="font-size: 0.75rem; color: var(--text-muted);">pop</span>
+          <!-- Informação de Rodapé: Multi-Aldeias & Botão Salvar -->
+          <div style="padding: 12px 16px; background: rgba(15,23,42,0.6); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-muted);">
+              <span>🌐</span>
+              <span>Todos os modelos guardados ficam associados à conta e disponíveis para seleção no menu <strong>Multi-Aldeias</strong>.</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <label for="rec-interval-minutes" style="font-size: 0.8rem; color: var(--text-muted);">Intervalo de Treino:</label>
-              <input type="number" id="rec-interval-minutes" class="form-control" style="width: 70px; padding: 4px 8px; font-size: 0.82rem;" value="5.0" step="0.5" min="1">
-              <span style="font-size: 0.75rem; color: var(--text-muted);">min</span>
-            </div>
-            <button class="btn btn-primary" id="btn-save-recruitment-bottom">
-              <span>💾</span> Guardar Configurações
+            <button class="btn btn-primary" id="btn-save-recruitment-bottom" style="font-weight: 700; padding: 6px 18px;">
+              <span>💾</span> Guardar Modelos
             </button>
           </div>
 
@@ -881,6 +760,581 @@
           <div id="balance-analysis-container" style="color: var(--text-muted); font-size: 0.88rem; line-height: 1.6;">
             A carregar análise de balanceamento...
           </div>
+        </div>
+      </main>
+
+      <!-- Panel 3: Mercado & Balanceamento de Recursos -->
+      <main class="tab-content" id="tab-market">
+        <!-- Top Toolbar do Mercado -->
+        <div class="card" style="margin-bottom: 20px;">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="icon" style="font-size: 1.4rem;">⚖️</span>
+              <div>
+                <h3 style="margin: 0; font-size: 1.1rem; color: #fff;">Mercado & Balanceamento de Recursos</h3>
+                <span style="font-size: 0.78rem; color: var(--text-muted);">Gestão de mercadores, transferências automatizadas entre aldeias e trocas no mercado</span>
+              </div>
+            </div>
+
+            <!-- Controles de Ativação / Desativação do Mercado -->
+            <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; background: rgba(15,23,42,0.7); padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border-glass);">
+              <!-- Master Switch Mercado -->
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 0.8rem; font-weight: 600; color: var(--text-main);">Mercado:</span>
+                <label class="switch-toggle" style="position: relative; display: inline-block; width: 40px; height: 22px; margin: 0;">
+                  <input type="checkbox" id="market-toggle-enabled" checked style="opacity: 0; width: 0; height: 0;">
+                  <span class="slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255,255,255,0.2); transition: .3s; border-radius: 22px;"></span>
+                </label>
+                <span id="market-toggle-label" style="font-size: 0.78rem; font-weight: 700; color: #34d399;">ATIVO</span>
+              </div>
+
+              <!-- Sub Switch Auto-Balanceamento -->
+              <div style="display: flex; align-items: center; gap: 8px; border-left: 1px solid var(--border-subtle); padding-left: 12px;">
+                <span style="font-size: 0.8rem; color: var(--text-muted);">Auto-Balancear:</span>
+                <label class="switch-toggle" style="position: relative; display: inline-block; width: 40px; height: 22px; margin: 0;">
+                  <input type="checkbox" id="market-toggle-autobalance" checked style="opacity: 0; width: 0; height: 0;">
+                  <span class="slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255,255,255,0.2); transition: .3s; border-radius: 22px;"></span>
+                </label>
+              <!-- Min Transfer Input -->
+              <div style="display: flex; align-items: center; gap: 6px; border-left: 1px solid var(--border-subtle); padding-left: 12px;">
+                <span style="font-size: 0.8rem; color: var(--text-muted);">Envio Mín:</span>
+                <input type="number" id="market-min-transfer-input" class="form-control" value="100" min="50" step="50" style="width: 80px; padding: 3px 6px; font-size: 0.8rem; font-family: var(--font-mono); text-align: right; background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); color: #fff;">
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <label for="market-village-selector" style="font-size: 0.8rem; color: var(--text-muted);">Aldeia em Foco:</label>
+                <select id="market-village-selector" class="form-control" style="width: auto; min-width: 170px; padding: 5px 10px; font-size: 0.82rem; background: rgba(15,23,42,0.85); border: 1px solid var(--border-glass);">
+                  <!-- Injetado dinamicamente via JS -->
+                </select>
+              </div>
+              <button class="btn btn-secondary" id="btn-market-refresh" style="padding: 6px 12px; font-size: 0.8rem;">
+                <span>🔄</span> Atualizar Mercado
+              </button>
+              <button class="btn btn-primary" id="btn-market-balance-now" style="padding: 6px 14px; font-size: 0.8rem; background: linear-gradient(135deg, var(--neon-cyan), var(--neon-emerald));">
+                <span>⚡</span> Balancear Recursos Globalmente
+              </button>
+            </div>
+          </div>
+
+          <!-- Banner Informativo quando Mercado está Desligado -->
+          <div id="market-disabled-alert" style="display: none; margin-top: 14px; background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.35); border-radius: 8px; padding: 10px 14px; color: #fbbf24; font-size: 0.84rem; align-items: center; gap: 8px;">
+            <span style="font-size: 1.1rem;">⚠️</span>
+            <div>
+              <strong>Funcionalidades de Mercado Desativadas:</strong> O envio automático de mercadores e o balanceamento global entre aldeias estão suspensos. Pode reativar a qualquer momento clicando no botão "Mercado" acima.
+            </div>
+          </div>
+
+          <!-- Cards de Métricas do Mercado -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-top: 15px;">
+            <!-- Card Mercadores Disponíveis -->
+            <div class="glass-card" style="padding: 14px 16px; border: 1px solid var(--border-glass);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Mercadores Livres</span>
+                <span style="font-size: 1.1rem;">🚚</span>
+              </div>
+              <div style="display: flex; align-items: baseline; gap: 6px;">
+                <strong id="market-merchants-avail" style="font-size: 1.4rem; font-family: var(--font-mono); color: var(--neon-cyan);">0</strong>
+                <span style="font-size: 0.9rem; color: var(--text-muted);">/ <span id="market-merchants-total">0</span> totais</span>
+              </div>
+              <div class="progress-bar-wrap" style="height: 6px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; margin-top: 8px;">
+                <div id="market-merchants-bar" style="height: 100%; width: 0%; background: linear-gradient(90deg, var(--neon-cyan), var(--neon-emerald)); transition: width 0.3s ease;"></div>
+              </div>
+            </div>
+
+            <!-- Card Mercadores em Trânsito -->
+            <div class="glass-card" style="padding: 14px 16px; border: 1px solid var(--border-glass);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Em Movimento</span>
+                <span style="font-size: 1.1rem;">⏳</span>
+              </div>
+              <div style="display: flex; align-items: baseline; gap: 6px;">
+                <strong id="market-merchants-transit" style="font-size: 1.4rem; font-family: var(--font-mono); color: var(--neon-amber);">0</strong>
+                <span style="font-size: 0.85rem; color: var(--text-muted);">mercadores na estrada</span>
+              </div>
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 6px;">
+                Carga em rota: <strong id="market-transit-load" style="color: var(--text-main); font-family: var(--font-mono);">0</strong> recursos
+              </div>
+            </div>
+
+            <!-- Card Capacidade de Transporte / Transferência Mínima -->
+            <div class="glass-card" style="padding: 14px 16px; border: 1px solid var(--border-glass);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Transferência Mínima</span>
+                <span style="font-size: 1.1rem;">📦</span>
+              </div>
+              <div style="display: flex; align-items: baseline; gap: 6px;">
+                <strong id="market-min-transfer-disp" style="font-size: 1.4rem; font-family: var(--font-mono); color: var(--neon-cyan);">100</strong>
+                <span style="font-size: 0.85rem; color: var(--text-muted);">recursos / envio</span>
+              </div>
+              <div style="font-size: 0.78rem; color: var(--neon-emerald); margin-top: 6px;">
+                Capacidade máx: <strong id="market-max-capacity" style="font-family: var(--font-mono);">0</strong> un.
+              </div>
+            </div>
+
+            <!-- Card Estado do Equilíbrio Global -->
+            <div class="glass-card" style="padding: 14px 16px; border: 1px solid var(--border-glass);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Equilíbrio da Conta</span>
+                <span style="font-size: 1.1rem;">📊</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="badge" id="market-balance-status-badge" style="background: rgba(16,185,129,0.2); color: #34d399; font-size: 0.82rem; font-weight: 700;">A CARREGAR...</span>
+              </div>
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 6px; display: flex; gap: 8px;" id="market-global-averages">
+                <span>M: <strong id="mkt-avg-wood" style="color:#22c55e;">0</strong></span>
+                <span>A: <strong id="mkt-avg-stone" style="color:#06b6d4;">0</strong></span>
+                <span>F: <strong id="mkt-avg-iron" style="color:#cbd5e1;">0</strong></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Seção: Plano de Balanceamento Global -->
+        <div class="card" style="margin-bottom: 20px;">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="icon">🌐</span>
+              <span style="font-weight: 700;">Plano de Transferências Recomendadas (Auto-Balanceamento)</span>
+              <span id="market-planned-count-badge" class="badge" style="background: rgba(6,182,212,0.2); color: var(--neon-cyan); font-size: 0.75rem;">0 ordens</span>
+            </div>
+            <button class="btn btn-warning btn-sm" id="btn-market-exec-plan" style="padding: 4px 12px; font-size: 0.78rem;">
+              <span>🚀</span> Executar Plano Agora
+            </button>
+          </div>
+
+          <!-- Doadoras e Recetoras Chips -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-bottom: 14px;">
+            <div style="background: rgba(15,23,42,0.6); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(16,185,129,0.25);">
+              <div style="font-size: 0.8rem; color: #34d399; font-weight: 700; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                <span>🟢</span> Aldeias Doadoras (Excedente / Armazém Cheio)
+              </div>
+              <div id="market-donors-chips" style="display: flex; flex-wrap: wrap; gap: 6px; font-size: 0.78rem;">
+                <span style="color: var(--text-muted);">Nenhuma doadora identificada.</span>
+              </div>
+            </div>
+            <div style="background: rgba(15,23,42,0.6); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(245,158,11,0.25);">
+              <div style="font-size: 0.8rem; color: #fbbf24; font-weight: 700; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+                <span>🟡</span> Aldeias Recetoras (Défice / Construções)
+              </div>
+              <div id="market-receivers-chips" style="display: flex; flex-wrap: wrap; gap: 6px; font-size: 0.78rem;">
+                <span style="color: var(--text-muted);">Nenhuma recetora com défice.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tabela de Ordens Planeadas -->
+          <div class="table-responsive" style="border: 1px solid var(--border-subtle); border-radius: 8px; max-height: 220px; overflow-y: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+              <thead style="background: rgba(30, 41, 59, 0.85); position: sticky; top: 0; z-index: 10;">
+                <tr style="border-bottom: 1px solid var(--border-subtle);">
+                  <th style="padding: 8px 12px;">Origem</th>
+                  <th style="padding: 8px 12px;">Destino</th>
+                  <th style="padding: 8px 12px;">Recursos (Madeira / Argila / Ferro)</th>
+                  <th style="padding: 8px 12px;">Mercadores</th>
+                  <th style="padding: 8px 12px;">Motivo</th>
+                  <th style="padding: 8px 12px; text-align: right;">Ação</th>
+                </tr>
+              </thead>
+              <tbody id="market-planned-orders-tbody">
+                <tr><td colspan="6" style="padding: 12px; text-align: center; color: var(--text-muted);">A carregar plano de balanceamento...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Seção: Duas Colunas - Envio Manual & Ofertas -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; margin-bottom: 20px;">
+          
+          <!-- Card: Envio Manual de Mercadores -->
+          <div class="card">
+            <div class="card-header">
+              <span class="icon">🚚</span> Envio Manual de Recursos
+            </div>
+            <form id="form-send-merchants" style="display: flex; flex-direction: column; gap: 12px; font-size: 0.85rem;">
+              <div>
+                <label style="color: var(--text-muted); display: block; margin-bottom: 4px;">Aldeia de Destino:</label>
+                <div style="display: flex; gap: 8px;">
+                  <select id="market-send-target-village" class="form-control" style="flex: 1; padding: 6px 10px; font-size: 0.85rem; background: rgba(15,23,42,0.85); border: 1px solid var(--border-glass);">
+                    <!-- Aldeias da conta -->
+                  </select>
+                  <input type="number" id="market-send-target-x" class="form-control" style="width: 75px; padding: 6px 8px; font-size: 0.85rem;" placeholder="X">
+                  <span style="align-self: center;">|</span>
+                  <input type="number" id="market-send-target-y" class="form-control" style="width: 75px; padding: 6px 8px; font-size: 0.85rem;" placeholder="Y">
+                </div>
+              </div>
+
+              <!-- Inputs de Recursos com Atalhos -->
+              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                <!-- Madeira -->
+                <div style="background: rgba(15,23,42,0.5); padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(16,185,129,0.2);">
+                  <label style="color: #34d399; font-weight: 600; display: flex; justify-content: space-between;">
+                    <span>🌲 Madeira</span>
+                    <span id="market-send-max-wood" style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer;" title="Preencher máximo">máx</span>
+                  </label>
+                  <input type="number" id="market-send-wood" class="form-control" value="0" min="0" step="1000" style="margin-top: 4px; padding: 6px 8px; font-size: 0.85rem; font-family: var(--font-mono);">
+                  <div style="display: flex; gap: 4px; margin-top: 4px;">
+                    <button type="button" class="btn btn-secondary btn-sm btn-quick-res" data-target="market-send-wood" data-add="1000" style="padding: 1px 5px; font-size: 0.68rem;">+1k</button>
+                    <button type="button" class="btn btn-secondary btn-sm btn-quick-res" data-target="market-send-wood" data-add="5000" style="padding: 1px 5px; font-size: 0.68rem;">+5k</button>
+                  </div>
+                </div>
+
+                <!-- Argila -->
+                <div style="background: rgba(15,23,42,0.5); padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(6,182,212,0.2);">
+                  <label style="color: var(--neon-cyan); font-weight: 600; display: flex; justify-content: space-between;">
+                    <span>🧱 Argila</span>
+                    <span id="market-send-max-stone" style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer;" title="Preencher máximo">máx</span>
+                  </label>
+                  <input type="number" id="market-send-stone" class="form-control" value="0" min="0" step="1000" style="margin-top: 4px; padding: 6px 8px; font-size: 0.85rem; font-family: var(--font-mono);">
+                  <div style="display: flex; gap: 4px; margin-top: 4px;">
+                    <button type="button" class="btn btn-secondary btn-sm btn-quick-res" data-target="market-send-stone" data-add="1000" style="padding: 1px 5px; font-size: 0.68rem;">+1k</button>
+                    <button type="button" class="btn btn-secondary btn-sm btn-quick-res" data-target="market-send-stone" data-add="5000" style="padding: 1px 5px; font-size: 0.68rem;">+5k</button>
+                  </div>
+                </div>
+
+                <!-- Ferro -->
+                <div style="background: rgba(15,23,42,0.5); padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(203,213,225,0.2);">
+                  <label style="color: #cbd5e1; font-weight: 600; display: flex; justify-content: space-between;">
+                    <span>⛏ Ferro</span>
+                    <span id="market-send-max-iron" style="font-size: 0.75rem; color: var(--text-muted); cursor: pointer;" title="Preencher máximo">máx</span>
+                  </label>
+                  <input type="number" id="market-send-iron" class="form-control" value="0" min="0" step="1000" style="margin-top: 4px; padding: 6px 8px; font-size: 0.85rem; font-family: var(--font-mono);">
+                  <div style="display: flex; gap: 4px; margin-top: 4px;">
+                    <button type="button" class="btn btn-secondary btn-sm btn-quick-res" data-target="market-send-iron" data-add="1000" style="padding: 1px 5px; font-size: 0.68rem;">+1k</button>
+                    <button type="button" class="btn btn-secondary btn-sm btn-quick-res" data-target="market-send-iron" data-add="5000" style="padding: 1px 5px; font-size: 0.68rem;">+5k</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Sumário de Mercadores -->
+              <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(30,41,59,0.5); padding: 8px 12px; border-radius: 6px;">
+                <span style="color: var(--text-muted);">Mercadores Necessários: <strong id="market-send-req-merchants" style="color: var(--neon-cyan);">0</strong></span>
+                <span style="color: var(--text-muted);">Disponíveis: <strong id="market-send-avail-merchants" style="color: var(--neon-emerald);">0</strong></span>
+              </div>
+
+              <button type="submit" class="btn btn-primary" id="btn-submit-send-merchants" style="width: 100%; padding: 8px; font-weight: 700;">
+                <span>🚀</span> Despachar Mercadores
+              </button>
+            </form>
+          </div>
+
+          <!-- Card: Criar Ofertas de Troca no Mercado -->
+          <div class="card">
+            <div class="card-header">
+              <span class="icon">🏷</span> Criar Oferta de Troca (Mercado Local)
+            </div>
+            <form id="form-create-market-offer" style="display: flex; flex-direction: column; gap: 12px; font-size: 0.85rem;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <!-- Vender -->
+                <div style="background: rgba(15,23,42,0.5); padding: 10px; border-radius: 8px;">
+                  <label style="color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Oferecer (Vender):</label>
+                  <select id="market-offer-sell-res" class="form-control" style="width: 100%; margin-bottom: 6px; padding: 6px 8px; font-size: 0.85rem;">
+                    <option value="wood">🌲 Madeira</option>
+                    <option value="stone">🧱 Argila</option>
+                    <option value="iron">⛏ Ferro</option>
+                  </select>
+                  <input type="number" id="market-offer-sell-amount" class="form-control" value="1000" min="100" step="100" style="padding: 6px 8px; font-size: 0.85rem; font-family: var(--font-mono);">
+                </div>
+
+                <!-- Pedir -->
+                <div style="background: rgba(15,23,42,0.5); padding: 10px; border-radius: 8px;">
+                  <label style="color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Procurar (Comprar):</label>
+                  <select id="market-offer-buy-res" class="form-control" style="width: 100%; margin-bottom: 6px; padding: 6px 8px; font-size: 0.85rem;">
+                    <option value="stone">🧱 Argila</option>
+                    <option value="wood">🌲 Madeira</option>
+                    <option value="iron">⛏ Ferro</option>
+                  </select>
+                  <input type="number" id="market-offer-buy-amount" class="form-control" value="1000" min="100" step="100" style="padding: 6px 8px; font-size: 0.85rem; font-family: var(--font-mono);">
+                </div>
+              </div>
+
+              <!-- Rácio e Multiplicador -->
+              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                <div>
+                  <label style="color: var(--text-muted); font-size: 0.78rem;">Rácio Calculado:</label>
+                  <input type="text" id="market-offer-ratio-display" class="form-control" value="1.00" readonly style="background: rgba(0,0,0,0.3); padding: 6px 8px; font-size: 0.85rem; font-family: var(--font-mono); color: var(--neon-cyan);">
+                </div>
+                <div>
+                  <label style="color: var(--text-muted); font-size: 0.78rem;">Duração Máx (h):</label>
+                  <input type="number" id="market-offer-max-time" class="form-control" value="10" min="1" max="48" style="padding: 6px 8px; font-size: 0.85rem;">
+                </div>
+                <div>
+                  <label style="color: var(--text-muted); font-size: 0.78rem;">Ofertas (x):</label>
+                  <input type="number" id="market-offer-multi" class="form-control" value="1" min="1" max="50" style="padding: 6px 8px; font-size: 0.85rem;">
+                </div>
+              </div>
+
+              <button type="submit" class="btn btn-secondary" id="btn-submit-create-offer" style="width: 100%; padding: 8px; font-weight: 700; margin-top: 4px;">
+                <span>📢</span> Publicar Oferta no Mercado
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Seção: Transportes Ativos & Ofertas Próprias -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
+          
+          <!-- Tabela de Transportes em Trânsito -->
+          <div class="card">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span class="icon">🚛</span> Transportes em Trânsito
+                <span id="market-transports-count" class="badge" style="margin-left: 6px; font-size: 0.75rem;">0</span>
+              </div>
+            </div>
+            <div class="table-responsive" style="border: 1px solid var(--border-subtle); border-radius: 8px; max-height: 240px; overflow-y: auto;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem; text-align: left;">
+                <thead style="background: rgba(30, 41, 59, 0.85); position: sticky; top: 0; z-index: 10;">
+                  <tr style="border-bottom: 1px solid var(--border-subtle);">
+                    <th style="padding: 8px 10px;">Direção</th>
+                    <th style="padding: 8px 10px;">Aldeia</th>
+                    <th style="padding: 8px 10px;">Recursos</th>
+                    <th style="padding: 8px 10px;">Merc.</th>
+                    <th style="padding: 8px 10px;">Chegada</th>
+                  </tr>
+                </thead>
+                <tbody id="market-transports-tbody">
+                  <tr><td colspan="5" style="padding: 12px; text-align: center; color: var(--text-muted);">Nenhum transporte de mercadores em trânsito.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Tabela de Ofertas Próprias Ativas -->
+          <div class="card">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span class="icon">📋</span> Ofertas Próprias Publicadas
+                <span id="market-offers-count" class="badge" style="margin-left: 6px; font-size: 0.75rem;">0</span>
+              </div>
+            </div>
+            <div class="table-responsive" style="border: 1px solid var(--border-subtle); border-radius: 8px; max-height: 240px; overflow-y: auto;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem; text-align: left;">
+                <thead style="background: rgba(30, 41, 59, 0.85); position: sticky; top: 0; z-index: 10;">
+                  <tr style="border-bottom: 1px solid var(--border-subtle);">
+                    <th style="padding: 8px 10px;">ID</th>
+                    <th style="padding: 8px 10px;">Oferece</th>
+                    <th style="padding: 8px 10px;">Procura</th>
+                    <th style="padding: 8px 10px;">Rácio</th>
+                    <th style="padding: 8px 10px;">Qtd (x)</th>
+                  </tr>
+                </thead>
+                <tbody id="market-offers-tbody">
+                  <tr><td colspan="5" style="padding: 12px; text-align: center; color: var(--text-muted);">Nenhuma oferta própria ativa no mercado.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- Panel: Estatísticas & Rendimento (Dashboard HUD) -->
+      <main class="tab-content" id="tab-stats">
+        <div style="display: flex; flex-direction: column; gap: 18px; max-width: 1150px; margin: 0 auto;">
+          
+          <!-- Toolbar Superior de Estatísticas -->
+          <div class="card">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span class="icon" style="font-size: 1.5rem;">📈</span>
+                <div>
+                  <h3 style="margin: 0; font-size: 1.15rem; color: #fff;">Painel de Métricas & Rendimento de Farm</h3>
+                  <span style="font-size: 0.78rem; color: var(--text-muted);">
+                    Monitorização em tempo real de recursos saqueados, taxas horárias, histórico e exército treinado
+                  </span>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-secondary btn-sm" id="btn-refresh-stats" style="padding: 6px 12px; font-size: 0.8rem;">
+                  <span>🔄</span> Atualizar Dados
+                </button>
+                <button class="btn btn-secondary btn-sm" id="btn-reset-stats" title="Limpar histórico e reiniciar contadores" style="padding: 6px 12px; font-size: 0.8rem; border-color: rgba(239, 68, 68, 0.4); color: #f87171;">
+                  <span>🗑️</span> Reiniciar
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Grid de 4 KPI Cards -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+            
+            <!-- KPI 1: Recursos Saqueados 24h -->
+            <div class="glass-card" style="padding: 16px; position: relative; overflow: hidden;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                <span style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Saque (Últimas 24h)</span>
+                <span class="badge" id="stats-hourly-rate-badge" style="background: rgba(16,185,129,0.15); color: var(--neon-emerald); font-weight: 700; font-size: 0.75rem;">
+                  ⚡ +0 / h
+                </span>
+              </div>
+              <div style="font-size: 1.8rem; font-weight: 800; font-family: var(--font-heading); color: #fff;" id="stats-kpi-loot-24h">
+                0
+              </div>
+              <div style="display: flex; gap: 10px; margin-top: 8px; font-size: 0.75rem; font-family: var(--font-mono); color: var(--text-muted);">
+                <span>🌲 <strong id="stats-kpi-wood-24h" style="color: #34d399;">0</strong></span>
+                <span>🧱 <strong id="stats-kpi-stone-24h" style="color: var(--neon-cyan);">0</strong></span>
+                <span>⛏ <strong id="stats-kpi-iron-24h" style="color: #cbd5e1;">0</strong></span>
+              </div>
+              <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px;">
+                Total Histórico: <strong id="stats-kpi-loot-alltime" style="color: var(--neon-amber);">0</strong>
+              </div>
+            </div>
+
+            <!-- KPI 2: Aldeias Saqueadas -->
+            <div class="glass-card" style="padding: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                <span style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Aldeias Saqueadas</span>
+                <span class="badge" style="background: rgba(6,182,212,0.15); color: var(--neon-cyan); font-weight: 700; font-size: 0.75rem;">
+                  🌾 Farm
+                </span>
+              </div>
+              <div style="font-size: 1.8rem; font-weight: 800; font-family: var(--font-heading); color: var(--neon-cyan);" id="stats-kpi-villages-farmed">
+                0
+              </div>
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">
+                Nas últimas 24h: <strong id="stats-kpi-villages-24h" style="color: #fff;">0</strong> aldeias atacadas
+              </div>
+              <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px;">
+                Média por aldeia: <strong id="stats-kpi-loot-per-village" style="color: var(--neon-emerald);">0</strong> res
+              </div>
+            </div>
+
+            <!-- KPI 3: Comandos & Taxa de Sucesso -->
+            <div class="glass-card" style="padding: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                <span style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Comandos Militares</span>
+                <span class="badge" id="stats-success-rate-badge" style="background: rgba(16,185,129,0.15); color: var(--neon-emerald); font-weight: 700; font-size: 0.75rem;">
+                  100% OK
+                </span>
+              </div>
+              <div style="font-size: 1.8rem; font-weight: 800; font-family: var(--font-heading); color: #fff;" id="stats-kpi-attacks-sent">
+                0
+              </div>
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">
+                Sucesso: <strong id="stats-kpi-attacks-success" style="color: var(--neon-emerald);">0</strong> / Enviados: <strong id="stats-kpi-attacks-total" style="color: #fff;">0</strong>
+              </div>
+              <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px;">
+                Nas últimas 24h: <strong id="stats-kpi-attacks-24h" style="color: var(--neon-cyan);">0</strong> ordens
+              </div>
+            </div>
+
+            <!-- KPI 4: Tropas Recrutadas -->
+            <div class="glass-card" style="padding: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                <span style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Tropas Recrutadas</span>
+                <span class="badge" style="background: rgba(245,158,11,0.15); color: var(--neon-amber); font-weight: 700; font-size: 0.75rem;">
+                  🪖 Exército
+                </span>
+              </div>
+              <div style="font-size: 1.8rem; font-weight: 800; font-family: var(--font-heading); color: var(--neon-amber);" id="stats-kpi-troops-recruited">
+                0
+              </div>
+              <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">
+                Edifícios evoluídos: <strong id="stats-kpi-buildings-count" style="color: #fff;">0</strong>
+              </div>
+              <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 6px;">
+                Mundo ativo: <strong id="stats-active-world-text" style="color: var(--neon-cyan);">pt117</strong>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Gráfico Interativo de Rendimento Horário (HTML5 Canvas) -->
+          <div class="glass-card" style="padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+              <div>
+                <h4 style="margin: 0; font-size: 1rem; color: #fff; display: flex; align-items: center; gap: 6px;">
+                  <span>📊</span> Rendimento de Farm ao Longo do Tempo
+                </h4>
+                <span style="font-size: 0.75rem; color: var(--text-muted);">
+                  Volume de recursos saqueados por hora/dia nas aldeias bárbaras
+                </span>
+              </div>
+              
+              <!-- Controles do Gráfico -->
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <!-- Seletor de Intervalo -->
+                <div class="btn-group" style="display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid var(--border-glass);">
+                  <button type="button" class="btn btn-sm btn-stats-range active" data-range="24" id="btn-stats-range-24h" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 0; border: none; background: rgba(6,182,212,0.25); color: var(--neon-cyan); font-weight: 700;">24 Horas</button>
+                  <button type="button" class="btn btn-sm btn-stats-range" data-range="168" id="btn-stats-range-7d" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 0; border: none; background: rgba(30,41,59,0.7); color: var(--text-muted);">7 Dias</button>
+                </div>
+
+                <!-- Seletor de Métrica -->
+                <div class="btn-group" style="display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid var(--border-glass);">
+                  <button type="button" class="btn btn-sm btn-stats-metric active" data-metric="total" id="btn-metric-total" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 0; border: none; background: rgba(16,185,129,0.25); color: var(--neon-emerald); font-weight: 700;">Total</button>
+                  <button type="button" class="btn btn-sm btn-stats-metric" data-metric="wood" id="btn-metric-wood" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 0; border: none; background: rgba(30,41,59,0.7); color: #34d399;">🌲 Madeira</button>
+                  <button type="button" class="btn btn-sm btn-stats-metric" data-metric="stone" id="btn-metric-stone" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 0; border: none; background: rgba(30,41,59,0.7); color: var(--neon-cyan);">🧱 Argila</button>
+                  <button type="button" class="btn btn-sm btn-stats-metric" data-metric="iron" id="btn-metric-iron" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 0; border: none; background: rgba(30,41,59,0.7); color: #cbd5e1;">⛏ Ferro</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Canvas Container com Tooltip -->
+            <div style="position: relative; width: 100%; height: 260px; background: rgba(15, 23, 42, 0.6); border-radius: 8px; border: 1px solid var(--border-subtle); padding: 10px;">
+              <canvas id="stats-loot-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
+              <!-- Tooltip Interativo -->
+              <div id="stats-chart-tooltip" style="display: none; position: absolute; background: rgba(15, 23, 42, 0.95); border: 1px solid var(--neon-cyan); border-radius: 6px; padding: 6px 10px; font-size: 0.75rem; color: #fff; pointer-events: none; z-index: 20; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
+              </div>
+            </div>
+
+            <!-- Legenda Inferior do Gráfico -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 0.75rem; color: var(--text-muted); flex-wrap: wrap; gap: 8px;">
+              <div style="display: flex; gap: 16px;">
+                <span style="display: flex; align-items: center; gap: 5px;"><span style="width: 10px; height: 10px; border-radius: 2px; background: var(--neon-emerald);"></span> Rendimento de Farm</span>
+                <span style="display: flex; align-items: center; gap: 5px;"><span style="width: 10px; height: 2px; background: var(--neon-cyan);"></span> Média Horária</span>
+              </div>
+              <div id="stats-chart-summary-text" style="color: var(--text-muted); font-family: var(--font-mono);">
+                A calcular dados históricos...
+              </div>
+            </div>
+          </div>
+
+          <!-- Duas Colunas: Matriz de Tropas Recrutadas & Histórico Recente de Comandos -->
+          <div style="display: grid; grid-template-columns: 1fr 1.3fr; gap: 16px;">
+            
+            <!-- Coluna 1: Tropas Recrutadas por Tipo -->
+            <div class="glass-card" style="padding: 16px;">
+              <div class="card-header" style="margin-bottom: 12px;">
+                <div class="card-title">
+                  <span class="icon">🛡️</span> Tropas Recrutadas pelo Bot
+                </div>
+              </div>
+              <div id="stats-recruitment-matrix" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px;">
+                <!-- Preenchido dinamicamente com cards de unidades -->
+                <div style="padding: 10px; text-align: center; color: var(--text-muted); font-size: 0.8rem; grid-column: 1 / -1;">
+                  Nenhuma tropa registada ainda.
+                </div>
+              </div>
+            </div>
+
+            <!-- Coluna 2: Histórico Recente de Comandos & Saques -->
+            <div class="glass-card" style="padding: 16px;">
+              <div class="card-header" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+                <div class="card-title">
+                  <span class="icon">📜</span> Histórico Recente de Comandos
+                </div>
+                <span class="badge" id="stats-recent-count-badge" style="font-size: 0.72rem;">0 eventos</span>
+              </div>
+              <div class="table-responsive" style="border: 1px solid var(--border-subtle); border-radius: 8px; max-height: 260px; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem; text-align: left;">
+                  <thead style="background: rgba(30, 41, 59, 0.85); position: sticky; top: 0; z-index: 10;">
+                    <tr style="border-bottom: 1px solid var(--border-subtle);">
+                      <th style="padding: 6px 8px;">Hora</th>
+                      <th style="padding: 6px 8px;">Tipo</th>
+                      <th style="padding: 6px 8px;">Alvo</th>
+                      <th style="padding: 6px 8px;">Tropas / Recursos</th>
+                      <th style="padding: 6px 8px;">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="stats-recent-tbody">
+                    <tr><td colspan="5" style="padding: 12px; text-align: center; color: var(--text-muted);">Nenhum comando enviado recentemente.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+
         </div>
       </main>
 

@@ -12,10 +12,12 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import WebSocket
 
+from engine.actions.economic_arbitrage import EconomicArbitrageManager
 from engine.actions.farm import FarmManager
 from engine.actions.main_building import MainBuildingManager
 from engine.actions.map import MapData, MapManager
-from engine.actions.place import PlaceManager
+from engine.actions.market import MarketManager
+from engine.actions.place import PlaceManager, UnitsCount
 from engine.actions.quest import QuestManager
 from engine.actions.recruitment import RecruitmentManager
 from engine.actions.village_coordinator import MultiVillageCoordinator
@@ -25,6 +27,7 @@ from engine.core.models import TaskPriority
 from engine.core.multi_world import MultiWorldManager, WorldInstance
 from engine.core.profile_manager import ProfileManager
 from engine.core.scheduler import TaskScheduler
+from engine.core.stats import StatsTracker
 
 
 logger = logging.getLogger(__name__)
@@ -52,15 +55,22 @@ class EngineContext:
         self.main_building_manager = MainBuildingManager()
         self.place_manager = PlaceManager()
         self.farm_manager = FarmManager()
-        self.recruitment_manager = RecruitmentManager()
+        self.recruitment_manager = RecruitmentManager(place_manager=self.place_manager)
         self.quest_manager = QuestManager()
+        self.market_manager = MarketManager()
         self._map_cache: Dict[str, Tuple[float, Any]] = {}
         self.map_manager = MapManager()
         self.profile_manager = ProfileManager()
+        self.arbitrage_manager = EconomicArbitrageManager(
+            main_building_manager=self.main_building_manager,
+            recruitment_manager=self.recruitment_manager,
+            place_manager=self.place_manager,
+        )
         self.village_coordinator = MultiVillageCoordinator(
             main_building_manager=self.main_building_manager,
             recruitment_manager=self.recruitment_manager,
             farm_manager=self.farm_manager,
+            market_manager=self.market_manager,
         )
 
         # Orquestrador Multi-Mundo Concorrente
@@ -82,6 +92,11 @@ class EngineContext:
 
         # Clientes WebSocket ativos
         self.active_websockets: Set[WebSocket] = set()
+
+        # Rastreadores de estatísticas e eficiência
+        self.stats_trackers: Dict[str, StatsTracker] = {}
+        self.stats_tracker = StatsTracker(world=self.config.world)
+        self.stats_trackers[self.config.world] = self.stats_tracker
 
         # Estado e estatísticas
         self.start_time = time.time()
@@ -175,25 +190,42 @@ class EngineContext:
         return {"status": "resumed", "message": "Motor de agendamento retomado."}
 
     async def trigger_build_cycle(self) -> Dict[str, Any]:
-        """Força a execução imediata de um ciclo de construção de edifícios."""
+        """Dispara manualmente um ciclo de verificação e evolução do Edifício Principal."""
         if not self.account:
             return {"status": "error", "message": "Conta não inicializada."}
 
-        target_village = self.account.current_village_id or "active"
-        task_id = f"ManualBuild-Village-{target_village}_{time.time_ns()}"
+        v_id = self.account.current_village_id or 0
+        task_id = f"ManualBuild-Village-{v_id}_{time.time_ns()}"
 
         async def _run():
-            await self.main_building_manager.run_build_cycle(
+            plan = self.config.get_active_build_plan(village_id=str(v_id))
+            res = await self.main_building_manager.run_build_cycle(
                 account=self.account,
-                plan=self.config.effective_building_plan,
+                plan=plan,
                 max_queue=self.config.building.max_queue,
+                village_id=v_id,
             )
+            if res:
+                tracker = self.get_stats_tracker()
+                tracker.record_building(
+                    building=res,
+                    village_id=v_id,
+                )
+                self.broadcast_sync("STATS_UPDATED", tracker.get_summary())
+
+            # Atualiza recursos, edifícios e fila de construção via screen=main e tropas via screen=place
+            await self.account.refresh_state()
+            await self.account.refresh_village_details(v_id)
+            self.broadcast_sync("VILLAGE_UPDATED", self.get_status_dict())
+            building_state = await self.get_building_state(v_id)
+            self.broadcast_sync("BUILDING_UPDATED", building_state)
+            return res
 
         self.scheduler.schedule(
-            name=f"ManualBuild-Village-{target_village}",
+            name=f"ManualBuild-Village-{v_id}",
             priority=TaskPriority.BUILD,
             action=_run,
-            delay_seconds=0.1,
+            delay_seconds=0.0,
             task_id=task_id,
         )
         return {"status": "scheduled", "task_id": task_id}
@@ -237,15 +269,18 @@ class EngineContext:
         if not self.account:
             return {"status": "error", "message": "Conta não inicializada."}
 
-        target_village = self.account.current_village_id or "active"
+        v_id = self.account.current_village_id or 0
+        target_village = v_id or "active"
         task_id = f"ManualRecruit-Village-{target_village}_{time.time_ns()}"
 
         async def _run():
+            targets = self.config.get_village_recruitment_targets(village_id=str(v_id))
             await self.recruitment_manager.run_recruitment_cycle(
                 account=self.account,
-                targets=self.config.recruitment.targets,
+                targets=targets,
                 batch_sizes=self.config.recruitment.batch_sizes,
                 min_free_pop=self.config.recruitment.min_free_pop,
+                village_id=v_id,
             )
 
         self.scheduler.schedule(
@@ -354,14 +389,17 @@ class EngineContext:
                 except Exception:
                     current_raw = {}
 
-            # Atualiza recursivamente campos permitidos
-            for key, val in new_data.items():
-                if isinstance(val, dict) and isinstance(current_raw.get(key), dict):
-                    current_raw[key].update(val)
-                else:
-                    current_raw[key] = val
+            # Atualiza recursivamente campos permitidos com fusão profunda (deep merge)
+            def _deep_merge(target: dict, source: dict) -> None:
+                for k, v in source.items():
+                    if isinstance(v, dict) and isinstance(target.get(k), dict):
+                        _deep_merge(target[k], v)
+                    else:
+                        target[k] = v
 
-            # Grava no disco
+            _deep_merge(current_raw, new_data)
+
+            # Grava no disco de forma atómica e persistente
             self.config_path.write_text(json.dumps(current_raw, indent=2), encoding="utf-8")
 
             # Recarrega a configuração ativa
@@ -412,13 +450,17 @@ class EngineContext:
                     "villages_count": p.villages_count,
                 }
 
-        # Lista detalhada de aldeias com categoria
+        # Lista detalhada de aldeias com categoria e fallback
         villages_list = []
         if self.account:
-            for v in self.account.villages.values():
+            vill_objs = list(self.account.villages.values())
+            if not vill_objs and self.account.current_village:
+                vill_objs = [self.account.current_village]
+            for v in vill_objs:
                 v_dict = v.to_dict()
                 cat = self.village_coordinator.get_village_category(self.account, self.config, v.id)
-                v_dict["category"] = cat.value
+                cat_val = cat.value if hasattr(cat, "value") else str(cat)
+                v_dict["category"] = cat_val
                 villages_list.append(v_dict)
 
         # Balanceamento de recursos entre aldeias
@@ -449,7 +491,7 @@ class EngineContext:
             "troops": troops_dict,
             "modules": {
                 "building": {
-                    "enabled": True,
+                    "enabled": self.config.building.enabled,
                     "template": self.config.building.template,
                     "max_queue": self.config.building.max_queue,
                     "interval_seconds": self.config.building.interval_seconds,
@@ -474,20 +516,32 @@ class EngineContext:
                     "safe_storage_margin": self.config.quest.safe_storage_margin,
                     "interval_minutes": self.config.quest.interval_minutes,
                 },
+                "market": {
+                    "enabled": getattr(self.config.market, "enabled", False),
+                    "auto_balance_enabled": getattr(self.config.market, "auto_balance", True),
+                    "auto_balance": getattr(self.config.market, "auto_balance", True),
+                    "interval_minutes": getattr(self.config.market, "interval_minutes", 30.0),
+                },
             },
+            "stats": self.get_stats_tracker().get_summary(),
             "captcha_alert": self.last_captcha_alert,
         }
 
     async def refresh_village_data(self) -> Dict[str, Any]:
-        """Atualiza ativamente recursos, tropas e estado da aldeia ativa."""
+        """Atualiza ativamente recursos, tropas, edifícios e estado da aldeia ativa."""
         if not self.account or not self.account.sid:
             return {"status": "error", "message": "Conta não conectada ou sem 'sid'."}
         try:
+            # 1. Atualiza recursos, edifícios e fila de construção via screen=main
+            await self.account.refresh_state()
+            # 2. Atualiza tropas disponíveis via screen=place
             await self.account.refresh_village_details()
             status_dict = self.get_status_dict()
             await self.broadcast("VILLAGE_UPDATED", status_dict)
+            await self.broadcast("STATUS_UPDATE", status_dict)
             return {"status": "success", "data": status_dict}
         except Exception as e:
+            logger.error(f"Erro ao atualizar dados da aldeia: {e}")
             return {"status": "error", "message": str(e)}
 
     async def claim_all_quests_safe(self) -> Dict[str, Any]:
@@ -531,6 +585,7 @@ class EngineContext:
                 "keep_alive_interval_minutes": self.config.auth.keep_alive_interval_minutes,
             },
             "building": {
+                "enabled": self.config.building.enabled,
                 "template": self.config.building.template,
                 "max_queue": self.config.building.max_queue,
                 "interval_seconds": self.config.building.interval_seconds,
@@ -560,6 +615,17 @@ class EngineContext:
                 "auto_daily_bonus": self.config.quest.auto_daily_bonus,
                 "safe_storage_margin": self.config.quest.safe_storage_margin,
                 "interval_minutes": self.config.quest.interval_minutes,
+            },
+            "market": {
+                "enabled": getattr(self.config.market, "enabled", False),
+                "auto_balance": getattr(self.config.market, "auto_balance", True),
+                "auto_balance_enabled": getattr(self.config.market, "auto_balance", True),
+                "reserve_margin": getattr(self.config.market, "reserve_margin", 0.20),
+                "reserve_margin_percent": getattr(self.config.market, "reserve_margin", 0.20),
+                "interval_minutes": getattr(self.config.market, "interval_minutes", 30.0),
+                "min_transfer_amount": getattr(self.config.market, "min_transfer_amount", 1000),
+                "max_merchants_percent": getattr(self.config.market, "max_merchant_ratio", 0.80),
+                "max_merchant_ratio": getattr(self.config.market, "max_merchant_ratio", 0.80),
             },
         }
 
@@ -713,10 +779,14 @@ class EngineContext:
             return {"status": "error", "message": "Conta não inicializada."}
 
         villages_data = []
-        for v in acc.villages.values():
+        vill_list = list(acc.villages.values())
+        if not vill_list and acc.current_village:
+            vill_list = [acc.current_village]
+        for v in vill_list:
             cat = self.village_coordinator.get_village_category(acc, cfg, v.id)
+            cat_val = cat.value if hasattr(cat, "value") else str(cat)
             v_dict = v.to_dict()
-            v_dict["category"] = cat.value
+            v_dict["category"] = cat_val
             villages_data.append(v_dict)
 
         balance = self.village_coordinator.calculate_resource_balance(acc)
@@ -818,6 +888,16 @@ class EngineContext:
                 target_y=target_y,
                 troops=troops,
             )
+            # Registo de métricas
+            tracker = self.get_stats_tracker()
+            tracker.record_command(
+                command_type="attack",
+                target_coords=f"{target_x}|{target_y}",
+                units={"spear": spear, "sword": sword, "axe": axe, "spy": spy, "light": light},
+                success=True,
+            )
+            self.broadcast_sync("STATS_UPDATED", tracker.get_summary())
+
             return {
                 "status": "success",
                 "message": f"Ataque enviado para ({target_x}|{target_y})!",
@@ -826,5 +906,673 @@ class EngineContext:
             }
         except Exception as e:
             logger.error(f"Erro ao enviar ataque rápido para ({target_x}|{target_y}): {e}")
+            tracker = self.get_stats_tracker()
+            tracker.record_command(
+                command_type="attack",
+                target_coords=f"{target_x}|{target_y}",
+                units={"spear": spear, "sword": sword, "axe": axe, "spy": spy, "light": light},
+                success=False,
+            )
             return {"status": "error", "message": str(e)}
+
+    # --- Mercado & Balanceamento de Recursos ---
+
+    async def get_market_state(self, village_id: Optional[int] = None) -> Dict[str, Any]:
+        """Obtém o estado do mercado (mercadores e transportes) de uma aldeia."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        v_id = village_id or self.account.current_village_id or 0
+        state = await self.market_manager.get_market_state(self.account, village_id=v_id, include_offers=True)
+        return {"status": "success", "market": state.to_dict()}
+
+    async def send_market_resources(
+        self,
+        source_village_id: int,
+        target_village_id: int,
+        wood: int = 0,
+        stone: int = 0,
+        iron: int = 0,
+    ) -> Dict[str, Any]:
+        """Envia recursos de uma aldeia de origem para destino via mercadores."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        success = await self.market_manager.send_resources(
+            account=self.account,
+            source_village_id=source_village_id,
+            target_village_id=target_village_id,
+            wood=wood,
+            stone=stone,
+            iron=iron,
+        )
+        if success:
+            self.broadcast_sync("MARKET_RESOURCES_SENT", {
+                "source_village_id": source_village_id,
+                "target_village_id": target_village_id,
+                "wood": wood,
+                "stone": stone,
+                "iron": iron,
+            })
+            return {
+                "status": "success",
+                "message": f"Recursos enviados com sucesso ({wood}W, {stone}S, {iron}I)!",
+            }
+        return {
+            "status": "error",
+            "message": "Falha ao enviar recursos pelo mercado (mercadores/recursos insuficientes ou limite de armazém excedido).",
+        }
+
+    def get_resource_balancing_plan(self) -> Dict[str, Any]:
+        """Calcula o plano de transferências recomendado para balanceamento global."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        orders = self.market_manager.calculate_balancing_transfers(self.account)
+        balance_summary = self.village_coordinator.calculate_resource_balance(self.account)
+        return {
+            "status": "success",
+            "balance_summary": balance_summary,
+            "planned_orders": [o.to_dict() for o in orders],
+            "total_orders": len(orders),
+        }
+
+    async def trigger_resource_balancing(self) -> Dict[str, Any]:
+        """Dispara a execução imediata de um ciclo de balanceamento de recursos entre aldeias."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        if not self.config.market.enabled:
+            return {"status": "error", "message": "O módulo de Mercado está desativado nas configurações."}
+        res = await self.market_manager.run_balancing_cycle(self.account)
+        self.broadcast_sync("MARKET_BALANCING_DONE", res)
+        return res
+
+    async def create_market_offer(
+        self,
+        village_id: int,
+        sell_res: str,
+        sell_amount: int,
+        buy_res: str,
+        buy_amount: int,
+        max_time: int = 10,
+        multi: int = 1,
+    ) -> Dict[str, Any]:
+        """Cria uma oferta de troca de recursos no mercado próprio."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        success = await self.market_manager.create_market_offer(
+            account=self.account,
+            village_id=village_id,
+            sell_res=sell_res,
+            sell_amount=sell_amount,
+            buy_res=buy_res,
+            buy_amount=buy_amount,
+            max_time=max_time,
+            multi=multi,
+        )
+        if success:
+            return {"status": "success", "message": "Oferta publicada com sucesso no mercado!"}
+        return {"status": "error", "message": "Falha ao criar oferta no mercado."}
+
+    # --- Métricas & Estatísticas de Eficiência ---
+
+    def get_stats_tracker(self, world: Optional[str] = None) -> StatsTracker:
+        """Obtém ou instancia o rastreador de estatísticas do mundo ativo/solicitado."""
+        target_world = world or (self.world_manager.active_world if hasattr(self, "world_manager") else None) or self.config.world
+        if target_world not in self.stats_trackers:
+            self.stats_trackers[target_world] = StatsTracker(world=target_world)
+        return self.stats_trackers[target_world]
+
+    def get_stats_summary(self, world: Optional[str] = None) -> Dict[str, Any]:
+        """Retorna resumo consolidado de estatísticas e KPIs de rendimento."""
+        tracker = self.get_stats_tracker(world)
+        return {"status": "success", "summary": tracker.get_summary()}
+
+    def get_stats_history(
+        self, hours: int = 24, days: int = 7, world: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Retorna séries temporais para os gráficos de rendimento e histórico recente."""
+        tracker = self.get_stats_tracker(world)
+        history = tracker.get_history(hours=hours, days=days)
+        return {"status": "success", "history": history}
+
+    def reset_stats(self, world: Optional[str] = None) -> Dict[str, Any]:
+        """Reinicia os registos de estatísticas do mundo ativo."""
+        tracker = self.get_stats_tracker(world)
+        tracker.reset_stats()
+        self.broadcast_sync("STATS_UPDATED", tracker.get_summary())
+        return {
+            "status": "success",
+            "message": f"Estatísticas do mundo '{tracker.world}' reiniciadas com sucesso.",
+        }
+
+    # --- Edifício Principal (Roadmap & Fila) ---
+
+    async def get_building_state(self, village_id: Optional[int] = None) -> Dict[str, Any]:
+        """Retorna o estado detalhado do Edifício Principal, fila e próximos passos."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        v_id = village_id or self.account.current_village_id or 0
+        try:
+            state = await self.main_building_manager.get_state(self.account, village_id=v_id)
+            plan = self.config.get_active_build_plan(village_id=str(v_id))
+            curr_v = self.account.villages.get(v_id)
+            resources = curr_v.resources if curr_v else None
+            upcoming = self.main_building_manager.get_upcoming_plan(state, plan, resources=resources)
+            candidate = self.main_building_manager.get_next_build_candidate(state, plan, resources=resources)
+
+            # Calcula contagem de concluídos e total do plano
+            completed_count = sum(1 for item in upcoming if item.get("status") == "completed")
+            total_plan_count = len(plan)
+            progress_pct = round((completed_count / total_plan_count * 100.0), 1) if total_plan_count > 0 else 100.0
+
+            next_target = None
+            if candidate:
+                from engine.actions.main_building import BUILDING_NAMES
+                b_name = BUILDING_NAMES.get(candidate.building, candidate.building)
+                next_target = {
+                    "building": candidate.building,
+                    "building_name": b_name,
+                    "target_level": candidate.target_level,
+                    "wood": candidate.wood,
+                    "stone": candidate.stone,
+                    "iron": candidate.iron,
+                    "pop": candidate.pop,
+                    "can_build": candidate.can_build,
+                    "can_afford": candidate.can_build,
+                    "error_reason": candidate.error_reason,
+                }
+            else:
+                next_item = next((item for item in upcoming if item.get("status") == "next"), None)
+                if next_item:
+                    next_target = {
+                        "building": next_item["building"],
+                        "building_name": next_item["building_name"],
+                        "target_level": next_item["target_level"],
+                        "wood": next_item.get("wood", 0),
+                        "stone": next_item.get("stone", 0),
+                        "iron": next_item.get("iron", 0),
+                        "pop": next_item.get("pop", 0),
+                        "can_build": next_item.get("can_afford", False),
+                        "can_afford": next_item.get("can_afford", False),
+                        "error_reason": "A aguardar recursos suficientes" if not next_item.get("can_afford", False) else None,
+                    }
+
+            return {
+                "status": "success",
+                "village_id": v_id,
+                "template": self.config.get_village_template(str(v_id)),
+                "enabled": getattr(self.config.building, "enabled", True),
+                "interval_seconds": getattr(self.config.building, "interval_seconds", 75.0),
+                "max_queue": getattr(self.config.building, "max_queue", 2),
+                "queue": [
+                    {
+                        "order_id": q.order_id,
+                        "building": q.building,
+                        "building_name": q.building_name,
+                        "target_level": q.target_level,
+                        "timer_str": q.timer_str,
+                        "cancel_url": q.cancel_url,
+                    }
+                    for q in state.queue
+                ],
+                "buildings": state.buildings,
+                "virtual_levels": state.virtual_levels,
+                "upcoming": upcoming,
+                "next_target": next_target,
+                "plan_total": total_plan_count,
+                "plan_completed": completed_count,
+                "completed_count": completed_count,
+                "progress_pct": progress_pct,
+                "scheduler_running": self.scheduler.is_running and not self.scheduler.is_paused,
+            }
+        except Exception as e:
+            logger.error(f"Erro ao obter estado de construção: {e}")
+            return {"status": "error", "message": str(e)}
+
+    async def cancel_building_order(self, order_id: str, village_id: Optional[int] = None) -> Dict[str, Any]:
+        """Cancela uma ordem de construção em andamento."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        v_id = village_id or self.account.current_village_id or 0
+        success = await self.main_building_manager.cancel_order(self.account, order_id=order_id, village_id=v_id)
+        if success:
+            self.broadcast_sync("BUILDING_ORDER_CANCELLED", {"order_id": order_id, "village_id": v_id})
+            return {"status": "success", "message": "Ordem de construção cancelada com sucesso!"}
+        return {"status": "error", "message": "Não foi possível cancelar a ordem de construção."}
+
+    def toggle_building_module(
+        self,
+        enabled: Optional[bool] = None,
+        interval_seconds: Optional[float] = None,
+        max_queue: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Ativa/desativa ou ajusta a rotina de auto-construção contínua."""
+        update_data = {}
+        if enabled is not None:
+            update_data["enabled"] = bool(enabled)
+            self.config.building.enabled = bool(enabled)
+        if interval_seconds is not None:
+            update_data["interval_seconds"] = float(interval_seconds)
+            self.config.building.interval_seconds = float(interval_seconds)
+        if max_queue is not None:
+            update_data["max_queue"] = int(max_queue)
+            self.config.building.max_queue = int(max_queue)
+
+        self.update_config_and_save({"building": update_data})
+        if self.config.building.enabled and self.account and self.scheduler:
+            plan = self.config.get_active_build_plan()
+            self.main_building_manager.schedule_auto_build(
+                scheduler=self.scheduler,
+                account=self.account,
+                plan=plan,
+                max_queue=self.config.building.max_queue,
+                interval_seconds=self.config.building.interval_seconds,
+                enabled_check=lambda: self.config.building.enabled,
+            )
+        self.broadcast_sync("MODULE_TOGGLED", {"module": "building", "enabled": self.config.building.enabled})
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success",
+            "message": f"Construção Automática {'ATIVADA' if self.config.building.enabled else 'DESATIVADA'}.",
+            "enabled": self.config.building.enabled,
+        }
+
+    # --- Recrutamento Militar & Tropas em Treino ---
+
+    async def get_recruitment_state(self, village_id: Optional[int] = None) -> Dict[str, Any]:
+        """Consulta o estado das filas de treino e unidades disponíveis nos edifícios militares."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não inicializada."}
+        v_id = village_id or self.account.current_village_id or 0
+        try:
+            from engine.config.settings import DEFAULT_ATTACK_MODEL, DEFAULT_DEFENSE_MODEL
+            targets = self.config.get_village_recruitment_targets(village_id=str(v_id))
+            batch_sizes = self.config.recruitment.batch_sizes
+            models = getattr(self.config.recruitment, "models", {
+                "attack": DEFAULT_ATTACK_MODEL.copy(),
+                "defense": DEFAULT_DEFENSE_MODEL.copy(),
+            })
+            village_cat = "defense"
+            if self.village_coordinator:
+                village_cat = self.village_coordinator.get_village_category(self.account, self.config, v_id).value
+
+            buildings_data = {}
+            total_in_queue_all: Dict[str, int] = {}
+            available_units_all: Dict[str, int] = {}
+            active_orders_list = []
+
+            for bld in ("barracks", "stable", "garage"):
+                try:
+                    b_state = await self.recruitment_manager.get_building_state(self.account, bld, village_id=v_id)
+                    bld_orders = []
+                    for q in b_state.queue:
+                        order_item = {
+                            "building": bld,
+                            "unit": q.unit,
+                            "unit_name": getattr(q, "unit_name", q.unit),
+                            "count": q.count,
+                            "timer_str": q.timer_str,
+                            "finish_time": q.finish_time,
+                            "cancel_url": q.cancel_url,
+                        }
+                        bld_orders.append(order_item)
+                        active_orders_list.append(order_item)
+
+                    buildings_data[bld] = {
+                        "available_units": b_state.available_units,
+                        "queue": bld_orders,
+                        "total_in_queue": b_state.total_in_queue,
+                    }
+                    for u, c in b_state.total_in_queue.items():
+                        total_in_queue_all[u] = total_in_queue_all.get(u, 0) + c
+                    for u, c in b_state.available_units.items():
+                        available_units_all[u] = c
+                except Exception as e:
+                    logger.debug(f"Edifício militar '{bld}' indisponível na aldeia {v_id}: {e}")
+                    buildings_data[bld] = {"available_units": {}, "queue": [], "total_in_queue": {}}
+
+            village_troops = {}
+            if v_id and v_id in self.account.villages:
+                village_troops = self.account.villages[v_id].troops
+            elif self.account.current_village:
+                village_troops = self.account.current_village.troops
+
+            return {
+                "status": "success",
+                "village_id": v_id,
+                "village_category": village_cat,
+                "enabled": self.config.recruitment.enabled,
+                "interval_minutes": self.config.recruitment.interval_minutes,
+                "min_free_pop": self.config.recruitment.min_free_pop,
+                "models": models,
+                "targets": targets,
+                "batch_sizes": batch_sizes,
+                "troops_home": village_troops,
+                "total_in_queue": total_in_queue_all,
+                "available_units": available_units_all,
+                "buildings": buildings_data,
+                "active_orders": active_orders_list,
+            }
+        except Exception as e:
+            logger.error(f"Erro ao obter estado de recrutamento: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def get_recruitment_models(self) -> Dict[str, Any]:
+        """Retorna os modelos de tropas de Ataque e Defesa configurados."""
+        from engine.config.settings import DEFAULT_ATTACK_MODEL, DEFAULT_DEFENSE_MODEL
+        models = getattr(self.config.recruitment, "models", {
+            "attack": DEFAULT_ATTACK_MODEL.copy(),
+            "defense": DEFAULT_DEFENSE_MODEL.copy(),
+        })
+        return {
+            "status": "success",
+            "models": models,
+        }
+
+    def save_recruitment_models(
+        self,
+        attack: Optional[Dict[str, int]] = None,
+        defense: Optional[Dict[str, int]] = None,
+        models: Optional[Dict[str, Dict[str, int]]] = None,
+    ) -> Dict[str, Any]:
+        """Salva todos os modelos de tropas (Ataque, Defesa e Customizados) no config.json."""
+        from engine.config.settings import DEFAULT_ATTACK_MODEL, DEFAULT_DEFENSE_MODEL
+        current_models = getattr(self.config.recruitment, "models", {
+            "attack": DEFAULT_ATTACK_MODEL.copy(),
+            "defense": DEFAULT_DEFENSE_MODEL.copy(),
+        }).copy()
+
+        if models is not None and isinstance(models, dict):
+            # Salva o dicionário completo de modelos recebido
+            current_models = {
+                str(m_name).lower().strip(): {str(k): max(0, int(v)) for k, v in m_dict.items()}
+                for m_name, m_dict in models.items()
+                if isinstance(m_dict, dict)
+            }
+            if "attack" not in current_models:
+                current_models["attack"] = DEFAULT_ATTACK_MODEL.copy()
+            if "defense" not in current_models:
+                current_models["defense"] = DEFAULT_DEFENSE_MODEL.copy()
+        else:
+            if attack is not None:
+                current_models["attack"] = {str(k): max(0, int(v)) for k, v in attack.items()}
+            if defense is not None:
+                current_models["defense"] = {str(k): max(0, int(v)) for k, v in defense.items()}
+
+        self.config.recruitment.models = current_models
+        self.update_config_and_save({"recruitment": {"models": current_models}})
+        self.broadcast_sync("RECRUITMENT_MODELS_UPDATED", {"models": current_models})
+        return {
+            "status": "success",
+            "message": "Modelos de tropas guardados e persistidos no config.json com sucesso!",
+            "models": current_models,
+        }
+
+    def delete_recruitment_model(self, model_name: str) -> Dict[str, Any]:
+        """Remove um modelo de tropas customizado e persiste no config.json."""
+        m_name = str(model_name).lower().strip()
+        if m_name in ("attack", "defense"):
+            return {"status": "error", "message": "Os modelos padrão 'attack' e 'defense' não podem ser removidos."}
+
+        current_models = getattr(self.config.recruitment, "models", {}).copy()
+        if m_name in current_models:
+            del current_models[m_name]
+            self.config.recruitment.models = current_models
+            self.update_config_and_save({"recruitment": {"models": current_models}})
+            self.broadcast_sync("RECRUITMENT_MODELS_UPDATED", {"models": current_models})
+            return {"status": "success", "message": f"Modelo '{m_name}' removido com sucesso!", "models": current_models}
+        return {"status": "error", "message": f"Modelo '{m_name}' não encontrado."}
+
+    def toggle_recruitment_module(
+        self,
+        enabled: Optional[bool] = None,
+        interval_minutes: Optional[float] = None,
+        min_free_pop: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Ativa/desativa ou ajusta a rotina de recrutamento militar contínuo."""
+        update_data = {}
+        if enabled is not None:
+            update_data["enabled"] = bool(enabled)
+            self.config.recruitment.enabled = bool(enabled)
+        if interval_minutes is not None:
+            update_data["interval_minutes"] = float(interval_minutes)
+            self.config.recruitment.interval_minutes = float(interval_minutes)
+        if min_free_pop is not None:
+            update_data["min_free_pop"] = int(min_free_pop)
+            self.config.recruitment.min_free_pop = int(min_free_pop)
+
+        self.update_config_and_save({"recruitment": update_data})
+        if self.config.recruitment.enabled and self.account and self.scheduler:
+            self.recruitment_manager.schedule_auto_recruit(
+                scheduler=self.scheduler,
+                account=self.account,
+                recruit_config=self.config.recruitment,
+                enabled_check=lambda: self.config.recruitment.enabled,
+            )
+        self.broadcast_sync("MODULE_TOGGLED", {"module": "recruitment", "enabled": self.config.recruitment.enabled})
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success",
+            "message": f"Recrutamento Automático {'ATIVADO' if self.config.recruitment.enabled else 'DESATIVADO'}.",
+            "enabled": self.config.recruitment.enabled,
+        }
+
+    def toggle_farm_module(
+        self,
+        enabled: Optional[bool] = None,
+        mode: Optional[str] = None,
+        template: Optional[str] = None,
+        max_distance: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Ativa/desativa ou ajusta a rotina de micro-farming contínuo."""
+        update_data = {}
+        if enabled is not None:
+            update_data["enabled"] = bool(enabled)
+            self.config.farm.enabled = bool(enabled)
+        if mode is not None:
+            update_data["mode"] = str(mode)
+            self.config.farm.mode = str(mode)
+        if template is not None:
+            update_data["template"] = str(template)
+            self.config.farm.template = str(template)
+        if max_distance is not None:
+            update_data["max_distance"] = float(max_distance)
+            self.config.farm.max_distance = float(max_distance)
+
+        self.update_config_and_save({"farm": update_data})
+        if self.config.farm.enabled and self.account and self.scheduler:
+            self.farm_manager.schedule_auto_farm(
+                scheduler=self.scheduler,
+                account=self.account,
+                farm_config=self.config.farm,
+            )
+        self.broadcast_sync("MODULE_TOGGLED", {"module": "farm", "enabled": self.config.farm.enabled})
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success",
+            "message": f"Micro-Farming {'ATIVADO' if self.config.farm.enabled else 'DESATIVADO'}.",
+            "enabled": self.config.farm.enabled,
+        }
+
+    def toggle_quest_module(
+        self,
+        enabled: Optional[bool] = None,
+        auto_claim_quests: Optional[bool] = None,
+        auto_daily_bonus: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Ativa/desativa ou ajusta a rotina de missões e bónus diário."""
+        update_data = {}
+        if enabled is not None:
+            update_data["enabled"] = bool(enabled)
+            self.config.quest.enabled = bool(enabled)
+        if auto_claim_quests is not None:
+            update_data["auto_claim_quests"] = bool(auto_claim_quests)
+            self.config.quest.auto_claim_quests = bool(auto_claim_quests)
+        if auto_daily_bonus is not None:
+            update_data["auto_daily_bonus"] = bool(auto_daily_bonus)
+            self.config.quest.auto_daily_bonus = bool(auto_daily_bonus)
+
+        self.update_config_and_save({"quest": update_data})
+        if self.config.quest.enabled and self.account and self.scheduler:
+            self.quest_manager.schedule_auto_quest(
+                scheduler=self.scheduler,
+                account=self.account,
+                quest_config=self.config.quest,
+            )
+        self.broadcast_sync("MODULE_TOGGLED", {"module": "quest", "enabled": self.config.quest.enabled})
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success",
+            "message": f"Missões & Bónus Diário {'ATIVADO' if self.config.quest.enabled else 'DESATIVADO'}.",
+            "enabled": self.config.quest.enabled,
+        }
+
+    async def get_arbitrage_state(self, village_id: Optional[int] = None) -> Dict[str, Any]:
+        """Consulta o estado da arbitragem económica, diagnóstico das 4 filas e projeção de fluxo de caixa."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não conectada"}
+        try:
+            v_id = village_id or self.account.current_village_id
+            decision = await self.arbitrage_manager.evaluate_village_arbitrage(
+                account=self.account,
+                village_id=v_id,
+                emergency_queue_seconds=self.config.arbitrage.emergency_queue_seconds,
+                min_military_batch=self.config.arbitrage.min_military_batch,
+            )
+            return {
+                "status": "success",
+                "enabled": self.config.arbitrage.enabled,
+                "decision": decision.to_dict(),
+            }
+        except Exception as e:
+            logger.error(f"Erro ao avaliar arbitragem económica: {e}")
+            return {"status": "error", "message": str(e)}
+
+    async def trigger_arbitrage_cycle(self, village_id: Optional[int] = None) -> Dict[str, Any]:
+        """Dispara manualmente um ciclo de arbitragem económica para a aldeia."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não conectada"}
+        try:
+            v_id = village_id or self.account.current_village_id
+            decision = await self.arbitrage_manager.execute_arbitrage_cycle(
+                account=self.account,
+                village_id=v_id,
+                emergency_queue_seconds=self.config.arbitrage.emergency_queue_seconds,
+                min_military_batch=self.config.arbitrage.min_military_batch,
+            )
+            self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+            return {
+                "status": "success",
+                "message": f"Ciclo de Arbitragem executado: [{decision.action_type.value.upper()}] - {decision.reason}",
+                "decision": decision.to_dict(),
+            }
+        except Exception as e:
+            logger.error(f"Erro ao executar ciclo de arbitragem: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def toggle_arbitrage_module(
+        self,
+        enabled: Optional[bool] = None,
+        interval_seconds: Optional[float] = None,
+        emergency_queue_seconds: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Ativa/desativa a rotina contínua de arbitragem económica 'Fila Sempre Ativa'."""
+        update_data = {}
+        if enabled is not None:
+            update_data["enabled"] = bool(enabled)
+            self.config.arbitrage.enabled = bool(enabled)
+        if interval_seconds is not None:
+            update_data["interval_seconds"] = float(interval_seconds)
+            self.config.arbitrage.interval_seconds = float(interval_seconds)
+        if emergency_queue_seconds is not None:
+            update_data["emergency_queue_seconds"] = float(emergency_queue_seconds)
+            self.config.arbitrage.emergency_queue_seconds = float(emergency_queue_seconds)
+
+        self.update_config_and_save({"arbitrage": update_data})
+        if self.config.arbitrage.enabled and self.account and self.scheduler:
+            self.arbitrage_manager.schedule_auto_arbitrage(
+                scheduler=self.scheduler,
+                account=self.account,
+                interval_seconds=self.config.arbitrage.interval_seconds,
+                emergency_queue_seconds=self.config.arbitrage.emergency_queue_seconds,
+                min_military_batch=self.config.arbitrage.min_military_batch,
+            )
+        self.broadcast_sync("MODULE_TOGGLED", {"module": "arbitrage", "enabled": self.config.arbitrage.enabled})
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success",
+            "message": f"Arbitragem Económica {'ATIVADA' if self.config.arbitrage.enabled else 'DESATIVADA'}.",
+            "enabled": self.config.arbitrage.enabled,
+        }
+
+    async def get_radar_farm_plan(
+        self,
+        radius: Optional[float] = None,
+        squad_troops: Optional[Dict[str, int]] = None,
+        village_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Calcula o plano de Radar Farm e alocação de micro-esquadrões."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não conectada"}
+        try:
+            r = radius if radius is not None else self.config.farm.map_scan_radius
+            troops = UnitsCount.from_dict(squad_troops) if squad_troops else UnitsCount.from_dict(self.config.farm.custom_troops)
+            plan = await self.farm_manager.get_radar_farm_plan(
+                account=self.account,
+                radius=r,
+                squad_template=troops,
+                skip_active_targets=self.config.farm.skip_active_targets,
+                village_id=village_id,
+            )
+            return {
+                "status": "success",
+                "village_id": plan.village_id,
+                "total_barbarians_found": plan.total_barbarians_found,
+                "eligible_targets_count": len(plan.eligible_targets),
+                "squads_assigned_count": len(plan.squads_assigned),
+                "total_carrying_capacity": plan.total_carrying_capacity,
+                "squads": [
+                    {"target": f"({coords[0]}|{coords[1]})", "units": sq.to_dict()}
+                    for coords, sq in plan.squads_assigned
+                ],
+            }
+        except Exception as e:
+            logger.error(f"Erro ao calcular plano de Radar Farm: {e}")
+            return {"status": "error", "message": str(e)}
+
+    async def trigger_radar_farm_cycle(
+        self,
+        radius: Optional[float] = None,
+        squad_troops: Optional[Dict[str, int]] = None,
+        village_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Dispara uma onda imediata de Radar Farming com alocação dinâmica de tropas."""
+        if not self.account:
+            return {"status": "error", "message": "Conta não conectada"}
+        try:
+            r = radius if radius is not None else self.config.farm.map_scan_radius
+            troops = UnitsCount.from_dict(squad_troops) if squad_troops else UnitsCount.from_dict(self.config.farm.custom_troops)
+            res = await self.farm_manager.run_radar_farm_cycle(
+                account=self.account,
+                radius=r,
+                squad_template=troops,
+                skip_active_targets=self.config.farm.skip_active_targets,
+                village_id=village_id,
+            )
+            self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+            return {
+                "status": "success",
+                "message": f"Onda de Radar Farming concluída: {res['sent_attacks']} ataques despachados.",
+                "data": res,
+            }
+        except Exception as e:
+            logger.error(f"Erro ao executar Radar Farm: {e}")
+            return {"status": "error", "message": str(e)}
+
+    def get_network_requests(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Retorna histórico de requisições de rede da conta ativa."""
+        if self.account:
+            return self.account.get_recent_requests(limit=limit)
+        return []
+
+
+
 

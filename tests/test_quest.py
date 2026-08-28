@@ -268,6 +268,39 @@ class TestQuestManagerActions(unittest.IsolatedAsyncioTestCase):
         success = await self.manager.claim_quest(self.mock_account, quest, safe_mode=True)
         self.assertTrue(success)
         self.mock_account.get_screen.assert_called_once()
+        call_args = self.mock_account.get_screen.call_args
+        screen_arg = call_args.args[0] if call_args.args else call_args.kwargs.get("screen")
+        self.assertEqual(screen_arg, "quest")
+        extra = call_args.kwargs.get("extra_params", {})
+        self.assertEqual(extra.get("action"), "reward")
+        self.assertEqual(extra.get("quest_id"), "101")
+        self.assertEqual(extra.get("h"), "csrf_token_test")
+
+    async def test_get_quest_state_falls_back_to_main_screen_rewards(self):
+        empty_quest_html = "<html><body><div id='no_quests'></div></body></html>"
+        main_screen_rewards_html = """
+        <html><body>
+            <div id="main_buildrow_wood">
+                <span class="level">1</span>
+                <a class="btn btn-reward" href="/game.php?village=12345&screen=quest&action=reward&quest_id=wood_1&h=csrf_abc">Recompensa</a>
+            </div>
+            <div id="main_buildrow_stone">
+                <span class="level">1</span>
+                <button onclick="Quest.reward('stone_1')">Receber</button>
+            </div>
+        </body></html>
+        """
+        self.mock_account.get_screen.side_effect = [
+            empty_quest_html,
+            main_screen_rewards_html,
+        ]
+
+        state = await self.manager.get_quest_state(self.mock_account)
+        self.assertEqual(len(state.quests), 2)
+        self.assertEqual(state.finishable_count, 2)
+        q_ids = [q.id for q in state.quests]
+        self.assertIn("wood_1", q_ids)
+        self.assertIn("stone_1", q_ids)
 
     async def test_claim_quest_skips_when_unsafe(self):
         # Configura armazém quase cheio

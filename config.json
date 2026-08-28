@@ -1,11 +1,11 @@
 {
   "world": "pt117",
-  "sid": "0:b3dfa2c44c207f3f5d63edb1a7111509f7f5401ca9d022a5a6f725d834c0576b7989a433714d885adbea8c00b8add3784abde4efa10f29185512d522f2faec66",
+  "sid": "0%3Aecb14c77d2b2394ae87f8c03aea0855333a0cb77004c2d6d1595cfc19580c6622154bd0406f74614a4d101ffe12933d14e686759576324533f2494b620c19c5e",
   "building": {
     "_comentario": "Templates dispon\u00edveis: 'rush_resources' (recursos), 'balanced' (balanceado), 'military_rush' (tropas/cavalaria) ou 'custom'",
     "template": "custom",
     "max_queue": 2,
-    "interval_seconds": 75,
+    "interval_seconds": 75.0,
     "custom_plan": [
       [
         "wood",
@@ -279,7 +279,8 @@
         "storage",
         12
       ]
-    ]
+    ],
+    "enabled": true
   },
   "farm": {
     "_comentario": "Modos: 'am_farm' (Assistente de Farm) ou 'place' (direto via Pra\u00e7a)",
@@ -310,22 +311,32 @@
   },
   "recruitment": {
     "_comentario": "Metas de tropas e lotes por ciclo para Quartel, Est\u00e1bulo e Oficina",
-    "enabled": false,
-    "interval_minutes": 5.0,
+    "enabled": true,
+    "interval_minutes": 5,
     "min_free_pop": 10,
     "targets": {
-      "spear": 0,
+      "spear": 50,
       "sword": 0,
-      "axe": 200,
-      "spy": 20,
-      "light": 200
+      "axe": 6000,
+      "archer": 0,
+      "spy": 100,
+      "light": 3000,
+      "marcher": 0,
+      "heavy": 0,
+      "ram": 250,
+      "catapult": 0
     },
     "batch_sizes": {
       "spear": 10,
       "sword": 10,
-      "axe": 15,
+      "axe": 25,
+      "archer": 10,
       "spy": 5,
-      "light": 5
+      "light": 10,
+      "marcher": 5,
+      "heavy": 5,
+      "ram": 5,
+      "catapult": 2
     }
   },
   "quest": {
@@ -336,8 +347,23 @@
     "safe_storage_margin": 0.95,
     "interval_minutes": 30.0
   },
+  "market": {
+    "_comentario": "Balanceamento autom\u00e1tico de recursos entre aldeias e gest\u00e3o do mercado",
+    "enabled": false,
+    "interval_minutes": 30.0,
+    "auto_balance": true,
+    "reserve_margin": 0.2,
+    "overflow_threshold": 0.9,
+    "deficit_threshold": 0.3,
+    "min_transfer_amount": 100,
+    "auto_trade_offers": false,
+    "max_merchant_ratio": 0.8
+  },
   "villages": {
     "6810": {
+      "category": "attack"
+    },
+    "6662": {
       "category": "attack"
     }
   }

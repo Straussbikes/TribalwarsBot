@@ -4,20 +4,19 @@ Orquestrador assíncrono para gestão simultânea e categorizada de múltiplas a
 da mesma conta, vinculação de templates (Ataque/Defesa/Balanceado) e balanceamento de recursos.
 """
 
-import asyncio
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from engine.actions.farm import FarmManager
 from engine.actions.main_building import MainBuildingManager
+from engine.actions.market import MarketManager
 from engine.actions.recruitment import RecruitmentManager
-from engine.config.settings import BotConfig
 from engine.core.account import TribalAccount
+
+if TYPE_CHECKING:
+    from engine.config.settings import BotConfig
 from engine.core.models import (
-    CATEGORY_BUILDING_TEMPLATES,
-    CATEGORY_RECRUITMENT_TARGETS,
-    TaskPriority,
     VillageCategory,
     VillageData,
 )
@@ -36,10 +35,12 @@ class MultiVillageCoordinator:
         main_building_manager: Optional[MainBuildingManager] = None,
         recruitment_manager: Optional[RecruitmentManager] = None,
         farm_manager: Optional[FarmManager] = None,
+        market_manager: Optional[MarketManager] = None,
     ):
         self.main_building_manager = main_building_manager or MainBuildingManager()
         self.recruitment_manager = recruitment_manager or RecruitmentManager()
         self.farm_manager = farm_manager or FarmManager()
+        self.market_manager = market_manager or MarketManager()
         self.last_sync_time: float = 0.0
 
     def set_village_category(
@@ -50,16 +51,19 @@ class MultiVillageCoordinator:
         category: str,
     ) -> bool:
         """
-        Define a categoria de uma aldeia (attack, defense, balanced)
-        e atualiza a configuração ativa.
+        Define a categoria ou modelo de tropas de uma aldeia (attack, defense, balanced ou modelo customizado)
+        e atualiza a configuração ativa e memória.
         """
         normalized_cat = category.lower().strip()
-        if normalized_cat not in ("attack", "defense", "balanced"):
+        if not normalized_cat:
             normalized_cat = "balanced"
 
         # 1. Atualiza no modelo de aldeia em memória
         if village_id in account.villages:
-            account.villages[village_id].category = VillageCategory(normalized_cat)
+            try:
+                account.villages[village_id].category = VillageCategory(normalized_cat)
+            except ValueError:
+                account.villages[village_id].category = normalized_cat
 
         # 2. Atualiza no BotConfig
         from engine.config.settings import VillageConfig
@@ -71,19 +75,23 @@ class MultiVillageCoordinator:
         logger.info(f"[{account.world}] Aldeia {village_id} categorizada como '{normalized_cat}'.")
         return True
 
-    def get_village_category(self, account: TribalAccount, config: BotConfig, village_id: int) -> VillageCategory:
-        """Retorna a categoria atribuída à aldeia (ou BALANCED por defeito)."""
-        if str(village_id) in config.villages:
-            cat_str = config.villages[str(village_id)].category
-            try:
-                return VillageCategory(cat_str)
-            except ValueError:
-                pass
+    def get_village_category(self, account: TribalAccount, config: BotConfig, village_id: int) -> Any:
+        """Retorna a categoria ou modelo atribuído à aldeia (ou BALANCED por defeito)."""
+        cat_str = None
+        if str(village_id) in config.villages and config.villages[str(village_id)].category:
+            cat_str = str(config.villages[str(village_id)].category).lower().strip()
 
-        if village_id in account.villages:
-            return account.villages[village_id].category
+        if not cat_str and village_id in account.villages:
+            v_cat = account.villages[village_id].category
+            cat_str = v_cat.value if hasattr(v_cat, "value") else str(v_cat).lower().strip()
 
-        return VillageCategory.BALANCED
+        if not cat_str:
+            return VillageCategory.BALANCED
+
+        try:
+            return VillageCategory(cat_str)
+        except ValueError:
+            return cat_str
 
     async def sync_all_villages(self, account: TribalAccount) -> List[VillageData]:
         """
@@ -139,10 +147,11 @@ class MultiVillageCoordinator:
         for v in villages:
             v_id = v.id
             cat = self.get_village_category(account, config, v_id)
+            cat_val = cat.value if hasattr(cat, "value") else str(cat)
             v_detail = {
                 "village_id": v_id,
                 "name": v.name,
-                "category": cat.value,
+                "category": cat_val,
                 "building": None,
                 "recruitment": None,
             }
@@ -156,9 +165,11 @@ class MultiVillageCoordinator:
                     max_queue=config.building.max_queue,
                     village_id=v_id,
                 )
-                if b_res and b_res.get("upgraded"):
-                    results["building_actions"] += 1
-                    v_detail["building"] = b_res
+                if b_res:
+                    upgraded_name = b_res.get("upgraded") if isinstance(b_res, dict) else b_res
+                    if upgraded_name:
+                        results["building_actions"] += 1
+                        v_detail["building"] = upgraded_name
 
                 # 2. Avaliação de Recrutamento baseada na categoria (se ativado)
                 if config.recruitment.enabled:
@@ -180,6 +191,20 @@ class MultiVillageCoordinator:
 
             results["details"].append(v_detail)
 
+        # Executa balanceamento de recursos entre aldeias se ativado
+        m_cfg = getattr(config, "market", None)
+        market_enabled = getattr(m_cfg, "enabled", False) if m_cfg else False
+        auto_balance = (getattr(m_cfg, "auto_balance_enabled", False) or getattr(m_cfg, "auto_balance", False)) if m_cfg else False
+        if market_enabled and auto_balance:
+            try:
+                b_res = await self.market_manager.run_balancing_cycle(account)
+                results["market_balancing"] = b_res
+            except Exception as m_err:
+                logger.warning(f"[{account.world}] Erro no balanceamento de mercado: {m_err}")
+                results["market_balancing"] = {"error": str(m_err)}
+        else:
+            logger.debug(f"[{account.world}] Balanceamento de mercado ignorado (Market enabled={market_enabled}, AutoBalance={auto_balance}).")
+
         # Restaura aldeia ativa se tiver sido alternada
         if orig_village_id and account.current_village_id != orig_village_id:
             try:
@@ -192,7 +217,8 @@ class MultiVillageCoordinator:
     def calculate_resource_balance(self, account: TribalAccount) -> Dict[str, Any]:
         """
         Analisa o balanceamento de recursos entre todas as aldeias da conta.
-        Identifica aldeias doadoras (excedente) e aldeias recetoras (défice).
+        Identifica aldeias doadoras (excedente) e aldeias recetoras (défice),
+        e calcula ordens de transferência recomendadas.
         """
         villages = list(account.villages.values())
         if not villages:
@@ -241,6 +267,9 @@ class MultiVillageCoordinator:
             elif score < -500:
                 receivers.append(v_info)
 
+        # Recomendações de transferência calculadas pelo MarketManager
+        orders = self.market_manager.calculate_balancing_transfers(account)
+
         return {
             "total_villages": n,
             "averages": {
@@ -250,4 +279,5 @@ class MultiVillageCoordinator:
             },
             "donors": donors,
             "receivers": receivers,
+            "recommended_transfers": [o.to_dict() for o in orders],
         }

@@ -99,14 +99,20 @@ class QuestManager:
     async def get_quest_state(
         self, account: TribalAccount, village_id: Optional[int] = None
     ) -> QuestState:
-        """Carrega 'screen=quest' e extrai o catálogo de missões e recompensas."""
+        """
+        Carrega 'screen=quest' e 'screen=main' e extrai o catálogo consolidado de missões
+        e recompensas de níveis de edifícios concluídos.
+        """
         v_id = village_id or account.current_village_id or 0
         html = await account.get_screen("quest", village_id=v_id)
 
         raw = parse_quest_screen(html, account.last_game_data)
-        quests: List[QuestItem] = []
+        quests_dict: Dict[str, QuestItem] = {}
 
         for q in raw.get("quests", []):
+            q_id = str(q.get("id", "")).strip()
+            if not q_id:
+                continue
             rew_dict = q.get("rewards", {})
             reward = QuestReward(
                 wood=rew_dict.get("wood", 0),
@@ -117,21 +123,56 @@ class QuestManager:
                 items=rew_dict.get("items", []),
                 description=rew_dict.get("description", ""),
             )
-            quests.append(
-                QuestItem(
-                    id=str(q.get("id", "")),
-                    title=str(q.get("title", "")),
-                    description=str(q.get("description", "")),
-                    finishable=bool(q.get("finishable", False)),
-                    rewards=reward,
-                    claim_url=q.get("claim_url"),
-                )
+            quests_dict[q_id] = QuestItem(
+                id=q_id,
+                title=str(q.get("title", "")),
+                description=str(q.get("description", "")),
+                finishable=bool(q.get("finishable", False)),
+                rewards=reward,
+                claim_url=q.get("claim_url"),
             )
 
+        # Se não encontramos missões concluídas em screen=quest, inspeciona também o ecrã do Edifício Principal (screen=main)
+        finishable_count = sum(1 for q in quests_dict.values() if q.finishable)
+        if finishable_count == 0:
+            try:
+                main_html = await account.get_screen("main", village_id=v_id)
+                main_raw = parse_quest_screen(main_html, account.last_game_data)
+                for q in main_raw.get("quests", []):
+                    q_id = str(q.get("id", "")).strip()
+                    if not q_id:
+                        continue
+                    if q_id not in quests_dict:
+                        rew_dict = q.get("rewards", {})
+                        reward = QuestReward(
+                            wood=rew_dict.get("wood", 0),
+                            stone=rew_dict.get("stone", 0),
+                            iron=rew_dict.get("iron", 0),
+                            pop=rew_dict.get("pop", 0),
+                            flags=rew_dict.get("flags", []),
+                            items=rew_dict.get("items", []),
+                            description=rew_dict.get("description", ""),
+                        )
+                        quests_dict[q_id] = QuestItem(
+                            id=q_id,
+                            title=str(q.get("title", "")),
+                            description=str(q.get("description", "")),
+                            finishable=bool(q.get("finishable", False)),
+                            rewards=reward,
+                            claim_url=q.get("claim_url"),
+                        )
+                    elif q.get("finishable") or q.get("claim_url"):
+                        quests_dict[q_id].finishable = True
+                        if q.get("claim_url"):
+                            quests_dict[q_id].claim_url = q.get("claim_url")
+            except Exception as e:
+                logger.debug(f"Não foi possível verificar recompensas em screen=main: {e}")
+
+        quests = list(quests_dict.values())
         finishable_count = sum(1 for q in quests if q.finishable)
         logger.info(
-            f"[{account.world}] Missões carregadas na aldeia {v_id}: "
-            f"{len(quests)} no total, {finishable_count} prontas para entrega."
+            f"[{account.world}] Missões/Recompensas carregadas na aldeia {v_id}: "
+            f"{len(quests)} no total, {finishable_count} prontas para resgate."
         )
         return QuestState(
             village_id=v_id,
@@ -184,8 +225,8 @@ class QuestManager:
         safe_margin: float = 0.95,
     ) -> bool:
         """
-        Resgata a recompensa de uma missão concluída.
-        Se safe_mode=True, verifica primeiro as margens de armazém e população da aldeia.
+        Resgata a recompensa de uma missão concluída ou marco de nível de edifício.
+        Submete primariamente com action=reward (padrão nativo do Tribal Wars) e fallback com CSRF.
         """
         v_id = village_id or account.current_village_id or 0
 
@@ -204,32 +245,55 @@ class QuestManager:
                     )
                     return False
 
-        # Prepara requisição de claim
+        # Prepara requisição de claim com ação nativa 'action=reward'
         logger.info(
-            f"[{account.world}] A resgatar recompensa da missão '{quest.title}' (ID {quest.id})..."
+            f"[{account.world}] A resgatar recompensa da missão/edifício '{quest.title}' (ID {quest.id})..."
         )
         try:
+            # Estratégia 1: Se houver claim_url específico, executa a rota do link injetando CSRF
+            if quest.claim_url:
+                target_url = quest.claim_url
+                if "h=" not in target_url and account.csrf_token:
+                    sep = "&" if "?" in target_url else "?"
+                    target_url = f"{target_url}{sep}h={account.csrf_token}"
+                full_url = target_url if target_url.startswith("http") else f"https://{account.host}/{target_url.lstrip('/')}"
+                await account.get(full_url, apply_jitter=True)
+                logger.info(
+                    f"[{account.world}] Recompensa da missão '{quest.title}' resgatada via URL nativa!"
+                )
+                return True
+
+            # Estratégia 2: GET com action=reward (padrão oficial Tribal Wars)
             extra_params = {
-                "action": "claim_reward",
+                "action": "reward",
                 "quest_id": quest.id,
                 "h": account.csrf_token or "",
             }
-
-            # Se houver claim_url específico, usa os parâmetros do link
-            if quest.claim_url and "action=" in quest.claim_url:
-                await account.get(f"https://{account.host}/{quest.claim_url.lstrip('/')}")
-            else:
-                await account.get_screen("quest", village_id=v_id, extra_params=extra_params)
-
+            await account.get_screen("quest", village_id=v_id, extra_params=extra_params, apply_jitter=True)
             logger.info(
-                f"[{account.world}] Recompensa da missão '{quest.title}' resgatada com sucesso!"
+                f"[{account.world}] Recompensa da missão '{quest.title}' resgatada com sucesso (action=reward)!"
             )
             return True
         except Exception as e:
-            logger.error(
-                f"[{account.world}] Falha ao resgatar recompensa da missão {quest.id}: {e}"
-            )
-            return False
+            logger.warning(f"Tentativa padrão de claim falhou para missão {quest.id}: {e}. A tentar fallback...")
+            try:
+                # Estratégia 3: Fallback via POST AJAX
+                await account.post_action(
+                    screen="quest",
+                    action="reward",
+                    data={"quest_id": quest.id, "h": account.csrf_token or ""},
+                    village_id=v_id,
+                    apply_jitter=True,
+                )
+                logger.info(
+                    f"[{account.world}] Recompensa da missão '{quest.title}' resgatada via POST AJAX fallback!"
+                )
+                return True
+            except Exception as e2:
+                logger.error(
+                    f"[{account.world}] Falha definitiva ao resgatar recompensa da missão {quest.id}: {e2}"
+                )
+                return False
 
     async def claim_all_valid_quests(
         self,
@@ -403,3 +467,50 @@ class QuestManager:
             results["daily_bonus_opened"] = opened
 
         return results
+
+    def schedule_auto_quest(
+        self,
+        scheduler: Any,
+        account: TribalAccount,
+        quest_config: Any,
+        village_id: Optional[int] = None,
+        enabled_check: Optional[Any] = None,
+    ) -> None:
+        """Agenda a execução periódica do ciclo de missões e bónus diário no TaskScheduler."""
+        from engine.core.models import TaskPriority
+
+        logger.info(
+            f"[{account.world}] Missões Automáticas agendadas a cada ~{quest_config.interval_minutes}min."
+        )
+
+        async def auto_quest_task():
+            if enabled_check and not enabled_check():
+                return
+            try:
+                await self.run_cycle(
+                    account=account,
+                    village_id=village_id,
+                    config=quest_config,
+                )
+            except Exception as e:
+                logger.warning(f"Erro no ciclo de auto-quest: {e}")
+            finally:
+                if scheduler.is_running and not scheduler.is_paused:
+                    if not enabled_check or enabled_check():
+                        interval_sec = quest_config.interval_minutes * 60.0
+                        scheduler.schedule_human_like(
+                            name=f"AutoQuest-Village-{village_id or 'active'}",
+                            priority=TaskPriority.QUEST,
+                            action=auto_quest_task,
+                            base_seconds=interval_sec,
+                            std_dev=interval_sec * 0.15,
+                            min_seconds=max(60.0, interval_sec * 0.5),
+                            max_seconds=interval_sec * 1.5,
+                        )
+
+        scheduler.schedule(
+            name=f"AutoQuest-Village-{village_id or 'active'}",
+            priority=TaskPriority.QUEST,
+            action=auto_quest_task,
+            delay_seconds=10.0,
+        )
