@@ -256,7 +256,7 @@ def extract_all_villages(
                         except (ValueError, TypeError):
                             continue
 
-    # 2. Fallback via select mobile ou links de troca de aldeia
+    # 2. Extração via select options (mobile/desktop dropdown de aldeias)
     if html:
         matches = re.findall(
             r'<option[^>]*value=["\'](\d+)["\'][^>]*>(.*?)</option>', html, re.DOTALL
@@ -264,17 +264,192 @@ def extract_all_villages(
         for v_id_str, raw_label in matches:
             try:
                 v_id = int(v_id_str)
-                coord_match = re.search(r'\((\d+)\|(\d+)\)', raw_label)
+                # Procura coordenadas no formato (123|456) ou 123|456
+                coord_match = re.search(r'\(?(\d{1,3})\|(\d{1,3})\)?', raw_label)
                 if coord_match:
                     x = int(coord_match.group(1))
                     y = int(coord_match.group(2))
+                    # Remove tags HTML e coordenadas do nome
                     name = raw_label[:coord_match.start()].strip()
-                    if v_id not in villages or not villages[v_id].x:
+                    name = re.sub(r'<[^>]+>', '', name).strip()
+                    if not name:
+                        name = f"Aldeia ({x}|{y})"
+                    if v_id not in villages:
                         villages[v_id] = VillageData(id=v_id, name=name, x=x, y=y)
+                    elif not villages[v_id].x:
+                        villages[v_id].name = name
+                        villages[v_id].x = x
+                        villages[v_id].y = y
+                else:
+                    clean_name = re.sub(r'<[^>]+>', '', raw_label).strip()
+                    if v_id not in villages and clean_name:
+                        villages[v_id] = VillageData(id=v_id, name=clean_name)
+            except (ValueError, TypeError):
+                continue
+
+        # 3. Extração via links de aldeia com parâmetros village=ID
+        link_matches = re.findall(
+            r'<a[^>]*href=["\'][^"\']*?[?&]village=(\d+)[^"\']*["\'][^>]*>(.*?)</a>',
+            html,
+            re.DOTALL | re.IGNORECASE,
+        )
+        for v_id_str, raw_label in link_matches:
+            try:
+                v_id = int(v_id_str)
+                coord_match = re.search(r'\(?(\d{1,3})\|(\d{1,3})\)?', raw_label)
+                if coord_match and v_id not in villages:
+                    x = int(coord_match.group(1))
+                    y = int(coord_match.group(2))
+                    clean_name = raw_label[:coord_match.start()].strip()
+                    clean_name = re.sub(r'<[^>]+>', '', clean_name).strip()
+                    villages[v_id] = VillageData(
+                        id=v_id,
+                        name=clean_name or f"Aldeia ({x}|{y})",
+                        x=x,
+                        y=y,
+                    )
             except (ValueError, TypeError):
                 continue
 
     return villages
+
+
+def parse_overview_villages(html: str) -> Dict[int, VillageData]:
+    """
+    Analisa a página de visão geral de produção de aldeias ('screen=overview_villages&mode=prod').
+    Extrai em lote todas as aldeias do jogador com recursos, capacidade de armazém e população.
+    """
+    villages: Dict[int, VillageData] = {}
+    if not html:
+        return villages
+
+    # Regex para localizar linhas de aldeia na tabela de produção
+    # Formato padrão: <tr ... data-id="12345" ...> ou linhas com link village=ID
+    row_pattern = re.compile(
+        r'<tr[^>]*?(?:data-id=["\'](?P<row_id>\d+)["\'])?[^>]*?>(?P<row_content>.*?)</tr>',
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    for row_match in row_pattern.finditer(html):
+        row_html = row_match.group("row_content")
+        row_id_str = row_match.group("row_id")
+
+        # Localiza o ID e nome da aldeia no link
+        v_link_match = re.search(
+            r'<a[^>]*href=["\'][^"\']*?[?&]village=(?P<v_id>\d+)[^"\']*["\'][^>]*>(?P<v_name>.*?)</a>',
+            row_html,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if not v_link_match and not row_id_str:
+            continue
+
+        v_id = int(v_link_match.group("v_id") if v_link_match else row_id_str)
+        raw_name = v_link_match.group("v_name") if v_link_match else ""
+
+        # Extrai coordenadas
+        x, y = 0, 0
+        coord_match = re.search(r'\(?(\d{1,3})\|(\d{1,3})\)?', raw_name or row_html)
+        if coord_match:
+            x = int(coord_match.group(1))
+            y = int(coord_match.group(2))
+
+        clean_name = re.sub(r'<[^>]+>', '', raw_name).strip()
+        if coord_match and clean_name:
+            c_start = clean_name.find(coord_match.group(0))
+            if c_start > 0:
+                clean_name = clean_name[:c_start].strip()
+
+        # Extrai recursos (Madeira, Argila, Ferro)
+        # 1. Padrões com classes span: wood, stone, iron
+        wood_m = re.search(r'<span[^>]*class=["\'][^"\']*wood[^"\']*["\'][^>]*>([\d\.]+)</span>', row_html, re.I)
+        stone_m = re.search(r'<span[^>]*class=["\'][^"\']*stone[^"\']*["\'][^>]*>([\d\.]+)</span>', row_html, re.I)
+        iron_m = re.search(r'<span[^>]*class=["\'][^"\']*iron[^"\']*["\'][^>]*>([\d\.]+)</span>', row_html, re.I)
+        storage_m = re.search(r'<span[^>]*class=["\'][^"\']*storage[^"\']*["\'][^>]*>([\d\.]+)</span>', row_html, re.I)
+        
+        # 2. Padrão de população (pop/pop_max)
+        pop_m = re.search(r'(\d{1,6})/(\d{1,6})', row_html)
+
+        # 3. Pontos
+        points_m = re.search(r'<td[^>]*class=["\'][^"\']*points[^"\']*["\'][^>]*>([\d\.]+)</td>', row_html, re.I)
+
+        def clean_int(val_str: Optional[str]) -> int:
+            if not val_str:
+                return 0
+            return int(val_str.replace(".", "").replace(",", "").strip())
+
+        wood = clean_int(wood_m.group(1)) if wood_m else 0
+        stone = clean_int(stone_m.group(1)) if stone_m else 0
+        iron = clean_int(iron_m.group(1)) if iron_m else 0
+        storage = clean_int(storage_m.group(1)) if storage_m else 1000
+        points = clean_int(points_m.group(1)) if points_m else 0
+
+        pop_curr = int(pop_m.group(1)) if pop_m else 0
+        pop_max = int(pop_m.group(2)) if pop_m else 240
+
+        res_obj = Resources(
+            wood=wood,
+            stone=stone,
+            iron=iron,
+            storage_max=storage,
+            pop=pop_curr,
+            pop_max=pop_max,
+        )
+
+        villages[v_id] = VillageData(
+            id=v_id,
+            name=clean_name or f"Aldeia {v_id}",
+            x=x,
+            y=y,
+            points=points,
+            resources=res_obj,
+        )
+
+    # Fallback 1: Procura elementos com classe quickedit-vn
+    if not villages:
+        for qe_match in re.finditer(r'class=["\'][^"\']*quickedit-vn[^"\']*["\'][^>]*data-id=["\'](\d+)["\'][^>]*>(.*?)</span>', html, re.I | re.DOTALL):
+            vid = int(qe_match.group(1))
+            vname = re.sub(r'<[^>]+>', '', qe_match.group(2)).strip()
+            x, y = 0, 0
+            cm = re.search(r'\(?(\d{1,3})\|(\d{1,3})\)?', vname)
+            if cm:
+                x, y = int(cm.group(1)), int(cm.group(2))
+            villages[vid] = VillageData(id=vid, name=vname or f"Aldeia {vid}", x=x, y=y)
+
+    # Fallback 2: Extrai todas as aldeias através de seletores e links genéricos
+    if not villages:
+        extracted = extract_all_villages(html)
+        if extracted:
+            villages.update(extracted)
+
+    return villages
+
+
+def extract_player_worlds(html: str, domain: str = "tribalwars.com.pt") -> List[str]:
+    """
+    Extrai a lista de subdomínios de mundos onde o utilizador possui conta/aldeias ativas.
+    """
+    if not html:
+        return []
+    
+    worlds = set()
+    # Padrão: https://pt117.tribalwars.com.pt ou links com mundo
+    pattern = re.compile(
+        r'https?://(?P<world>[a-z0-9_]+)\.' + re.escape(domain),
+        re.IGNORECASE,
+    )
+    for m in pattern.finditer(html):
+        w = m.group("world").lower()
+        if w not in ("www", "forum", "help", "blog", "api"):
+            worlds.add(w)
+
+    # Padrão: data-world="pt117" ou class="world_button... data-id="pt117"
+    attr_pattern = re.compile(r'data-world=["\'](?P<world>[a-z0-9_]+)["\']', re.I)
+    for m in attr_pattern.finditer(html):
+        w = m.group("world").lower()
+        if w not in ("www", "forum", "help"):
+            worlds.add(w)
+
+    return sorted(list(worlds))
 
 
 

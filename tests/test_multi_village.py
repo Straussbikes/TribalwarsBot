@@ -68,20 +68,96 @@ class TestMultiVillage(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(v_fortaleza.x, 600)
         self.assertEqual(v_fortaleza.y, 500)
 
-    @patch.object(TribalAccount, "get_screen", new_callable=AsyncMock)
-    async def test_switch_village_context(self, mock_get_screen):
-        """Valida que switch_village atualiza o village_id ativo na conta e efetua requisição."""
-        account = TribalAccount(world="pt117", sid="dummy_sid")
-        account.villages[6810] = VillageData(id=6810, name="Aldeia 1", x=571, y=485)
-        account.villages[7290] = VillageData(id=7290, name="Aldeia 2", x=572, y=486)
-        account.current_village_id = 6810
+    def test_parse_overview_villages_production_table(self):
+        """Valida a extração de recursos em lote a partir do ecrã overview_villages."""
+        from engine.utils.parsers import parse_overview_villages
+        html = """
+        <table id="production_table">
+            <tr data-id="101">
+                <td><a href="game.php?village=101&screen=overview">Aldeia Alpha (500|500) K55</a></td>
+                <td class="points">1.250</td>
+                <td><span class="wood">5.400</span> <span class="stone">4.200</span> <span class="iron">3.100</span></td>
+                <td><span class="storage">10.000</span></td>
+                <td><a href="game.php?village=101&screen=farm">150/240</a></td>
+            </tr>
+            <tr data-id="102">
+                <td><a href="game.php?village=102&screen=overview">Aldeia Beta (501|500) K55</a></td>
+                <td class="points">850</td>
+                <td><span class="wood">2.100</span> <span class="stone">1.950</span> <span class="iron">800</span></td>
+                <td><span class="storage">6.000</span></td>
+                <td><a href="game.php?village=102&screen=farm">80/150</a></td>
+            </tr>
+        </table>
+        """
+        vills = parse_overview_villages(html)
+        self.assertEqual(len(vills), 2)
+        self.assertIn(101, vills)
+        self.assertIn(102, vills)
 
-        switched = await account.switch_village(7290)
-        self.assertEqual(account.current_village_id, 7290)
-        self.assertEqual(switched.id, 7290)
-        self.assertEqual(switched.name, "Aldeia 2")
-        mock_get_screen.assert_awaited_once_with("overview", village_id=7290, apply_jitter=True)
+        v1 = vills[101]
+        self.assertEqual(v1.id, 101)
+        self.assertEqual(v1.coordinates, "500|500")
+        self.assertEqual(v1.points, 1250)
+        self.assertEqual(v1.resources.wood, 5400)
+        self.assertEqual(v1.resources.stone, 4200)
+        self.assertEqual(v1.resources.iron, 3100)
+        self.assertEqual(v1.resources.storage_max, 10000)
+        self.assertEqual(v1.resources.pop, 150)
+        self.assertEqual(v1.resources.pop_max, 240)
+
+        v2 = vills[102]
+        self.assertEqual(v2.id, 102)
+        self.assertEqual(v2.resources.wood, 2100)
+        self.assertEqual(v2.resources.storage_max, 6000)
+
+    def test_extract_player_worlds(self):
+        """Valida a extração de subdomínios dos mundos do jogador a partir do portal."""
+        from engine.utils.parsers import extract_player_worlds
+        portal_html = """
+        <div class="world_selection">
+            <a class="world_button_active" href="https://pt117.tribalwars.com.pt/game.php">Mundo 117</a>
+            <a class="world_button_active" href="https://pt118.tribalwars.com.pt/game.php">Mundo 118</a>
+            <a class="world_button_active" data-world="pt119" href="https://pt119.tribalwars.com.pt/game.php">Mundo 119</a>
+        </div>
+        """
+        worlds = extract_player_worlds(portal_html, "tribalwars.com.pt")
+        self.assertIn("pt117", worlds)
+        self.assertIn("pt118", worlds)
+        self.assertIn("pt119", worlds)
+        self.assertNotIn("www", worlds)
+
+    @patch.object(TribalAccount, "get_screen", new_callable=AsyncMock)
+    async def test_fetch_all_villages_overview(self, mock_get_screen):
+        """Valida que fetch_all_villages_overview atualiza as aldeias da conta sem mudar current_village_id."""
+        mock_get_screen.return_value = """
+        <table id="production_table">
+            <tr data-id="6810">
+                <td><a href="game.php?village=6810&screen=overview">Aldeia 1 (571|485)</a></td>
+                <td class="points">500</td>
+                <td><span class="wood">1.500</span> <span class="stone">1.200</span> <span class="iron">900</span></td>
+                <td><span class="storage">2.000</span></td>
+                <td>200/400</td>
+            </tr>
+            <tr data-id="7290">
+                <td><a href="game.php?village=7290&screen=overview">Aldeia 2 (572|486)</a></td>
+                <td class="points">300</td>
+                <td><span class="wood">800</span> <span class="stone">600</span> <span class="iron">400</span></td>
+                <td><span class="storage">1.500</span></td>
+                <td>100/250</td>
+            </tr>
+        </table>
+        """
+        account = TribalAccount(world="pt117", sid="dummy_sid")
+        account.current_village_id = 6810
+        account.villages[6810] = VillageData(id=6810, name="Aldeia 1", x=571, y=485)
+
+        vills = await account.fetch_all_villages_overview()
+        self.assertEqual(len(vills), 2)
+        self.assertEqual(account.current_village_id, 6810)  # Preserva aldeia ativa
+        self.assertEqual(account.villages[6810].resources.wood, 1500)
+        self.assertEqual(account.villages[7290].resources.wood, 800)
 
 
 if __name__ == "__main__":
     unittest.main()
+

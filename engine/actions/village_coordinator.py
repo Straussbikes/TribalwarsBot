@@ -100,20 +100,17 @@ class MultiVillageCoordinator:
         if not account or not account.sid:
             return []
 
-        villages_list = list(account.villages.values())
-        if not villages_list and account.current_village:
-            villages_list = [account.current_village]
+        # 1. Sincronização em lote via overview_villages (modo produção)
+        try:
+            await account.fetch_all_villages_overview()
+        except Exception as e:
+            logger.debug(f"[{account.world}] Erro ao consultar overview_villages: {e}")
 
-        for v in villages_list:
-            try:
-                # Se for a aldeia ativa, atualiza diretamente
-                if account.current_village_id == v.id:
-                    await account.refresh_village_details()
-                else:
-                    # Consulta dados via tela principal passando o village_id
-                    await account.get_screen("main", village_id=v.id)
-            except Exception as e:
-                logger.debug(f"[{account.world}] Erro suave ao sincronizar aldeia {v.id}: {e}")
+        # 2. Atualiza detalhes da aldeia ativa (tropas da Praça de Reunião e recursos)
+        try:
+            await account.refresh_village_details()
+        except Exception as e:
+            logger.debug(f"[{account.world}] Erro ao atualizar detalhes da aldeia ativa: {e}")
 
         self.last_sync_time = time.time()
         return list(account.villages.values())

@@ -20,7 +20,7 @@ class TestProfileManager(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.profiles_path = Path(self.temp_dir.name) / "test_profiles.json"
+        self.profiles_dir = Path(self.temp_dir.name) / "profiles"
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -35,36 +35,44 @@ class TestProfileManager(unittest.TestCase):
         restored = deobfuscate_password(obfuscated)
         self.assertEqual(original, restored)
 
-    def test_create_and_save_profile(self):
-        """Valida a criação e persistência atómica de um perfil em disco."""
-        manager = ProfileManager(self.profiles_path)
+    def test_create_and_save_profile_isolated_files(self):
+        """Valida a criação e persistência atómica de um perfil em ficheiro individual profiles/{id}.json."""
+        manager = ProfileManager(self.profiles_dir)
         prof = AccountProfile(
             id="pt117_main",
             name="Conta Principal",
-            world="pt117",
-            sid="test_sid_123",
+            world_domain="pt117.tribalwars.com.pt",
+            session_cookie="test_sid_123",
+            village_id=6810,
             username="jogador_pt",
             proxy="http://1.2.3.4:8080",
+            build_order_strategy="rush_resources",
             is_active=True,
         )
         prof.password = "secret_pass"
 
         manager.add_or_update_profile(prof)
-        self.assertTrue(self.profiles_path.exists())
+        profile_file = self.profiles_dir / "pt117_main.json"
+        self.assertTrue(profile_file.exists())
 
         # Recarrega noutra instância
-        manager2 = ProfileManager(self.profiles_path)
+        manager2 = ProfileManager(self.profiles_dir)
         loaded = manager2.get_profile("pt117_main")
         self.assertIsNotNone(loaded)
         self.assertEqual(loaded.name, "Conta Principal")
         self.assertEqual(loaded.world, "pt117")
+        self.assertEqual(loaded.domain, "tribalwars.com.pt")
+        self.assertEqual(loaded.session_cookie, "test_sid_123")
+        self.assertEqual(loaded.sid, "test_sid_123")
+        self.assertEqual(loaded.village_id, 6810)
+        self.assertEqual(loaded.build_order_strategy, "rush_resources")
         self.assertEqual(loaded.password, "secret_pass")
         self.assertEqual(loaded.proxy, "http://1.2.3.4:8080")
         self.assertTrue(loaded.is_active)
 
     def test_switch_active_profile(self):
         """Valida a alternância de perfil ativo com desativação do anterior."""
-        manager = ProfileManager(self.profiles_path)
+        manager = ProfileManager(self.profiles_dir)
         p1 = AccountProfile(id="p1", name="Conta 1", world="pt117", is_active=True)
         p2 = AccountProfile(id="p2", name="Conta 2", world="pt118", is_active=False)
         manager.add_or_update_profile(p1)
@@ -78,15 +86,18 @@ class TestProfileManager(unittest.TestCase):
         self.assertTrue(manager.get_profile("p2").is_active)
 
     def test_delete_profile(self):
-        """Valida a remoção segura de um perfil."""
-        manager = ProfileManager(self.profiles_path)
+        """Valida a remoção segura de um perfil e eliminação do ficheiro JSON."""
+        manager = ProfileManager(self.profiles_dir)
         p = AccountProfile(id="temp", name="Temporária")
         manager.add_or_update_profile(p)
         self.assertIn("temp", manager.profiles)
+        self.assertTrue((self.profiles_dir / "temp.json").exists())
 
         manager.delete_profile("temp")
         self.assertNotIn("temp", manager.profiles)
+        self.assertFalse((self.profiles_dir / "temp.json").exists())
 
 
 if __name__ == "__main__":
     unittest.main()
+

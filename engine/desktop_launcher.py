@@ -98,109 +98,24 @@ class DesktopApp:
         async def _run():
             cfg = load_config()
             scheduler = TaskScheduler()
-            account = None
-
-            if cfg.sid and cfg.sid.strip():
-                account = TribalAccount(
-                    world=cfg.world,
-                    sid=cfg.sid,
-                    domain=cfg.domain,
-                    proxy=cfg.proxy,
-                )
-                try:
-                    await account.init_session()
-                except Exception as e:
-                    logger.warning(f"Sessão não pôde ser inicializada no arranque: {e}")
-
-            mb_mgr = MainBuildingManager(default_max_queue=cfg.building.max_queue)
-            place_mgr = PlaceManager()
-            farm_mgr = FarmManager()
-            recruit_mgr = RecruitmentManager()
-
-            # Agenda rotinas ativas
-            if account and cfg.building.template:
-                build_plan = cfg.get_active_build_plan()
-                mb_mgr.schedule_auto_build(
-                    scheduler=scheduler,
-                    account=account,
-                    plan=build_plan,
-                    max_queue=cfg.building.max_queue,
-                    interval_seconds=cfg.building.interval_seconds,
-                    enabled_check=lambda: cfg.building.enabled,
-                )
-
-            if account and cfg.farm.enabled:
-                farm_mgr.schedule_auto_farm(
-                    scheduler=scheduler,
-                    account=account,
-                    farm_config=cfg.farm,
-                )
-
-            if account and cfg.recruitment.enabled:
-                recruit_mgr.schedule_auto_recruit(
-                    scheduler=scheduler,
-                    account=account,
-                    recruit_config=cfg.recruitment,
-                    bot_config=cfg,
-                )
-
-            # Agendamento do Keep-Alive para manter a sessão sempre ativa
-            if account and cfg.auth.keep_alive:
-                from engine.core.models import TaskPriority
-
-                async def keep_alive_task():
-                    try:
-                        if account and account.sid:
-                            await account.refresh_state()
-                            logger.debug(f"[{cfg.world}] Pulso de Keep-Alive executado com sucesso.")
-                    except Exception as e:
-                        logger.debug(f"[{cfg.world}] Aviso no pulso de Keep-Alive: {e}")
-                    finally:
-                        scheduler.schedule_human_like(
-                            name="SessionKeepAlive",
-                            priority=TaskPriority.BACKGROUND,
-                            action=keep_alive_task,
-                            base_delay=cfg.auth.keep_alive_interval_minutes * 60.0,
-                            jitter_sigma=30.0,
-                        )
-
-                scheduler.schedule(
-                    name="SessionKeepAlive",
-                    priority=TaskPriority.BACKGROUND,
-                    action=keep_alive_task,
-                    delay_seconds=cfg.auth.keep_alive_interval_minutes * 60.0,
-                )
-                logger.info(f"Keep-Alive de sessão ativado a cada ~{cfg.auth.keep_alive_interval_minutes:.0f}min.")
-
-            # Sincronização inicial de tropas e recursos
-            if account and account.sid:
-                async def initial_sync_task():
-                    try:
-                        v = await account.refresh_state()
-                        p_mgr = PlaceManager()
-                        await p_mgr.get_state(account, village_id=v.id)
-                        logger.info(f"[{cfg.world}] Sincronização inicial de tropas e recursos concluída com sucesso.")
-                    except Exception as e:
-                        logger.debug(f"[{cfg.world}] Falha suave na sincronização inicial: {e}")
-
-                scheduler.schedule(
-                    name="InitialStateSync",
-                    priority=TaskPriority.REFRESH,
-                    action=initial_sync_task,
-                    delay_seconds=1.0,
-                )
-
-            # Inicia scheduler
             scheduler.start()
 
-
-            # Cria Contexto Sidecar
+            # Cria Contexto Sidecar em modo Standby / Offline
             self.context = EngineContext(
                 scheduler=scheduler,
                 config=cfg,
-                account=account,
+                account=None,
             )
+            # Assegura que todas as contas arrancam em modo Offline na base de dados SQLite
+            self.context.profile_manager.deactivate_all()
+            self.context.active_profile_id = None
             self.context.on_renew_session = self.navigate_to_login
+            self.context.on_captcha_alert = self.handle_captcha_alert
+
+            async def _on_bot_protect_alert(err: BotProtectionError):
+                await self.context.notify_captcha_detected(world=cfg.world, html_snippet=err.html_snippet)
+
+            scheduler.on_bot_protection(_on_bot_protect_alert)
 
             # Inicia Servidor FastAPI
             self.server = await start_sidecar_server(
@@ -216,6 +131,20 @@ class DesktopApp:
             self.loop.run_until_complete(_run())
         except Exception as e:
             logger.error(f"Exceção no motor em background: {e}")
+
+    def handle_captcha_alert(self, world: str, url: str):
+        """Notifica o utilizador e restaura/foca a janela desktop quando é detetado um captcha."""
+        logger.critical("=" * 65)
+        logger.critical(f"🚨 [ALERTA ANTI-BOT] Desafio Captcha detetado no mundo {world.upper()}!")
+        logger.critical(f"👉 URL de resolução: {url}")
+        logger.critical("👉 Todas as rotinas foram pausadas automaticamente para proteger a conta.")
+        logger.critical("👉 Resolva o teste na interface e clique em Retomar.")
+        logger.critical("=" * 65)
+        if self.window:
+            try:
+                self.window.restore()
+            except Exception:
+                pass
 
     def navigate_to_login(self):
         """Redireciona a janela atual para a página de login do Tribal Wars."""
@@ -328,6 +257,25 @@ class DesktopApp:
             if not is_in_game:
                 continue
 
+            # Deteção de Captcha / Desafio de verificação humana ativo
+            is_on_captcha = (
+                "bot_protect" in curr_url
+                or "screen=bot_protect" in curr_url
+                or "bot_check" in curr_url
+            )
+            if not is_on_captcha:
+                # Também inspeciona o DOM para evitar fecho durante o preenchimento do captcha
+                has_captcha_dom = self._js_safe(
+                    "Boolean(document.getElementById('bot_protect') || document.querySelector('form[action*=\"bot_protect\"]') || document.querySelector('.bot_check') || document.querySelector('#bot_check'))"
+                )
+                if has_captcha_dom is True or has_captcha_dom == "true" or has_captcha_dom == 1:
+                    is_on_captcha = True
+
+            if is_on_captcha:
+                logger.info(f"[Login/Captcha] ⚠️ Ecrã de verificação humana ativo em {curr_url[:70]}... Aguardando resolução manual do utilizador.")
+                time.sleep(2.5)
+                continue
+
             logger.info(f"[Login] Entrada no jogo detetada! URL: {curr_url[:80]}")
 
             # Deteta automaticamente o mundo onde o utilizador entrou (ex: pt117 ou pt114)
@@ -417,6 +365,33 @@ class DesktopApp:
         from engine.config.settings import save_config_sid
         save_config_sid(sid)
         self.context.config.sid = sid
+
+        # Sincroniza e persiste o perfil de conta no ProfileManager
+        if hasattr(self.context, "profile_manager") and self.context.profile_manager:
+            from engine.core.profile_manager import AccountProfile
+            p_id = self.context.active_profile_id or "default_main"
+            existing = self.context.profile_manager.get_profile(p_id)
+            if existing:
+                existing.session_cookie = sid
+                existing.world_domain = f"{self.context.config.world}.{self.context.config.domain}"
+                existing.world = self.context.config.world
+                existing.last_used = time.time()
+                existing.is_active = True
+                self.context.profile_manager.save_profile(existing)
+            else:
+                new_p = AccountProfile(
+                    id=p_id,
+                    name=f"Conta {self.context.config.world.upper()}",
+                    world_domain=f"{self.context.config.world}.{self.context.config.domain}",
+                    world=self.context.config.world,
+                    domain=self.context.config.domain,
+                    session_cookie=sid,
+                    last_used=time.time(),
+                    is_active=True,
+                )
+                self.context.profile_manager.save_profile(new_p)
+            self.context.active_profile_id = p_id
+
         if hasattr(self.context, "world_manager") and self.context.world_manager:
             inst = self.context.world_manager.get_instance(self.context.config.world)
             if inst:
@@ -431,6 +406,12 @@ class DesktopApp:
                 fut.result(timeout=10)
                 asyncio.run_coroutine_threadsafe(
                     self.context.account.refresh_state(), self.loop
+                )
+                asyncio.run_coroutine_threadsafe(
+                    self.context.account.fetch_all_villages_overview(), self.loop
+                )
+                asyncio.run_coroutine_threadsafe(
+                    self.context.account.discover_active_worlds(), self.loop
                 )
             except Exception as e:
                 logger.warning(f"Erro ao sincronizar nova sessão da conta: {e}")
@@ -451,6 +432,12 @@ class DesktopApp:
                 fut.result(timeout=10)
                 asyncio.run_coroutine_threadsafe(
                     account.refresh_state(), self.loop
+                )
+                asyncio.run_coroutine_threadsafe(
+                    account.fetch_all_villages_overview(), self.loop
+                )
+                asyncio.run_coroutine_threadsafe(
+                    account.discover_active_worlds(), self.loop
                 )
             except Exception as e:
                 logger.warning(f"Erro ao inicializar nova conta: {e}")

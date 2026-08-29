@@ -27,12 +27,14 @@ from engine.utils.parsers import (
     extract_all_villages,
     extract_csrf_token,
     extract_game_data,
+    extract_player_worlds,
     extract_resources,
     extract_village_and_player,
     is_bot_protection_present,
     is_session_expired,
     parse_available_units,
     parse_building_levels,
+    parse_overview_villages,
 )
 
 from engine.utils.timing import get_click_jitter
@@ -247,7 +249,9 @@ class TribalAccount:
             )
 
 
-    def _update_state_from_html(self, html: str, url: str = "") -> None:
+    def _update_state_from_html(
+        self, html: str, url: str = "", requested_village_id: Optional[int] = None
+    ) -> None:
         """Extrai game_data, atualiza CSRF, recursos e informações de aldeia."""
         game_data = extract_game_data(html)
         if game_data:
@@ -269,36 +273,47 @@ class TribalAccount:
             if v_id not in self.villages:
                 self.villages[v_id] = v_data
             else:
+                # Preserva recursos, tropas e edifícios já conhecidos
                 curr_res = self.villages[v_id].resources
+                curr_troops = self.villages[v_id].troops
+                curr_blds = self.villages[v_id].buildings
                 self.villages[v_id] = v_data
                 self.villages[v_id].resources = curr_res
+                self.villages[v_id].troops = curr_troops
+                self.villages[v_id].buildings = curr_blds
+
+        # Identifica a aldeia que foi renderizada na resposta HTML
+        rendered_village_id = village.id if village else (requested_village_id or self.current_village_id)
 
         if village:
-            self.current_village_id = village.id
             if village.id not in self.villages:
                 self.villages[village.id] = village
 
-        # 3. Atualização dos Recursos da aldeia ativa
-        if self.current_village_id:
-            res = extract_resources(html, game_data)
-            if self.current_village_id in self.villages:
-                self.villages[self.current_village_id].resources = res
+            # Só altera current_village_id se não estiver definido ou se a requisição não foi para outra aldeia específica
+            if self.current_village_id is None or requested_village_id is None or requested_village_id == self.current_village_id:
+                self.current_village_id = village.id
 
-        # 4. Atualização das Tropas disponíveis na aldeia ativa
-        if self.current_village_id and self.current_village_id in self.villages:
+        # 3. Atualização dos Recursos da aldeia renderizada
+        if rendered_village_id:
+            res = extract_resources(html, game_data)
+            if rendered_village_id in self.villages:
+                self.villages[rendered_village_id].resources = res
+
+        # 4. Atualização das Tropas disponíveis na aldeia renderizada
+        if rendered_village_id and rendered_village_id in self.villages:
             try:
                 units = parse_available_units(html)
                 if any(units.values()):
-                    self.villages[self.current_village_id].troops = units
+                    self.villages[rendered_village_id].troops = units
             except Exception:
                 pass
 
-        # 5. Atualização dos Níveis de Edifícios da aldeia ativa
-        if self.current_village_id and self.current_village_id in self.villages:
+        # 5. Atualização dos Níveis de Edifícios da aldeia renderizada
+        if rendered_village_id and rendered_village_id in self.villages:
             try:
                 blds = parse_building_levels(html, game_data)
                 if blds:
-                    self.villages[self.current_village_id].buildings.update(blds)
+                    self.villages[rendered_village_id].buildings.update(blds)
             except Exception:
                 pass
 
@@ -416,7 +431,7 @@ class TribalAccount:
             )
 
             self._inspect_response(response, html)
-            self._update_state_from_html(html, str(response.url))
+            self._update_state_from_html(html, str(response.url), requested_village_id=village_id)
             return html
 
     async def post_action(
@@ -517,7 +532,7 @@ class TribalAccount:
             )
 
             self._inspect_response(response, html)
-            self._update_state_from_html(html, str(response.url))
+            self._update_state_from_html(html, str(response.url), requested_village_id=village_id)
             return html
 
     async def _refresh_state_internal(self) -> None:
@@ -540,7 +555,8 @@ class TribalAccount:
         Atualiza o estado completo da conta carregando o ecrã principal ('main').
         Retorna a VillageData atualizada com recursos e população.
         """
-        await self.get_screen("main", village_id=village_id, apply_jitter=False)
+        v_id = village_id or self.current_village_id
+        await self.get_screen("main", village_id=v_id, apply_jitter=False)
         if not self.current_village:
             raise ActionFailedError("Não foi possível carregar as informações da aldeia.")
         return self.current_village
@@ -551,6 +567,7 @@ class TribalAccount:
         Atualiza recursos e edifícios da aldeia selecionada.
         """
         logger.info(f"[{self.world}] A alternar contexto ativo para aldeia {village_id}...")
+        self.current_village_id = village_id
         await self.get_screen("overview", village_id=village_id, apply_jitter=True)
         self.current_village_id = village_id
         if village_id in self.villages:
@@ -566,4 +583,55 @@ class TribalAccount:
         if v_id and v_id in self.villages:
             return self.villages[v_id]
         return self.current_village or VillageData(id=v_id or 0)
+
+    async def fetch_all_villages_overview(self) -> Dict[int, VillageData]:
+        """
+        Consulta o ecrã 'overview_villages' (modo produção) para extrair em lote
+        todas as aldeias da conta e respetivos recursos, armazém e população.
+        """
+        try:
+            html = await self.get_screen(
+                "overview_villages",
+                extra_params={"mode": "prod"},
+                apply_jitter=False,
+            )
+            overview_vills = parse_overview_villages(html)
+            if overview_vills:
+                for vid, vdata in overview_vills.items():
+                    if vid in self.villages:
+                        if vdata.name:
+                            self.villages[vid].name = vdata.name
+                        if vdata.x and vdata.y:
+                            self.villages[vid].x = vdata.x
+                            self.villages[vid].y = vdata.y
+                        if vdata.points:
+                            self.villages[vid].points = vdata.points
+                        self.villages[vid].resources = vdata.resources
+                    else:
+                        self.villages[vid] = vdata
+                logger.info(
+                    f"[{self.world}] Sincronizadas {len(overview_vills)} aldeias via overview_villages."
+                )
+        except Exception as e:
+            logger.debug(f"[{self.world}] overview_villages indisponível ou suavemente falhada: {e}")
+        return self.villages
+
+    async def discover_active_worlds(self) -> List[str]:
+        """
+        Consulta o portal oficial do jogo para detetar quais mundos
+        o utilizador possui conta e aldeias criadas.
+        """
+        portal_url = f"https://{self.domain}/page/play"
+        discovered = [self.world]
+        try:
+            async with self._lock:
+                resp = await self.session.get(portal_url)
+                if resp.status_code == 200:
+                    found = extract_player_worlds(resp.text, domain=self.domain)
+                    for w in found:
+                        if w not in discovered:
+                            discovered.append(w)
+        except Exception as e:
+            logger.debug(f"[{self.world}] Falha suave ao descobrir mundos da conta: {e}")
+        return discovered
 

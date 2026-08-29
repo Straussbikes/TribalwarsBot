@@ -206,9 +206,63 @@ class SidecarApi {
     return await this.request("/api/map/farm", { method: "POST" });
   }
 
+  // --- Gestão de Perfis de Conta & Bloqueio Monousuário (Account Manager) ---
+  async getAccounts() {
+    return await this.request("/api/accounts");
+  }
+
+  async getAccount(accountId) {
+    return await this.request(`/api/accounts/${accountId}`);
+  }
+
+  async createAccount(data) {
+    return await this.request("/api/accounts", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateAccount(accountId, data) {
+    return await this.request(`/api/accounts/${accountId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteAccount(accountId) {
+    return await this.request(`/api/accounts/${accountId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async activateAccount(accountId) {
+    return await this.request(`/api/accounts/${accountId}/activate`, {
+      method: "POST",
+    });
+  }
+
+  async disconnectAccount() {
+    return await this.request("/api/accounts/disconnect", {
+      method: "POST",
+    });
+  }
+
+  // Aliases de compatibilidade
+  async getProfiles() {
+    return await this.getAccounts();
+  }
+
+  async switchProfile(profileId) {
+    return await this.activateAccount(profileId);
+  }
+
   // --- Multi-Mundo Simultâneo ---
   async getWorlds() {
     return await this.request("/api/worlds");
+  }
+
+  async discoverWorlds() {
+    return await this.request("/api/worlds/discover");
   }
 
   async registerWorld(world, sid, domain = "tribalwars.com.pt", proxy = null) {
@@ -373,6 +427,50 @@ class SidecarApi {
   async resetStats(world = null) {
     const url = world ? `/api/stats/reset?world=${encodeURIComponent(world)}` : "/api/stats/reset";
     return await this.request(url, { method: "POST" });
+  }
+
+  // --- Gestão de Contas & Multi-Conta Monousuário ---
+
+  async getAccounts() {
+    return await this.request("/api/accounts");
+  }
+
+  async createAccount(accountData) {
+    return await this.request("/api/accounts", {
+      method: "POST",
+      body: JSON.stringify(accountData),
+    });
+  }
+
+  async updateAccount(accountId, accountData) {
+    return await this.request(`/api/accounts/${accountId}`, {
+      method: "PUT",
+      body: JSON.stringify(accountData),
+    });
+  }
+
+  async deleteAccount(accountId) {
+    return await this.request(`/api/accounts/${accountId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async activateAccount(accountId) {
+    return await this.request(`/api/accounts/${accountId}/activate`, {
+      method: "POST",
+    });
+  }
+
+  async disconnectAccount() {
+    return await this.request("/api/accounts/disconnect", {
+      method: "POST",
+    });
+  }
+
+  async refreshVillage() {
+    return await this.request("/api/village/refresh", {
+      method: "POST",
+    });
   }
 }
 

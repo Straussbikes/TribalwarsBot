@@ -5,7 +5,7 @@ Testes Unitários para Validação de Proxies Residenciais/Dedicados
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from engine.core.profile_manager import test_proxy_connection
+import engine.core.profile_manager as pm
 
 
 class TestProxy(unittest.IsolatedAsyncioTestCase):
@@ -21,7 +21,7 @@ class TestProxy(unittest.IsolatedAsyncioTestCase):
         mock_get.return_value = mock_resp
 
 
-        res = await test_proxy_connection("http://user:pass@198.51.100.42:8080")
+        res = await pm.test_proxy_connection("http://user:pass@198.51.100.42:8080")
         self.assertEqual(res["status"], "online")
         self.assertEqual(res["ip"], "198.51.100.42")
         self.assertIn("latency_ms", res)
@@ -30,7 +30,7 @@ class TestProxy(unittest.IsolatedAsyncioTestCase):
     @patch("curl_cffi.requests.AsyncSession.get", side_effect=Exception("Connection refused"))
     async def test_proxy_connection_failure(self, mock_get):
         """Valida reporte correto de proxy offline em caso de falha de conexão."""
-        res = await test_proxy_connection("http://127.0.0.1:9999")
+        res = await pm.test_proxy_connection("http://127.0.0.1:9999")
         self.assertEqual(res["status"], "offline")
         self.assertIn("Connection refused", res["error"])
 

@@ -1,6 +1,6 @@
 {
   "world": "pt117",
-  "sid": "0%3Ac5be74638b3788c4f479b4c08c2a5a056d1e40ef08f70f416293ede777639f7f7da8ac078106b47cf68ae55c72e3ae45de5205304a64fb4111b7ebd5eca82c8d",
+  "sid": "0%3A73b17af147e7f09f1356cdc5f53129e17116e93c1d71da54533ffd78edb95f01961adc5626ae84e7fce76783c5bba526f1c3c517396d3676d7c96145f1016cc0",
   "building": {
     "_comentario": "Templates dispon\u00edveis: 'rush_resources' (recursos), 'balanced' (balanceado), 'military_rush' (tropas/cavalaria) ou 'custom'",
     "template": "custom",
@@ -1163,7 +1163,7 @@
   },
   "market": {
     "_comentario": "Balanceamento autom\u00e1tico de recursos entre aldeias e gest\u00e3o do mercado",
-    "enabled": true,
+    "enabled": false,
     "interval_minutes": 30.0,
     "auto_balance": true,
     "reserve_margin": 0.2,
@@ -1179,6 +1179,36 @@
     },
     "6662": {
       "category": "attack"
+    },
+    "45497": {
+      "category": "attack"
+    },
+    "44198": {
+      "category": "attack"
+    },
+    "33665": {
+      "category": "attack"
+    },
+    "37227": {
+      "category": "attack"
+    },
+    "37555": {
+      "category": "attack"
+    },
+    "39224": {
+      "category": "defense"
+    },
+    "46950": {
+      "category": "defense"
+    },
+    "33992": {
+      "category": "defense"
+    },
+    "36684": {
+      "category": "defense"
+    },
+    "35789": {
+      "category": "defense"
     }
   }
 }

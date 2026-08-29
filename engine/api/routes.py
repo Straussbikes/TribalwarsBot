@@ -81,6 +81,40 @@ class SwitchProfileRequest(BaseModel):
     profile_id: str
 
 
+class AccountCreateRequest(BaseModel):
+    name: str
+    world_domain: Optional[str] = None
+    world: Optional[str] = "pt117"
+    domain: Optional[str] = "tribalwars.com.pt"
+    village_id: Optional[int] = None
+    session_cookie: Optional[str] = ""
+    sid: Optional[str] = None
+    build_order_strategy: Optional[str] = "rush_resources"
+    building_template: Optional[str] = None
+    farm_presets: Optional[Dict[str, Any]] = None
+    recruitment_models: Optional[Dict[str, Any]] = None
+    proxy: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+
+class AccountUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    world_domain: Optional[str] = None
+    world: Optional[str] = None
+    domain: Optional[str] = None
+    village_id: Optional[int] = None
+    session_cookie: Optional[str] = None
+    sid: Optional[str] = None
+    build_order_strategy: Optional[str] = None
+    building_template: Optional[str] = None
+    farm_presets: Optional[Dict[str, Any]] = None
+    recruitment_models: Optional[Dict[str, Any]] = None
+    proxy: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+
 class AddFarmTargetRequest(BaseModel):
     x: int
     y: int
@@ -318,6 +352,47 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         res = await context.refresh_village_data()
         return res
 
+    # --- Gestão de Perfis de Conta & Bloqueio Monousuário (Single-Active Profile Lock) ---
+
+    @router.get("/accounts")
+    def get_accounts():
+        """Lista todas as contas registadas no sistema."""
+        return {"accounts": context.list_accounts()}
+
+    @router.post("/accounts")
+    def create_account(payload: AccountCreateRequest):
+        """Cria um novo perfil de conta."""
+        return context.create_account(payload.model_dump(exclude_unset=True))
+
+    @router.get("/accounts/{account_id}")
+    def get_account(account_id: str):
+        """Obtém detalhes de uma conta específica."""
+        acc = context.get_account(account_id)
+        if not acc:
+            raise HTTPException(status_code=404, detail="Conta não encontrada.")
+        return acc
+
+    @router.put("/accounts/{account_id}")
+    def update_account(account_id: str, payload: AccountUpdateRequest):
+        """Atualiza configurações de uma conta existente."""
+        return context.update_account(account_id, payload.model_dump(exclude_unset=True))
+
+    @router.delete("/accounts/{account_id}")
+    def delete_account(account_id: str):
+        """Remove o perfil da conta."""
+        return context.delete_account(account_id)
+
+    @router.post("/accounts/{account_id}/activate")
+    async def activate_account(account_id: str):
+        """Para a conta em execução, carrega o perfil selecionado e inicia o motor."""
+        return await context.activate_account(account_id)
+
+    @router.post("/accounts/disconnect")
+    async def disconnect_account():
+        """Para o scheduler e liberta a sessão ativa, regressando ao Hub de Contas."""
+        return await context.disconnect_account()
+
+    # Aliases de compatibilidade legada
     @router.get("/profiles")
     async def list_profiles():
         """Lista todos os perfis de conta configurados."""
@@ -530,6 +605,11 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         """Lista todos os mundos sob gestão concorrente do orquestrador."""
         return {"worlds": context.list_worlds()}
 
+    @router.get("/worlds/discover")
+    async def discover_worlds():
+        """Descobre todos os mundos onde o utilizador tem aldeia criada."""
+        return await context.discover_player_worlds()
+
     @router.post("/worlds/register", response_model=ActionResponse)
     async def register_world(payload: WorldRegisterRequest):
         """Regista e inicializa um novo mundo em paralelo."""
@@ -553,6 +633,20 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
     async def get_account_villages():
         """Lista detalhada de todas as aldeias com recursos, população e categorias."""
         return await context.sync_and_get_all_villages()
+
+    @router.post("/account/switch-village", response_model=ActionResponse)
+    async def switch_active_village(payload: SwitchVillageRequest):
+        """Alterna a aldeia ativa da conta no mundo atual."""
+        if not context.account:
+            return ActionResponse(status="error", message="Conta não inicializada.")
+        try:
+            v_data = await context.account.switch_village(payload.village_id)
+            status = context.get_status_dict()
+            context.broadcast_sync("STATUS_UPDATE", status)
+            context.broadcast_sync("VILLAGE_UPDATED", status)
+            return ActionResponse(status="success", message=f"Contexto alternado para a aldeia '{v_data.name}' ({v_data.coordinates}).")
+        except Exception as e:
+            return ActionResponse(status="error", message=str(e))
 
     @router.post("/account/village/category", response_model=ActionResponse)
     def set_village_category(payload: VillageCategoryRequest):
@@ -784,6 +878,11 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
     def get_network_requests(limit: int = 50):
         """Retorna histórico de requisições HTTP efetuadas pelo bot com telemetria."""
         return context.get_network_requests(limit=limit)
+
+    @router.post("/village/refresh")
+    async def refresh_village_details():
+        """Atualiza ativamente os dados da aldeia ativa, recursos e tropas."""
+        return await context.refresh_village_data()
 
     return router
 

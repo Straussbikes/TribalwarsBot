@@ -25,7 +25,7 @@ from engine.config.settings import BotConfig, load_config
 from engine.core.account import TribalAccount
 from engine.core.models import TaskPriority
 from engine.core.multi_world import MultiWorldManager, WorldInstance
-from engine.core.profile_manager import ProfileManager
+from engine.core.profile_manager import AccountProfile, ProfileManager
 from engine.core.scheduler import TaskScheduler
 from engine.core.stats import StatsTracker
 
@@ -60,7 +60,6 @@ class EngineContext:
         self.market_manager = MarketManager()
         self._map_cache: Dict[str, Tuple[float, Any]] = {}
         self.map_manager = MapManager()
-        self.profile_manager = ProfileManager()
         self.arbitrage_manager = EconomicArbitrageManager(
             main_building_manager=self.main_building_manager,
             recruitment_manager=self.recruitment_manager,
@@ -72,6 +71,10 @@ class EngineContext:
             farm_manager=self.farm_manager,
             market_manager=self.market_manager,
         )
+        # Gestor de Perfis e Base de Dados SQLite (Single-Active Session)
+        self.profile_manager = ProfileManager()
+        self._account_lock = asyncio.Lock()
+        self.active_profile_id: Optional[str] = None
 
         # Orquestrador Multi-Mundo Concorrente
         self.world_manager = MultiWorldManager(on_captcha_alert=self.notify_captcha_detected)
@@ -88,7 +91,6 @@ class EngineContext:
 
         # Cache de mapa
         self._map_cache: Dict[str, Tuple[float, MapData]] = {}
-
 
         # Clientes WebSocket ativos
         self.active_websockets: Set[WebSocket] = set()
@@ -164,13 +166,26 @@ class EngineContext:
 
     async def notify_captcha_detected(self, world: str, html_snippet: str = "") -> None:
         """Notifica o frontend de que um desafio anti-bot requer atenção do utilizador."""
+        url = f"https://{world}.{self.config.domain}/game.php?screen=bot_protect"
         alert_data = {
             "world": world,
             "detected_at": time.time(),
-            "url": f"https://{world}.{self.config.domain}/game.php?screen=bot_protect&page=mobile",
+            "url": url,
             "snippet": html_snippet[:600] if html_snippet else "",
         }
         self.last_captcha_alert = alert_data
+        logger.critical("=" * 65)
+        logger.critical(f"🚨 [ALERTA ANTI-BOT] Desafio Captcha detetado no mundo {world.upper()}!")
+        logger.critical(f"👉 URL: {url}")
+        logger.critical("👉 O motor foi pausado automaticamente para proteger a conta.")
+        logger.critical("=" * 65)
+
+        if hasattr(self, "on_captcha_alert") and callable(self.on_captcha_alert):
+            try:
+                self.on_captcha_alert(world, url)
+            except Exception as e:
+                logger.debug(f"Erro ao acionar on_captcha_alert: {e}")
+
         await self.broadcast("CAPTCHA_ALERT", alert_data)
         logger.critical(f"Alerta de Captcha transmitido para {len(self.active_websockets)} clientes WebSocket.")
 
@@ -452,6 +467,12 @@ class EngineContext:
 
         # Lista detalhada de aldeias com categoria e fallback
         villages_list = []
+        total_resources_dict = {
+            "wood": 0, "stone": 0, "iron": 0,
+            "storage_max": 0, "pop": 0, "pop_max": 0, "free_pop": 0,
+        }
+        total_troops_dict = {}
+
         if self.account:
             vill_objs = list(self.account.villages.values())
             if not vill_objs and self.account.current_village:
@@ -463,6 +484,24 @@ class EngineContext:
                 v_dict["category"] = cat_val
                 villages_list.append(v_dict)
 
+                if v.resources:
+                    total_resources_dict["wood"] += v.resources.wood
+                    total_resources_dict["stone"] += v.resources.stone
+                    total_resources_dict["iron"] += v.resources.iron
+                    total_resources_dict["storage_max"] += v.resources.storage_max
+                    total_resources_dict["pop"] += v.resources.pop
+                    total_resources_dict["pop_max"] += v.resources.pop_max
+                    total_resources_dict["free_pop"] += v.resources.free_pop
+                v_troops = getattr(v, "troops", {}) or {}
+                for u_name, u_qty in v_troops.items():
+                    total_troops_dict[u_name] = total_troops_dict.get(u_name, 0) + (u_qty or 0)
+
+        # Se só temos 1 aldeia ou os totais forem 0, usa os recursos da aldeia atual
+        if total_resources_dict["storage_max"] == 0 and resources_dict:
+            total_resources_dict = resources_dict.copy()
+        if not total_troops_dict and troops_dict:
+            total_troops_dict = troops_dict.copy()
+
         # Balanceamento de recursos entre aldeias
         balance_summary = None
         if self.account and len(self.account.villages) > 0:
@@ -471,16 +510,18 @@ class EngineContext:
         return {
             "engine": {
                 "uptime_seconds": round(self.uptime_seconds, 1),
-                "is_running": self.scheduler.is_running,
-                "is_paused": self.scheduler.is_paused,
-                "queue_size": self.scheduler.queue_size,
+                "is_running": self.scheduler.is_running if self.scheduler else False,
+                "is_paused": self.scheduler.is_paused if self.scheduler else False,
+                "queue_size": self.scheduler.queue_size if self.scheduler else 0,
             },
+            "active_profile_id": self.active_profile_id,
+            "accounts": self.profile_manager.list_profiles(),
             "active_world": self.world_manager.active_world or self.config.world,
             "worlds": self.world_manager.list_worlds(),
             "account": {
                 "world": self.config.world,
                 "domain": self.config.domain,
-                "has_sid": bool(self.config.sid),
+                "has_sid": bool(self.account and self.account.sid),
                 "proxy": self.config.proxy,
                 "player": player_data,
                 "village": village_data,
@@ -489,6 +530,8 @@ class EngineContext:
             "resource_balance": balance_summary,
             "resources": resources_dict,
             "troops": troops_dict,
+            "total_resources": total_resources_dict,
+            "total_troops": total_troops_dict,
             "modules": {
                 "building": {
                     "enabled": self.config.building.enabled,
@@ -649,38 +692,199 @@ class EngineContext:
             logger.error(f"Erro ao alternar para aldeia {village_id}: {e}")
             return {"status": "error", "message": str(e)}
 
-    def list_profiles(self) -> List[Dict[str, Any]]:
-        """Lista todos os perfis guardados."""
+    # --- Gestor de Perfis de Conta & Bloqueio Monousuário (Single-Active Profile Lock) ---
+
+    def list_accounts(self) -> List[Dict[str, Any]]:
+        """Lista todas as contas registadas no sistema."""
         return self.profile_manager.list_profiles()
 
-    async def switch_profile(self, profile_id: str) -> Dict[str, Any]:
-        """Alterna o perfil de conta ativo."""
-        target = self.profile_manager.set_active_profile(profile_id)
-        if not target:
-            return {"status": "error", "message": f"Perfil '{profile_id}' não encontrado."}
+    def get_account(self, account_id: str) -> Optional[Dict[str, Any]]:
+        """Obtém detalhes de uma conta específica."""
+        prof = self.profile_manager.get_profile(account_id)
+        return prof.to_dict(include_plain_password=False) if prof else None
 
-        # Atualiza a configuração ativa
-        self.config.world = target.world
-        self.config.domain = target.domain
-        self.config.sid = target.sid
-        self.config.proxy = target.proxy
-        self.config.building.template = target.building_template
-        if target.username:
-            self.config.auth.username = target.username
-        if target.password:
-            self.config.auth.password = target.password
+    def create_account(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Cria um novo perfil de conta e guarda isoladamente em profiles/{id}.json."""
+        prof = AccountProfile.from_dict(data)
+        self.profile_manager.save_profile(prof)
+        self.broadcast_sync("ACCOUNTS_UPDATED", {"accounts": self.profile_manager.list_profiles()})
+        return {"status": "success", "message": f"Conta '{prof.name}' criada com sucesso.", "account": prof.to_dict()}
 
-        # Atualiza a conta de jogo
-        if self.account:
-            self.account.world = target.world
-            self.account.domain = target.domain
-            self.account.sid = target.sid
-            self.account.proxy = target.proxy
-            await self.account.init_session()
+    def update_account(self, account_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Atualiza configurações de uma conta existente."""
+        prof = self.profile_manager.get_profile(account_id)
+        if not prof:
+            return {"status": "error", "message": f"Conta com ID '{account_id}' não encontrada."}
 
-        self.broadcast_sync("PROFILE_SWITCHED", {"profile": target.to_dict()})
+        for k, v in data.items():
+            if hasattr(prof, k) and v is not None:
+                setattr(prof, k, v)
+        
+        prof.__post_init__()
+        self.profile_manager.save_profile(prof)
+
+        # Se for a conta ativa no momento, reflete na configuração e na sessão
+        if self.active_profile_id == account_id:
+            self.config.world = prof.world
+            self.config.domain = prof.domain
+            self.config.sid = prof.sid
+            self.config.proxy = prof.proxy
+            self.config.building.template = prof.build_order_strategy
+            if self.account:
+                self.account.world = prof.world
+                self.account.domain = prof.domain
+                self.account.sid = prof.sid
+                self.account.proxy = prof.proxy
+
+        self.broadcast_sync("ACCOUNTS_UPDATED", {"accounts": self.profile_manager.list_profiles()})
         self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
-        return {"status": "success", "message": f"Perfil '{target.name}' ativado com sucesso.", "profile": target.to_dict()}
+        return {"status": "success", "message": f"Conta '{prof.name}' atualizada com sucesso.", "account": prof.to_dict()}
+
+    async def delete_account(self, account_id: str) -> Dict[str, Any]:
+        """Remove o perfil da conta."""
+        if self.active_profile_id == account_id:
+            await self.disconnect_account()
+
+        success = self.profile_manager.delete_profile(account_id)
+        if success:
+            self.broadcast_sync("ACCOUNTS_UPDATED", {"accounts": self.profile_manager.list_profiles()})
+            return {"status": "success", "message": f"Conta '{account_id}' eliminada com sucesso."}
+        return {"status": "error", "message": f"Conta '{account_id}' não encontrada."}
+
+    async def activate_account(self, account_id: str) -> Dict[str, Any]:
+        """
+        Bloqueio Monousuário Estrito (Single-Active Session):
+        Para o agendador e limpa a sessão da conta anterior, instancia o novo cliente isolado
+        com as credenciais da conta selecionada e inicializa o motor.
+        """
+        async with self._account_lock:
+            target = self.profile_manager.get_profile(account_id)
+            if not target:
+                return {"status": "error", "message": f"Conta '{account_id}' não encontrada."}
+
+            logger.info(f"🔄 A ativar perfil de conta: '{target.name}' ({target.world.upper()})...")
+
+            # 1. Para e limpa o agendador da conta anterior
+            if self.scheduler:
+                try:
+                    await self.scheduler.stop()
+                    logger.info("Agendador anterior parado com sucesso.")
+                except Exception as e:
+                    logger.debug(f"Aviso ao parar agendador anterior: {e}")
+
+            # 2. Fecha e limpa a sessão HTTP anterior
+            if self.account:
+                try:
+                    await self.account.close()
+                    logger.info("Sessão HTTP da conta anterior encerrada.")
+                except Exception as e:
+                    logger.debug(f"Aviso ao fechar sessão HTTP anterior: {e}")
+
+            # 3. Marca este perfil como o único ativo
+            self.profile_manager.set_active_profile(account_id)
+            self.active_profile_id = account_id
+
+            # 4. Atualiza BotConfig com as definições do perfil
+            self.config.world = target.world
+            self.config.domain = target.domain
+            self.config.sid = target.sid or target.session_cookie
+            self.config.proxy = target.proxy
+            self.config.building.template = target.build_order_strategy or target.building_template
+            if target.username:
+                self.config.auth.username = target.username
+            if target.password:
+                self.config.auth.password = target.password
+
+            # 5. Instancia um novo agendador limpo para esta conta
+            self.scheduler = TaskScheduler(f"Scheduler-{target.world}")
+
+            async def on_bot_detected(err: Any):
+                logger.critical(f"⚠️ CAPTCHA detetado na conta {target.name}: {err}")
+                await self.notify_captcha_detected(err if isinstance(err, dict) else {"message": str(err)})
+
+            async def on_session_expired(err: Any):
+                logger.critical(f"⚠️ Sessão expirada na conta {target.name}: {err}")
+
+            self.scheduler.on_bot_protection(on_bot_detected)
+            self.scheduler.on_session_expired(on_session_expired)
+
+            # 6. Instancia uma nova conta TribalAccount
+            self.account = TribalAccount(
+                world=target.world,
+                sid=target.sid or target.session_cookie,
+                domain=target.domain,
+                proxy=target.proxy,
+            )
+
+            # 7. Atualiza orquestradores e instâncias de mundo
+            self.world_manager.instances.clear()
+            self.world_manager.instances[target.world] = WorldInstance(
+                world=target.world,
+                account=self.account,
+                scheduler=self.scheduler,
+                config=self.config,
+                coordinator=self.village_coordinator,
+                is_active=True,
+            )
+            self.world_manager.active_world = target.world
+
+            # 8. Inicializa a sessão HTTP e lê o estado da aldeia
+            try:
+                if self.account.sid:
+                    await self.account.init_session()
+                    await self.account.refresh_state()
+                    logger.info(f"Conta '{target.name}' conectada com sucesso ao mundo {target.world.upper()}.")
+            except Exception as e:
+                logger.warning(f"Aviso ao inicializar sessão de {target.name}: {e}")
+
+            status = self.get_status_dict()
+            self.broadcast_sync("ACCOUNT_ACTIVATED", {"account_id": account_id, "account": target.to_dict()})
+            self.broadcast_sync("STATUS_UPDATE", status)
+
+            return {
+                "status": "success",
+                "message": f"Conta '{target.name}' ({target.world.upper()}) ativada com sucesso.",
+                "account": target.to_dict(),
+                "status_data": status,
+            }
+
+    async def disconnect_account(self) -> Dict[str, Any]:
+        """Para a execução da conta ativa e liberta a sessão, regressando ao Hub inicial."""
+        async with self._account_lock:
+            if self.scheduler:
+                try:
+                    await self.scheduler.stop()
+                except Exception as e:
+                    logger.debug(f"Erro ao parar agendador: {e}")
+
+            if self.account:
+                try:
+                    await self.account.close()
+                except Exception as e:
+                    logger.debug(f"Erro ao fechar sessão: {e}")
+
+            # Desmarca qualquer perfil ativo
+            for p in self.profile_manager.profiles.values():
+                if p.is_active:
+                    p.is_active = False
+                    self.profile_manager.save_profile(p)
+
+            self.active_profile_id = None
+            self.account = None
+            self.world_manager.instances.clear()
+
+            status = self.get_status_dict()
+            self.broadcast_sync("ACCOUNT_DISCONNECTED", {})
+            self.broadcast_sync("STATUS_UPDATE", status)
+            logger.info("Conta desconectada com sucesso. Retornando ao Hub de Contas.")
+            return {"status": "success", "message": "Conta desconectada com sucesso."}
+
+    # Aliases de compatibilidade
+    def list_profiles(self) -> List[Dict[str, Any]]:
+        return self.list_accounts()
+
+    async def switch_profile(self, profile_id: str) -> Dict[str, Any]:
+        return await self.activate_account(profile_id)
 
     async def test_proxy(self, proxy_url: str) -> Dict[str, Any]:
         """Testa conectividade de um proxy residencial/dedicado."""
@@ -771,7 +975,20 @@ class EngineContext:
         self.broadcast_sync("WORLD_SWITCHED", {"active_world": world_key, "status": status})
         return {"status": "success", "message": f"Dashboard focado no mundo '{world_key}'.", "world": inst.to_dict()}
 
-    # --- Gestão Coordenada Multi-Aldeia & Categorização ---
+    async def discover_player_worlds(self) -> Dict[str, Any]:
+        """Descobre os mundos do utilizador via portal oficial onde a conta tem aldeias criadas."""
+        if not self.account or not self.account.sid:
+            return {"status": "error", "message": "Conta não conectada ou sem 'sid'.", "worlds": []}
+        try:
+            active_worlds = await self.account.discover_active_worlds()
+            if self.config.world and self.config.world not in active_worlds:
+                active_worlds.append(self.config.world)
+            return {"status": "success", "worlds": active_worlds}
+        except Exception as e:
+            logger.error(f"Erro ao descobrir mundos: {e}")
+            return {"status": "error", "message": str(e), "worlds": [self.config.world] if self.config.world else []}
+
+    # --- Rotas Multi-Aldeia & Categorização ---
 
     def set_village_category(self, village_id: int, category: str, world: Optional[str] = None) -> Dict[str, Any]:
         """Atribui categoria (attack, defense, balanced) a uma aldeia e persiste no config.json."""
@@ -798,13 +1015,19 @@ class EngineContext:
             return {"status": "success", "message": f"Aldeia {village_id} categorizada como '{category}'."}
         return {"status": "error", "message": "Falha ao definir categoria."}
 
-    async def sync_and_get_all_villages(self, world: Optional[str] = None) -> Dict[str, Any]:
+    async def sync_and_get_all_villages(self, world: Optional[str] = None, force_sync: bool = True) -> Dict[str, Any]:
         """Retorna visão detalhada de todas as aldeias da conta com categorias e recursos."""
         inst = self.world_manager.get_instance(world)
         acc = inst.account if inst else self.account
         cfg = inst.config if inst else self.config
         if not acc:
             return {"status": "error", "message": "Conta não inicializada."}
+
+        if force_sync and acc.sid:
+            try:
+                await self.village_coordinator.sync_all_villages(acc)
+            except Exception as e:
+                logger.debug(f"[{acc.world}] Erro suave ao sincronizar aldeias: {e}")
 
         villages_data = []
         vill_list = list(acc.villages.values())
@@ -818,6 +1041,10 @@ class EngineContext:
             villages_data.append(v_dict)
 
         balance = self.village_coordinator.calculate_resource_balance(acc)
+        status = self.get_status_dict()
+        self.broadcast_sync("STATUS_UPDATE", status)
+        self.broadcast_sync("VILLAGE_UPDATED", status)
+
         return {
             "world": acc.world,
             "count": len(villages_data),
@@ -1602,6 +1829,190 @@ class EngineContext:
         if self.account:
             return self.account.get_recent_requests(limit=limit)
         return []
+
+    # --- Gestão de Contas & Multi-Conta Monousuário (Single-Active Session) ---
+
+    def list_accounts(self) -> List[Dict[str, Any]]:
+        """Lista todas as contas guardadas a partir da base de dados SQLite."""
+        return self.profile_manager.list_profiles()
+
+    def create_account(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Cria um novo perfil de conta isolado na base de dados SQLite."""
+        prof = AccountProfile.from_dict(data)
+        prof.is_active = False  # Criada inicialmente offline
+        self.profile_manager.save_profile(prof)
+        self.broadcast_sync("ACCOUNTS_UPDATED", {"accounts": self.list_accounts()})
+        return {
+            "status": "success",
+            "message": f"Conta '{prof.name}' criada com sucesso.",
+            "account": prof.to_dict(include_plain_password=False),
+        }
+
+    def update_account(self, account_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Atualiza as configurações de uma conta na base de dados SQLite."""
+        prof = self.profile_manager.get_profile(account_id)
+        if not prof:
+            return {"status": "error", "message": f"Conta '{account_id}' não encontrada."}
+        
+        data["id"] = account_id
+        updated = AccountProfile.from_dict(data)
+        self.profile_manager.save_profile(updated)
+        self.broadcast_sync("ACCOUNTS_UPDATED", {"accounts": self.list_accounts()})
+        return {
+            "status": "success",
+            "message": f"Conta '{updated.name}' atualizada com sucesso.",
+            "account": updated.to_dict(include_plain_password=False),
+        }
+
+    def delete_account(self, account_id: str) -> Dict[str, Any]:
+        """Remove um perfil de conta da base de dados SQLite."""
+        if self.active_profile_id == account_id:
+            if self.scheduler:
+                self.scheduler.clear()
+            if self.account:
+                try:
+                    asyncio.create_task(self.account.close())
+                except Exception:
+                    pass
+                self.account = None
+            self.active_profile_id = None
+        
+        self.profile_manager.delete_profile(account_id)
+        self.broadcast_sync("ACCOUNTS_UPDATED", {"accounts": self.list_accounts()})
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success",
+            "message": f"Conta '{account_id}' eliminada com sucesso.",
+        }
+
+    async def activate_account(self, account_id: str) -> Dict[str, Any]:
+        """
+        Ativa uma conta específica com bloqueio monousuário estrito (Single-Active Session).
+        Encerra qualquer sessão anterior de forma limpa antes de instanciar a nova.
+        """
+        async with self._account_lock:
+            prof = self.profile_manager.get_profile(account_id)
+            if not prof:
+                return {"status": "error", "message": f"Conta com ID '{account_id}' não encontrada."}
+
+            logger.info(f"🔄 A ativar perfil monousuário: '{prof.name}' ({prof.world})")
+
+            # 1. Encerra a conta anterior se estiver a correr
+            if self.account:
+                try:
+                    if self.scheduler:
+                        self.scheduler.clear()
+                    await self.account.close()
+                except Exception as e:
+                    logger.warning(f"Aviso ao encerrar conta anterior: {e}")
+                self.account = None
+
+            # 2. Marca na base de dados SQLite a conta ativa (e desativa todas as outras)
+            self.profile_manager.set_active_profile(account_id)
+            self.active_profile_id = account_id
+
+            # 3. Atualiza BotConfig com as credenciais do perfil
+            self.config.world = prof.world
+            self.config.domain = prof.domain
+            self.config.sid = prof.sid or prof.session_cookie or ""
+            self.config.proxy = prof.proxy
+            if prof.build_order_strategy:
+                self.config.building.template = prof.build_order_strategy
+
+            # 4. Instancia e inicializa o cliente de rede da nova conta
+            account = TribalAccount(
+                world=prof.world,
+                sid=self.config.sid,
+                domain=prof.domain,
+                proxy=prof.proxy,
+            )
+            self.account = account
+
+            if self.config.sid:
+                try:
+                    await account.init_session()
+                    await account.refresh_state()
+                    await account.fetch_all_villages_overview()
+                    await account.discover_active_worlds()
+                except Exception as e:
+                    logger.warning(f"Aviso na inicialização da conta ativada '{prof.name}': {e}")
+
+            # 5. Configura e agenda as rotinas no Scheduler
+            if self.scheduler and self.config.sid:
+                self.scheduler.clear()
+                # Main building
+                if self.config.building.enabled:
+                    mb_mgr = MainBuildingManager(default_max_queue=self.config.building.max_queue)
+                    mb_mgr.schedule_auto_build(
+                        scheduler=self.scheduler,
+                        account=self.account,
+                        plan=self.config.get_active_build_plan(),
+                        max_queue=self.config.building.max_queue,
+                        interval_seconds=self.config.building.interval_seconds,
+                        enabled_check=lambda: self.config.building.enabled,
+                    )
+                # Farm
+                if self.config.farm.enabled:
+                    self.farm_manager.schedule_auto_farm(
+                        scheduler=self.scheduler,
+                        account=self.account,
+                        farm_config=self.config.farm,
+                    )
+                # Recruitment
+                if self.config.recruitment.enabled:
+                    self.recruitment_manager.schedule_auto_recruit(
+                        scheduler=self.scheduler,
+                        account=self.account,
+                        recruit_config=self.config.recruitment,
+                        bot_config=self.config,
+                    )
+                if not self.scheduler.is_running:
+                    self.scheduler.start()
+
+            # 6. Sincroniza instâncias no MultiWorldManager
+            self.world_manager.instances[prof.world] = WorldInstance(
+                world=prof.world,
+                account=self.account,
+                scheduler=self.scheduler,
+                config=self.config,
+                coordinator=self.village_coordinator,
+                is_active=True,
+            )
+            self.world_manager.active_world = prof.world
+
+            # 7. Transmite broadcast de estado
+            status_dict = self.get_status_dict()
+            self.broadcast_sync("ACCOUNT_ACTIVATED", {"account_id": account_id, "account": prof.to_dict()})
+            self.broadcast_sync("STATUS_UPDATE", status_dict)
+
+            return {
+                "status": "success",
+                "message": f"Conta '{prof.name}' ({prof.world}) ativada com sucesso.",
+                "account": prof.to_dict(include_plain_password=False),
+            }
+
+    async def disconnect_account(self) -> Dict[str, Any]:
+        """Desconecta a conta ativa, pausa agendadores e liberta recursos (Modo Offline)."""
+        async with self._account_lock:
+            if self.scheduler:
+                self.scheduler.clear()
+            if self.account:
+                try:
+                    await self.account.close()
+                except Exception as e:
+                    logger.debug(f"Aviso ao fechar sessão de rede: {e}")
+                self.account = None
+
+            self.profile_manager.deactivate_all()
+            self.active_profile_id = None
+            self.config.sid = ""
+
+            status_dict = self.get_status_dict()
+            self.broadcast_sync("ACCOUNT_DISCONNECTED", {})
+            self.broadcast_sync("STATUS_UPDATE", status_dict)
+
+            logger.info("Conta desconectada. Motor em modo Standby / Offline.")
+            return {"status": "success", "message": "Conta desconectada com sucesso."}
 
 
 

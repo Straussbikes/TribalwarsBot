@@ -189,31 +189,29 @@
   - [x] Canal WebSocket bidirecional para streaming em tempo real de logs e status.
   - [x] Disparo de alerta de captcha anti-bot para o frontend (`CAPTCHA_ALERT`).
   - [x] Suíte de testes unitários para a API Sidecar (14 testes dedicados).
-- [ ] **Gestão Concorrente Multi-Aldeia (Mesmo Mundo)**
-  - [x] Extração de todas as aldeias da conta a partir do `game_data` (`extract_all_villages`).
+- [x] **Gestão Concorrente Multi-Aldeia (Mesmo Mundo)**
+  - [x] Extração de todas as aldeias da conta a partir do `game_data` (`extract_all_villages`) e em lote via `overview_villages`.
   - [x] Alternância fluida de contexto entre múltiplas aldeias (`account.switch_village` e `POST /api/account/switch-village`).
-  - [ ] Execução de rotinas e agendamento concorrente/round-robin para múltiplas aldeias na mesma sessão sem conflito de requests.
-  - [ ] Configuração individualizada por aldeia no `config.json` (perfil Ofensivo/Defensivo, templates de tropas e edifícios).
-- [ ] **Gestão Simultânea Multi-Mundo (2+ Mundos Concorrentes)**
-  - [ ] Orquestrador de instâncias para execução simultânea de múltiplos mundos (ex: pt117 e pt118 ao mesmo tempo).
-  - [ ] Isolamento de sessões de rede `TribalAccount`, schedulers e ficheiros de cookies/configuração por mundo.
-  - [ ] Suporte a instâncias em abas ou seletor de mundo em tempo real no Dashboard Frontend.
-- [x] **Gestor de Perfis & Proxies**
-  - [x] Persistência segura de perfis de conta com ofuscação/encriptação (`ProfileManager` em `profiles.json`).
-  - [x] Suporte a proxy dedicado ou residencial por conta com diagnóstico ativo (`test_proxy_connection`).
-  - [x] Suíte de testes unitários dedicada (9 testes cobrindo perfis, multi-aldeia e proxies).
-- [x] **Orquestrador Multi-Mundo Simultâneo:**
-  - [x] Execução concorrente de múltiplos mundos em paralelo (ex.: `pt117`, `pt118`, mundos internacionais) no mesmo processo.
-  - [x] Ciclo de vida desacoplado: instâncias dedicadas de `TribalAccount`, `TaskScheduler`, cookies de sessão e proxies independentes por mundo (`WorldInstance` e `MultiWorldManager`).
-  - [x] Gestão centralizada de instâncias na Sidecar API com multiplexação de eventos WebSocket e rotas contextualizadas (`/api/worlds`, `/api/worlds/register`, `/api/worlds/switch`).
-- [x] **Gestão Simultânea e Categorizada de Múltiplas Aldeias:**
   - [x] Execução assíncrona coordenada das rotinas de farm, construção e recrutamento para todas as aldeias da conta sem bloqueio mútuo (`MultiVillageCoordinator`).
-  - [x] **Categorização de Aldeias (`⚔️ Ataque` / `🛡️ Defesa` / `⚖️ Balanceado`):**
-    - [x] Atribuição de perfil por aldeia persistido em `config.json` (`villages[id].category`).
-    - [x] Associação dinâmica de templates de construção específicos ao tipo de aldeia (Ataque foca `military_rush`; Defesa foca `balanced`/muralha; Balanceado foca `rush_resources`).
-    - [x] Associação dinâmica de templates de recrutamento específicos ao tipo de aldeia (Ataque = Machados/Leves/Aríetes; Defesa = Lanças/Espadachins/Pesadas; Misto = Balanceado).
-    - [x] Módulo analítico de balanceamento de recursos entre aldeias (identificação de doadoras vs recetoras e desvios médios).
-    - [x] Suíte de testes unitários dedicada (2 testes com 7 asserções cobrindo multi-mundo, isolamento de sessões, categorização e balanceamento).
+  - [x] Configuração individualizada por aldeia no `config.json` (perfil Ofensivo/Defensivo/Balanceado, templates de tropas e edifícios).
+  - [x] Módulo analítico de balanceamento de recursos entre aldeias (identificação de doadoras vs recetoras e desvios médios).
+- [x] **Gestão Simultânea Multi-Mundo (Mundos Concorrentes)**
+  - [x] Orquestrador de instâncias para execução simultânea de múltiplos mundos no mesmo processo (`MultiWorldManager` e `WorldInstance`).
+  - [x] Isolamento de sessões de rede `TribalAccount`, schedulers e ficheiros de cookies/configuração por mundo.
+  - [x] Suporte a instâncias em abas e seletor de mundo em tempo real no Dashboard Frontend (`/api/worlds`, `/api/worlds/register`, `/api/worlds/switch`).
+- [x] **Gestor de Perfis, Base de Dados SQLite & Arranque Estrito Offline**
+  - [x] Base de dados local SQLite transacional (`data/accounts.db`) para persistência de contas, cookies `sid`, credenciais, estratégias e timestamps.
+  - [x] Arranque 100% desconectado por omissão: aplicação abre no Gestor de Contas com todas em `⚪ OFFLINE` e a Dashboard bloqueada.
+  - [x] Bloqueio monousuário estrito (Single-Active Session Lock) garantindo 1 conta ativa por sessão com limpeza limpa de agendador e sockets.
+  - [x] Hub de Gestão de Contas no Frontend com badges Online/Offline, login direto no Tribos pelo navegador integrado (`renewSession`) e criação/edição/eliminação atómica.
+  - [x] Suporte a proxy dedicado ou residencial por conta com diagnóstico ativo (`test_proxy_connection`).
+  - [x] Suíte de testes unitários dedicada cobrindo SQLite, perfis, ativação monousuário, multi-aldeia e proxies (204 testes 100% OK).
+- [ ] **Migração e Gestão de Modelos de Construção e Recrutamento para SQLite (`data/accounts.db`)**
+  - [ ] Schema para `building_templates` (`id`, `account_id`, `name`, `target_levels`, `priority_list`, `is_default`, `created_at`).
+  - [ ] Schema para `recruitment_models` (`id`, `account_id`, `name`, `units`, `batch_sizes`, `is_default`, `created_at`).
+  - [ ] Métodos CRUD no `AccountsDatabase` (`engine/storage/database.py`) e no `EngineContext`.
+  - [ ] Endpoints REST `/api/templates/building` e `/api/templates/recruitment` para criação, edição, clonagem e exclusão de modelos.
+  - [ ] Interface visual no Frontend para gerir, personalizar e associar modelos a aldeias/contas sem editar o `config.json`.
 
 ---
 

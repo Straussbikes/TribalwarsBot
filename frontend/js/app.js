@@ -138,6 +138,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     aggIron: document.getElementById("agg-iron"),
     aggVillagesCount: document.getElementById("agg-villages-count"),
 
+    // Account Hub & Modais de Gestão de Contas
+    accountHubView: document.getElementById("account-hub-view"),
+    accountsGrid: document.getElementById("accounts-grid"),
+    hubHeaderActions: document.getElementById("hub-header-actions"),
+    btnHubAddAccount: document.getElementById("btn-hub-add-account"),
+    btnSwitchAccount: document.getElementById("btn-switch-account"),
+    accountModal: document.getElementById("account-modal"),
+    btnCancelAccountModal: document.getElementById("btn-cancel-account-modal"),
+    btnSaveAccountModal: document.getElementById("btn-save-account-modal"),
+    inputAccId: document.getElementById("input-acc-id"),
+    inputAccName: document.getElementById("input-acc-name"),
+    inputAccWorldDomain: document.getElementById("input-acc-world-domain"),
+    inputAccSid: document.getElementById("input-acc-sid"),
+    inputAccVillageId: document.getElementById("input-acc-village-id"),
+    inputAccProxy: document.getElementById("input-acc-proxy"),
+    inputAccTemplate: document.getElementById("input-acc-template"),
+
     // Mercado & Balanceamento de Recursos (Secção 2.7)
     marketVillageSelector: document.getElementById("market-village-selector"),
     btnMarketRefresh: document.getElementById("btn-market-refresh"),
@@ -247,11 +264,31 @@ document.addEventListener("DOMContentLoaded", async () => {
     statsRecentCountBadge: document.getElementById("stats-recent-count-badge"),
     statsRecentTbody: document.getElementById("stats-recent-tbody"),
     btnStatsRange24h: document.getElementById("btn-stats-range-24h"),
-    btnStatsRange7d: document.getElementById("btn-stats-range-7d"),
     btnMetricTotal: document.getElementById("btn-metric-total"),
     btnMetricWood: document.getElementById("btn-metric-wood"),
     btnMetricStone: document.getElementById("btn-metric-stone"),
     btnMetricIron: document.getElementById("btn-metric-iron"),
+
+    // Account Hub & Modals (Single-Active Session)
+    accountHubView: document.getElementById("account-hub-view"),
+    mainWorkspace: document.querySelector(".main-workspace"),
+    accountsGrid: document.getElementById("accounts-grid"),
+    btnHubAddAccount: document.getElementById("btn-hub-add-account"),
+    btnSwitchAccount: document.getElementById("btn-switch-account"),
+    accountModal: document.getElementById("account-modal"),
+    accountModalTitle: document.getElementById("account-modal-title"),
+    formAccountModal: document.getElementById("form-account-modal"),
+    inputAccId: document.getElementById("input-acc-id"),
+    inputAccName: document.getElementById("input-acc-name"),
+    inputAccWorldDomain: document.getElementById("input-acc-world-domain"),
+    inputAccSid: document.getElementById("input-acc-sid"),
+    inputAccVillageId: document.getElementById("input-acc-village-id"),
+    inputAccProxy: document.getElementById("input-acc-proxy"),
+    inputAccTemplate: document.getElementById("input-acc-template"),
+    btnCancelAccountModal: document.getElementById("btn-cancel-account-modal"),
+    btnSaveAccountModal: document.getElementById("btn-save-account-modal"),
+    btnLogout: document.getElementById("btn-logout"),
+    worldTabsContainer: document.getElementById("world-tabs-container"),
   };
 
   // Estado do Mapa Tático
@@ -453,6 +490,45 @@ document.addEventListener("DOMContentLoaded", async () => {
     loadRecruitmentData();
   });
 
+  // Som Sintetizado de Emergência para Alertas Anti-Bot (Web Audio API nativa)
+  function playEmergencyCaptchaSound() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.4);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.4);
+    } catch (e) {
+      console.debug("Áudio não disponível:", e);
+    }
+  }
+
+  // Interceção de Alerta Anti-Bot (Captcha Triggered)
+  window.wsClient.on("CAPTCHA_ALERT", (data) => {
+    state.captchaActive = true;
+    state.schedulerRunning = false;
+    updateTopBar();
+    playEmergencyCaptchaSound();
+
+    const modal = document.getElementById("captcha-modal");
+    const worldEl = document.getElementById("captcha-world-id");
+    const timeEl = document.getElementById("captcha-detected-time");
+    if (worldEl) worldEl.textContent = (data?.world || "PT117").toUpperCase();
+    if (timeEl) timeEl.textContent = new Date().toLocaleTimeString("pt-PT");
+    if (modal) modal.style.display = "flex";
+
+    addLogEntry("ERROR", "security", "⚠️ ALERTA DE SEGURANÇA: Desafio Anti-Bot detetado! O motor foi pausado automaticamente.");
+  });
+
   // --- 4. Renderização Reativa da Interface ---
   function updateBuildingStatusBadge(enabled) {
     if (!elements.bldBadgeStatus) return;
@@ -550,7 +626,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         window.mapViewer?.setOwnVillage(data.account.coordinates.x, data.account.coordinates.y);
       }
 
-      // Seletor Multi-Aldeia
+      // Seletor Multi-Aldeia no cabeçalho do Dashboard
       const vSelect = document.getElementById("village-selector");
       if (vSelect && data.account.villages && data.account.villages.length > 1) {
         vSelect.style.display = "inline-block";
@@ -558,7 +634,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         vSelect.innerHTML = data.account.villages
           .map(
             (vill) =>
-              `<option value="${vill.id}" ${vill.id === currentVId ? "selected" : ""}>${vill.name} (${vill.coordinates})</option>`
+              `<option value="${vill.id}" ${vill.id === currentVId ? "selected" : ""}>${vill.name} (${vill.coordinates || `${vill.x}|${vill.y}`})</option>`
           )
           .join("");
       } else if (vSelect) {
@@ -567,11 +643,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
 
-    // Recursos
-    const r = data.resources || (data.account && data.account.village && data.account.village.resources);
+    // Recursos (Soma de Todas as Aldeias no Painel Geral)
+    const r = data.total_resources || data.resources || (data.account && data.account.village && data.account.village.resources);
+    if (data.account) state.account = data.account;
+    if (data.account && data.account.village) state.village = data.account.village;
+    if (r) state.resources = r;
+    if (data.resource_balance) state.resource_balance = data.resource_balance;
+
     if (r) {
       const maxStorage = r.storage_max || 1000;
-      elements.storageCapacity.textContent = maxStorage.toLocaleString();
+      const isMulti = Boolean(data.account?.villages && data.account.villages.length > 1);
+      elements.storageCapacity.textContent = `${maxStorage.toLocaleString()}${isMulti ? ' (Total)' : ''}`;
 
       // Madeira
       const woodPct = Math.min(100, Math.round((r.wood / maxStorage) * 100));
@@ -591,12 +673,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       // População
       const maxPop = r.pop_max || 240;
       const popPct = Math.min(100, Math.round((r.pop / maxPop) * 100));
-      elements.resPopVal.textContent = `${r.pop} / ${maxPop} (${r.free_pop || 0} livres)`;
+      elements.resPopVal.textContent = `${r.pop.toLocaleString()} / ${maxPop.toLocaleString()} (${(r.free_pop || 0).toLocaleString()} livres)`;
       elements.resPopBar.style.width = `${popPct}%`;
     }
 
-    // Tropas Disponíveis na Aldeia (12 Unidades)
-    const troops = data.troops || (data.account && data.account.village && data.account.village.troops) || {};
+    // Tropas Disponíveis (Soma de Todas as Aldeias no Painel Geral)
+    const troops = data.total_troops || data.troops || (data.account && data.account.village && data.account.village.troops) || {};
     state.army = troops;
     const unitMap = {
       spear: elements.armySpear,
@@ -719,19 +801,212 @@ document.addEventListener("DOMContentLoaded", async () => {
     return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   }
 
+  // --- Funções de Gestão de Contas (Account Hub / Single Active Session) ---
+  function showAccountHub() {
+    if (elements.accountHubView) elements.accountHubView.style.display = "block";
+    if (elements.mainWorkspace) elements.mainWorkspace.style.display = "none";
+    loadAndRenderAccounts();
+  }
+
+  function showDashboard() {
+    if (elements.accountHubView) elements.accountHubView.style.display = "none";
+    if (elements.mainWorkspace) elements.mainWorkspace.style.display = "flex";
+  }
+
+  async function loadAndRenderAccounts() {
+    try {
+      const res = await window.api.getAccounts();
+      const accounts = res?.accounts || [];
+      const status = await window.api.getStatus();
+      renderAccountsHub(accounts, status?.active_profile_id);
+    } catch (e) {
+      console.error("Erro ao carregar contas:", e);
+    }
+  }
+
+  function renderAccountsHub(accounts, activeAccountId) {
+    if (!elements.accountsGrid) return;
+
+    if (!accounts || accounts.length === 0) {
+      elements.accountsGrid.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 48px; background: rgba(15,23,42,0.6); border-radius: 12px; border: 1px dashed var(--border-glass);">
+          <div style="font-size: 2.5rem; margin-bottom: 12px;">🛡️</div>
+          <h3 style="color: #fff; font-size: 1.1rem; margin-bottom: 8px;">Nenhuma conta configurada</h3>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px;">Adicione o seu primeiro perfil de jogo para iniciar a automação.</p>
+          <button class="btn btn-primary" id="btn-empty-add-account" style="background: var(--gradient-primary); padding: 8px 18px;">
+            <span>➕</span> Criar Primeira Conta
+          </button>
+        </div>
+      `;
+      document.getElementById("btn-empty-add-account")?.addEventListener("click", openAddAccountModal);
+      return;
+    }
+
+    elements.accountsGrid.innerHTML = accounts.map(acc => {
+      const isActive = acc.id === activeAccountId || acc.is_active;
+      const worldName = (acc.world || "PT117").toUpperCase();
+      const lastUsedStr = acc.last_used ? new Date(acc.last_used).toLocaleString("pt-PT") : "Nunca";
+      const hasSid = Boolean(acc.session_cookie || acc.sid);
+
+      return `
+        <div class="account-card ${isActive ? 'active' : ''}" style="background: rgba(15,23,42,0.85); border: 1px solid ${isActive ? 'var(--neon-purple)' : 'var(--border-glass)'}; border-radius: 12px; padding: 20px; box-shadow: ${isActive ? '0 8px 24px rgba(168,85,247,0.2)' : 'none'}; position: relative; display: flex; flex-direction: column; justify-content: space-between; transition: all 0.2s ease;">
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="width: 40px; height: 40px; border-radius: 10px; background: ${isActive ? 'rgba(168,85,247,0.2)' : 'rgba(30,41,59,0.7)'}; border: 1px solid ${isActive ? 'var(--neon-purple)' : 'var(--border-glass)'}; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">
+                  👤
+                </div>
+                <div>
+                  <h4 style="color: #fff; font-size: 1.05rem; font-weight: 700; margin: 0;">${acc.name || 'Conta Tribal'}</h4>
+                  <span style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted);">${acc.world_domain || `${acc.world}.${acc.domain}`}</span>
+                </div>
+              </div>
+              <span style="font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 8px; ${isActive ? 'background: var(--neon-purple); color: #000;' : (hasSid ? 'background: rgba(34,197,94,0.15); color: var(--neon-emerald);' : 'background: rgba(239,68,68,0.15); color: var(--neon-crimson);')}">
+                ${isActive ? 'ATIVO' : (hasSid ? 'PRONTA' : 'SEM SID')}
+              </span>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 18px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+              <div style="display: flex; justify-content: space-between;">
+                <span>🌐 Mundo:</span>
+                <span style="font-weight: 600; color: var(--neon-cyan);">${worldName}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span>🏰 Aldeia Principal:</span>
+                <span style="font-family: var(--font-mono); color: #e2e8f0;">${acc.village_id || 'Auto-detetada'}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span>🔒 Proxy:</span>
+                <span style="font-family: var(--font-mono); color: ${acc.proxy ? 'var(--neon-emerald)' : 'var(--text-muted)'};">${acc.proxy ? 'Ativo' : 'Nenhum'}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span>⏳ Último Acesso:</span>
+                <span style="color: #cbd5e1;">${lastUsedStr}</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--border-subtle); padding-top: 14px;">
+            <button class="btn btn-primary btn-activate-acc" data-id="${acc.id}" style="flex: 1; padding: 6px 12px; font-size: 0.82rem; font-weight: 700; ${isActive ? 'background: var(--neon-purple);' : 'background: var(--gradient-primary);'}">
+              ${isActive ? '✅ Entrar no Dashboard' : '🚀 Entrar'}
+            </button>
+            <button class="btn btn-secondary btn-edit-acc" data-id="${acc.id}" title="Editar Definições da Conta" style="padding: 6px 10px; font-size: 0.82rem;">
+              ✏️
+            </button>
+            <button class="btn btn-secondary btn-delete-acc" data-id="${acc.id}" title="Eliminar Conta" style="padding: 6px 10px; font-size: 0.82rem; color: var(--neon-crimson);">
+              🗑️
+            </button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    // Wire Card Events
+    elements.accountsGrid.querySelectorAll(".btn-activate-acc").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const accId = btn.getAttribute("data-id");
+        try {
+          btn.disabled = true;
+          btn.innerHTML = "<span>⏳</span> A carregar...";
+          addLogEntry("INFO", "account", `A carregar perfil de conta ${accId}...`);
+          const res = await window.api.activateAccount(accId);
+          if (res && res.status === "success") {
+            addLogEntry("SUCCESS", "account", res.message || "Conta ativada com sucesso.");
+            showDashboard();
+            const status = await window.api.getStatus();
+            updateDashboard(status);
+          } else {
+            alert(res?.message || "Erro ao ativar conta.");
+          }
+        } catch (err) {
+          alert(`Falha ao ativar conta: ${err.message}`);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
+    elements.accountsGrid.querySelectorAll(".btn-edit-acc").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const accId = btn.getAttribute("data-id");
+        openEditAccountModal(accId);
+      });
+    });
+
+    elements.accountsGrid.querySelectorAll(".btn-delete-acc").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const accId = btn.getAttribute("data-id");
+        if (confirm("Tem a certeza de que deseja eliminar esta conta?")) {
+          try {
+            await window.api.deleteAccount(accId);
+            addLogEntry("INFO", "account", "Conta eliminada com sucesso.");
+            loadAndRenderAccounts();
+          } catch (err) {
+            alert(`Erro ao eliminar conta: ${err.message}`);
+          }
+        }
+      });
+    });
+  }
+
+  function openAddAccountModal() {
+    if (!elements.accountModal) return;
+    if (elements.accountModalTitle) elements.accountModalTitle.textContent = "Nova Conta de Jogo";
+    if (elements.inputAccId) elements.inputAccId.value = "";
+    if (elements.inputAccName) elements.inputAccName.value = "";
+    if (elements.inputAccWorldDomain) elements.inputAccWorldDomain.value = "pt117";
+    if (elements.inputAccSid) elements.inputAccSid.value = "";
+    if (elements.inputAccVillageId) elements.inputAccVillageId.value = "";
+    if (elements.inputAccProxy) elements.inputAccProxy.value = "";
+    if (elements.inputAccTemplate) elements.inputAccTemplate.value = "rush_resources";
+    elements.accountModal.style.display = "flex";
+  }
+
+  async function openEditAccountModal(accId) {
+    if (!elements.accountModal) return;
+    try {
+      const acc = await window.api.getAccount(accId);
+      if (!acc) return;
+      if (elements.accountModalTitle) elements.accountModalTitle.textContent = `Editar: ${acc.name}`;
+      if (elements.inputAccId) elements.inputAccId.value = acc.id || accId;
+      if (elements.inputAccName) elements.inputAccName.value = acc.name || "";
+      if (elements.inputAccWorldDomain) elements.inputAccWorldDomain.value = acc.world_domain || acc.world || "pt117";
+      if (elements.inputAccSid) elements.inputAccSid.value = acc.session_cookie || acc.sid || "";
+      if (elements.inputAccVillageId) elements.inputAccVillageId.value = acc.village_id || "";
+      if (elements.inputAccProxy) elements.inputAccProxy.value = acc.proxy || "";
+      if (elements.inputAccTemplate) elements.inputAccTemplate.value = acc.build_order_strategy || acc.building_template || "rush_resources";
+      elements.accountModal.style.display = "flex";
+    } catch (err) {
+      alert(`Erro ao carregar detalhes da conta: ${err.message}`);
+    }
+  }
+
   // --- Funções de Renderização Multi-Mundo & Dropdown ---
-  const COMMON_WORLDS = ["pt114", "pt115", "pt116", "pt117", "pt118"];
+  let cachedDiscoveredWorlds = [];
+
+  async function refreshDiscoveredWorlds() {
+    try {
+      const res = await window.api.discoverWorlds();
+      if (res && res.status === "success" && res.worlds) {
+        cachedDiscoveredWorlds = res.worlds.map(w => w.toLowerCase());
+        const status = await window.api.getStatus();
+        if (status && status.worlds) {
+          renderWorldDropdown(status.worlds, status.active_world);
+          renderWorldTabs(status.worlds, status.active_world);
+        }
+      }
+    } catch (e) {
+      console.debug("Falha suave ao descobrir mundos:", e);
+    }
+  }
 
   function renderWorldDropdown(worlds, activeWorld) {
     if (!elements.worldDropdownList) return;
     const currentW = (activeWorld || "pt117").toLowerCase();
 
-    // Apenas lista mundos registados/conectados e o mundo ativo
+    // Apenas lista mundos onde o utilizador tem aldeia criada / conta ativa
     const registeredWorldKeys = (worlds || []).map(w => (w.world || "").toLowerCase()).filter(Boolean);
-    if (!registeredWorldKeys.includes(currentW)) {
-      registeredWorldKeys.unshift(currentW);
-    }
-    const allWorldKeys = Array.from(new Set(registeredWorldKeys));
+    const allWorldKeys = Array.from(new Set([currentW, ...registeredWorldKeys, ...cachedDiscoveredWorlds]));
 
     elements.worldDropdownList.innerHTML = allWorldKeys.map(w => {
       const isCurrent = w === currentW;
@@ -741,7 +1016,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             <span>🌐</span>
             <span>${w.toUpperCase()}</span>
           </div>
-          ${isCurrent ? '<span style="font-size: 0.65rem; background: var(--neon-cyan); color: #000; padding: 1px 6px; border-radius: 10px; font-weight: 700;">ATIVO</span>' : '<span style="font-size: 0.68rem; color: var(--neon-emerald); font-weight: 600;">Ligado</span>'}
+          ${isCurrent ? '<span style="font-size: 0.65rem; background: var(--neon-cyan); color: #000; padding: 1px 6px; border-radius: 10px; font-weight: 700;">ATIVO</span>' : '<span style="font-size: 0.68rem; color: var(--neon-emerald); font-weight: 600;">Aldeia Criada</span>'}
         </div>
       `;
     }).join("");
@@ -781,17 +1056,23 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function renderWorldTabs(worlds, activeWorld) {
     if (!elements.worldTabsContainer) return;
-    if (!worlds || worlds.length === 0) {
-      elements.worldTabsContainer.innerHTML = `<span class="world-chip active">🌐 ${(activeWorld || 'pt117').toUpperCase()}</span>`;
+    const currentW = (activeWorld || "pt117").toLowerCase();
+    const registeredWorldKeys = (worlds || []).map(w => (w.world || "").toLowerCase()).filter(Boolean);
+    const combinedKeys = Array.from(new Set([currentW, ...registeredWorldKeys, ...cachedDiscoveredWorlds]));
+
+    if (combinedKeys.length === 0) {
+      elements.worldTabsContainer.innerHTML = `<span class="world-chip active">🌐 ${currentW.toUpperCase()}</span>`;
       return;
     }
 
-    elements.worldTabsContainer.innerHTML = worlds.map(w => {
-      const isActive = w.world === activeWorld;
+    elements.worldTabsContainer.innerHTML = combinedKeys.map(w => {
+      const isActive = w === currentW;
+      const wObj = (worlds || []).find(item => (item.world || "").toLowerCase() === w);
+      const vCount = wObj?.villages_count;
       return `
-        <button class="world-chip ${isActive ? 'active' : ''}" data-world="${w.world}" title="Clique para focar no mundo ${w.world.toUpperCase()}">
-          <span>🌐</span> ${w.world.toUpperCase()}
-          ${w.villages_count ? `<span style="font-size:0.68rem; opacity:0.8;">(${w.villages_count} aldeias)</span>` : ''}
+        <button class="world-chip ${isActive ? 'active' : ''}" data-world="${w}" title="Clique para focar no mundo ${w.toUpperCase()}">
+          <span>🌐</span> ${w.toUpperCase()}
+          ${vCount ? `<span style="font-size:0.68rem; opacity:0.8;">(${vCount}v)</span>` : ''}
         </button>
       `;
     }).join("");
@@ -799,14 +1080,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     elements.worldTabsContainer.querySelectorAll(".world-chip").forEach(btn => {
       btn.addEventListener("click", async () => {
         const targetWorld = btn.getAttribute("data-world");
-        if (targetWorld && targetWorld !== activeWorld) {
+        if (targetWorld && targetWorld !== currentW) {
           try {
-            console.log(`A alternar para o mundo ${targetWorld}...`);
-            await window.api.switchWorld(targetWorld);
+            btn.innerHTML = `<span>⏳</span> ${targetWorld.toUpperCase()}`;
+            addLogEntry("INFO", "orchestrator", `A mudar para o mundo ${targetWorld.toUpperCase()}...`);
+            const res = await window.api.switchWorld(targetWorld);
+            if (res && res.status === "success") {
+              addLogEntry("SUCCESS", "orchestrator", `Mundo alternado para ${targetWorld.toUpperCase()} com sucesso.`);
+            } else if (res && res.message) {
+              alert(res.message);
+            }
             const status = await window.api.getStatus();
             updateDashboard(status);
           } catch (err) {
             console.error("Erro ao alternar mundo:", err);
+            addLogEntry("ERROR", "orchestrator", `Falha ao mudar para o mundo ${targetWorld}: ${err.message}`);
           }
         }
       });
@@ -840,7 +1128,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!state.villageCategories) state.villageCategories = {};
 
     elements.villagesTableBody.innerHTML = villages.map(v => {
-      const r = v.resources || {};
+      const isCurr = state.village && state.village.id === v.id;
+      // Garante que a aldeia ativa reflete com exatidão os recursos mais recentes sincronizados
+      const r = (isCurr && state.resources) ? state.resources : (v.resources || {});
       totWood += r.wood || 0;
       totStone += r.stone || 0;
       totIron += r.iron || 0;
@@ -868,7 +1158,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         <tr style="border-bottom: 1px solid var(--border-subtle); transition: background 0.15s ease;" onmouseover="this.style.background='rgba(30,41,59,0.5)'" onmouseout="this.style.background='transparent'">
           <td style="padding: 10px 14px; font-weight: 600;">
             ${v.name || 'Aldeia'}
-            ${state.village && state.village.id === v.id ? '<span style="color: var(--neon-cyan); font-size: 0.75rem; margin-left: 6px;">(Ativa)</span>' : ''}
+            ${isCurr ? '<span style="color: var(--neon-cyan); font-size: 0.75rem; margin-left: 6px; font-weight: 700;">(Ativa)</span>' : ''}
           </td>
           <td style="padding: 10px 14px; font-family: var(--font-mono); color: var(--neon-cyan);">
             ${v.coordinates || `${v.x}|${v.y}`}
@@ -1021,9 +1311,382 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   });
 
-  if (elements.btnAddWorld && elements.addWorldModal) {
-    elements.btnAddWorld.addEventListener("click", () => {
-      elements.addWorldModal.style.display = "flex";
+  // --- Gestão do Hub de Contas (Single-Active Session) & Acesso Restrito ---
+  async function showAccountHub() {
+    const hubView = document.getElementById("account-hub-view");
+    const mainWorkspace = document.querySelector(".main-workspace");
+    if (hubView) hubView.style.display = "block";
+    if (mainWorkspace) mainWorkspace.style.display = "none";
+
+    // Oculta controlos in-game na Topbar
+    if (elements.btnLogout) elements.btnLogout.style.display = "none";
+    if (elements.btnRefreshData) elements.btnRefreshData.style.display = "none";
+    if (elements.btnClaimQuests) elements.btnClaimQuests.style.display = "none";
+    if (elements.btnToggleScheduler) elements.btnToggleScheduler.style.display = "none";
+    if (elements.btnFarmNow) elements.btnFarmNow.style.display = "none";
+    if (elements.worldTabsContainer) elements.worldTabsContainer.style.display = "none";
+
+    await loadAndRenderAccounts();
+  }
+
+  function hideAccountHub() {
+    const hubView = document.getElementById("account-hub-view");
+    const mainWorkspace = document.querySelector(".main-workspace");
+    if (hubView) hubView.style.display = "none";
+    if (mainWorkspace) mainWorkspace.style.display = "flex";
+
+    // Mostra controlos in-game na Topbar
+    if (elements.btnLogout) elements.btnLogout.style.display = "inline-flex";
+    if (elements.btnRefreshData) elements.btnRefreshData.style.display = "inline-flex";
+    if (elements.btnClaimQuests) elements.btnClaimQuests.style.display = "inline-flex";
+    if (elements.btnToggleScheduler) elements.btnToggleScheduler.style.display = "inline-flex";
+    if (elements.btnFarmNow) elements.btnFarmNow.style.display = "inline-flex";
+    if (elements.worldTabsContainer) elements.worldTabsContainer.style.display = "inline-flex";
+  }
+
+  function openAddAccountModal() {
+    if (!elements.accountModal) return;
+    const titleEl = document.getElementById("account-modal-title");
+    if (titleEl) titleEl.textContent = "Nova Conta de Jogo";
+    if (elements.inputAccId) elements.inputAccId.value = "";
+    if (elements.inputAccName) elements.inputAccName.value = "";
+    if (elements.inputAccWorldDomain) elements.inputAccWorldDomain.value = state.account?.world || "pt117";
+    if (elements.inputAccSid) elements.inputAccSid.value = "";
+    if (elements.inputAccVillageId) elements.inputAccVillageId.value = "";
+    if (elements.inputAccProxy) elements.inputAccProxy.value = "";
+    if (elements.inputAccTemplate) elements.inputAccTemplate.value = "rush_resources";
+    elements.accountModal.style.display = "flex";
+  }
+
+  function openEditAccountModal(acc) {
+    if (!elements.accountModal) return;
+    const titleEl = document.getElementById("account-modal-title");
+    if (titleEl) titleEl.textContent = `Editar Conta: ${acc.name}`;
+    if (elements.inputAccId) elements.inputAccId.value = acc.id || "";
+    if (elements.inputAccName) elements.inputAccName.value = acc.name || "";
+    if (elements.inputAccWorldDomain) elements.inputAccWorldDomain.value = acc.world_domain || acc.world || "pt117";
+    if (elements.inputAccSid) elements.inputAccSid.value = acc.session_cookie || acc.sid || "";
+    if (elements.inputAccVillageId) elements.inputAccVillageId.value = acc.village_id || "";
+    if (elements.inputAccProxy) elements.inputAccProxy.value = acc.proxy || "";
+    if (elements.inputAccTemplate) elements.inputAccTemplate.value = acc.build_order_strategy || "rush_resources";
+    elements.accountModal.style.display = "flex";
+  }
+
+  async function loadAndRenderAccounts() {
+    const grid = document.getElementById("accounts-grid");
+    if (!grid) return;
+    try {
+      grid.innerHTML = `<div style="color: var(--text-muted); font-size: 0.85rem; padding: 20px;"><span>⏳</span> A carregar contas guardadas...</div>`;
+      const res = await window.api.getAccounts();
+      const accounts = res?.accounts || [];
+      const activeId = res?.active_id || state.activeProfileId;
+
+      if (!accounts.length) {
+        // Oculta o botão superior de adicionar quando não há contas
+        if (elements.hubHeaderActions) elements.hubHeaderActions.style.display = "none";
+        if (elements.btnHubAddAccount) elements.btnHubAddAccount.style.display = "none";
+
+        grid.innerHTML = `
+          <div style="grid-column: 1 / -1; text-align: center; padding: 48px 24px; background: rgba(15,23,42,0.6); border: 1px dashed var(--border-glass); border-radius: 16px; max-width: 580px; margin: 20px auto; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+            <div style="font-size: 3rem; margin-bottom: 12px;">🛡️</div>
+            <h3 style="color: #fff; font-family: var(--font-title); font-size: 1.25rem; margin-bottom: 8px; font-weight: 700;">Nenhuma Conta Configurada</h3>
+            <p style="color: var(--text-muted); font-size: 0.88rem; line-height: 1.5; margin-bottom: 24px;">
+              Faz login diretamente no Tribal Wars pelo navegador integrado para capturar a sessão automaticamente, ou adiciona os dados da tua conta manualmente.
+            </p>
+            <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+              <button class="btn btn-primary" id="btn-hub-login-direct" style="background: var(--gradient-primary); padding: 10px 20px; font-size: 0.9rem; font-weight: 700; box-shadow: 0 4px 16px rgba(168,85,247,0.4); display: flex; align-items: center; gap: 8px;">
+                <span>🔑</span> Fazer Login no Tribos
+              </button>
+              <button class="btn btn-secondary" id="btn-hub-create-manual" style="padding: 10px 18px; font-size: 0.88rem; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                <span>⚙️</span> Adicionar Manualmente
+              </button>
+            </div>
+          </div>
+        `;
+        const btnLoginDirect = document.getElementById("btn-hub-login-direct");
+        if (btnLoginDirect) {
+          btnLoginDirect.addEventListener("click", async () => {
+            try {
+              btnLoginDirect.disabled = true;
+              btnLoginDirect.innerHTML = "<span>⏳</span> A abrir Tribal Wars...";
+              addLogEntry("INFO", "account", "A abrir ecrã de autenticação do Tribal Wars...");
+              await window.api.renewSession();
+            } catch (err) {
+              alert(`Erro ao abrir login: ${err.message}`);
+            } finally {
+              btnLoginDirect.disabled = false;
+              btnLoginDirect.innerHTML = "<span>🔑</span> Fazer Login no Tribos";
+            }
+          });
+        }
+        const btnManual = document.getElementById("btn-hub-create-manual");
+        if (btnManual) {
+          btnManual.addEventListener("click", openAddAccountModal);
+        }
+        return;
+      }
+
+      // Mostra o botão superior de adicionar quando já existem contas
+      if (elements.hubHeaderActions) elements.hubHeaderActions.style.display = "flex";
+      if (elements.btnHubAddAccount) elements.btnHubAddAccount.style.display = "inline-flex";
+
+      grid.innerHTML = accounts.map(acc => {
+        const isActive = acc.id === activeId && Boolean(state.activeProfileId);
+        const hasSid = Boolean(acc.session_cookie || acc.sid);
+        const lastUsedStr = acc.last_used ? new Date(acc.last_used * 1000).toLocaleString("pt-PT") : "Nunca";
+        return `
+          <div class="account-card" style="background: rgba(30, 41, 59, 0.7); border: 1px solid ${isActive ? 'var(--neon-cyan)' : 'var(--border-glass)'}; border-radius: 12px; padding: 18px; position: relative; box-shadow: ${isActive ? '0 0 20px rgba(6,182,212,0.2)' : 'none'}; display: flex; flex-direction: column; justify-content: space-between; gap: 14px;">
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                <div>
+                  <h4 style="color: #fff; font-family: var(--font-title); font-size: 1.05rem; margin: 0; font-weight: 700;">${acc.name || 'Conta sem nome'}</h4>
+                  <span style="font-size: 0.72rem; color: var(--neon-cyan); font-weight: 600; font-family: var(--font-mono);">🌐 ${(acc.world || acc.world_domain || 'PT117').toUpperCase()}</span>
+                </div>
+                ${isActive 
+                  ? `<span style="background: rgba(16,185,129,0.2); color: var(--neon-emerald); border: 1px solid var(--neon-emerald); border-radius: 6px; padding: 2px 8px; font-size: 0.68rem; font-weight: 700;">🟢 ONLINE</span>`
+                  : `<span style="background: rgba(100,116,139,0.2); color: #94a3b8; border: 1px solid rgba(148,163,184,0.3); border-radius: 6px; padding: 2px 8px; font-size: 0.68rem; font-weight: 600;">⚪ OFFLINE</span>`
+                }
+              </div>
+              <div style="font-size: 0.75rem; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px;">
+                <div><strong>Sessão:</strong> ${hasSid ? '<span style="color:var(--neon-emerald)">🟢 Guardada</span>' : '<span style="color:var(--neon-amber)">🟡 Sem SID</span>'}</div>
+                <div><strong>Aldeia:</strong> ${acc.village_id || 'Automática'}</div>
+                <div><strong>Estratégia:</strong> ${acc.build_order_strategy || 'rush_resources'}</div>
+                <div><strong>Último Acesso:</strong> ${lastUsedStr}</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border-glass); padding-top: 12px;">
+              <button class="btn btn-primary btn-sm btn-activate-acc" data-id="${acc.id}" style="flex: 1; min-width: 110px; background: var(--gradient-primary); font-weight: 600;">
+                <span>▶</span> ${isActive ? 'Focar Painel' : 'Conectar'}
+              </button>
+              <button class="btn btn-secondary btn-sm btn-login-acc" data-id="${acc.id}" title="Abrir ecrã do jogo para autenticar" style="padding: 4px 8px;">
+                <span>🔑</span> Login
+              </button>
+              <button class="btn btn-secondary btn-sm btn-edit-acc" data-id="${acc.id}" title="Editar Definições" style="padding: 4px 8px;">
+                <span>✏️</span>
+              </button>
+              <button class="btn btn-danger btn-sm btn-del-acc" data-id="${acc.id}" title="Eliminar Conta" style="padding: 4px 8px;">
+                <span>🗑️</span>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      // Event listeners dos botões dos cards de conta
+      grid.querySelectorAll(".btn-activate-acc").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const accId = btn.getAttribute("data-id");
+          try {
+            btn.disabled = true;
+            btn.innerHTML = "<span>⏳</span> A iniciar...";
+            addLogEntry("INFO", "account", `A ativar perfil de conta ${accId}...`);
+            const res = await window.api.activateAccount(accId);
+            if (res && res.status === "success") {
+              state.activeProfileId = accId;
+              addLogEntry("SUCCESS", "account", `Conta ativada com sucesso: ${res.account?.name || accId}`);
+              hideAccountHub();
+              const status = await window.api.getStatus();
+              updateDashboard(status);
+            } else {
+              alert(res?.message || "Falha ao ativar conta.");
+            }
+          } catch (err) {
+            alert(`Erro ao ativar conta: ${err.message}`);
+          } finally {
+            btn.disabled = false;
+            btn.innerHTML = "<span>▶</span> Conectar";
+          }
+        });
+      });
+
+      grid.querySelectorAll(".btn-login-acc").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const accId = btn.getAttribute("data-id");
+          try {
+            await window.api.activateAccount(accId);
+            state.activeProfileId = accId;
+            hideAccountHub();
+            await window.api.renewSession();
+          } catch (err) {
+            alert(`Erro ao abrir login: ${err.message}`);
+          }
+        });
+      });
+
+      grid.querySelectorAll(".btn-edit-acc").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const accId = btn.getAttribute("data-id");
+          const acc = accounts.find(a => a.id === accId);
+          if (acc) openEditAccountModal(acc);
+        });
+      });
+
+      grid.querySelectorAll(".btn-del-acc").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const accId = btn.getAttribute("data-id");
+          const acc = accounts.find(a => a.id === accId);
+          if (confirm(`Tem a certeza que deseja eliminar a conta '${acc?.name || accId}'?`)) {
+            try {
+              btn.disabled = true;
+              await window.api.deleteAccount(accId);
+              if (state.activeProfileId === accId) {
+                state.activeProfileId = null;
+              }
+              addLogEntry("INFO", "account", `Conta '${acc?.name || accId}' eliminada.`);
+              await loadAndRenderAccounts();
+            } catch (err) {
+              alert(`Erro ao eliminar conta: ${err.message}`);
+            }
+          }
+        });
+      });
+    } catch (e) {
+      console.error("Erro ao carregar contas:", e);
+      grid.innerHTML = `<div style="color: var(--neon-rose); font-size: 0.82rem; padding: 20px;">Falha ao carregar contas: ${e.message}</div>`;
+    }
+  }
+
+  // Handlers do Botão Refresh da Aldeia Ativa
+  if (elements.btnRefreshData) {
+    elements.btnRefreshData.addEventListener("click", async () => {
+      try {
+        elements.btnRefreshData.disabled = true;
+        addLogEntry("INFO", "orchestrator", "A atualizar dados da aldeia, recursos e tropas...");
+        const res = await window.api.refreshVillage();
+        if (res && res.status === "success" && res.data) {
+          updateDashboard(res.data);
+          addLogEntry("SUCCESS", "orchestrator", "Recursos e tropas da aldeia atualizados com sucesso.");
+        } else {
+          const status = await window.api.getStatus();
+          updateDashboard(status);
+          addLogEntry("SUCCESS", "orchestrator", "Estado do jogo atualizado.");
+        }
+      } catch (err) {
+        console.error("Erro ao atualizar dados:", err);
+        addLogEntry("ERROR", "orchestrator", `Falha ao atualizar dados: ${err.message}`);
+      } finally {
+        elements.btnRefreshData.disabled = false;
+      }
+    });
+  }
+
+  // Handlers do Account Hub, Modal & Logout
+  if (elements.btnLogout) {
+    elements.btnLogout.addEventListener("click", async () => {
+      if (confirm("Deseja terminar a sessão atual da conta e regressar ao Gestor de Contas?")) {
+        try {
+          elements.btnLogout.disabled = true;
+          await window.api.disconnectAccount();
+          state.activeProfileId = null;
+          showAccountHub();
+        } catch (err) {
+          console.error("Erro ao efetuar logout:", err);
+          showAccountHub();
+        } finally {
+          elements.btnLogout.disabled = false;
+        }
+      }
+    });
+  }
+
+  // Handlers do Modal de Captcha Anti-Bot
+  const captchaModal = document.getElementById("captcha-modal");
+  const btnOpenCaptcha = document.getElementById("btn-open-captcha-browser");
+  const btnResumeCaptcha = document.getElementById("btn-resume-after-captcha");
+
+  if (btnOpenCaptcha) {
+    btnOpenCaptcha.addEventListener("click", async () => {
+      try {
+        await window.api.renewSession();
+      } catch (err) {
+        console.error("Erro ao abrir sessão para captcha:", err);
+      }
+    });
+  }
+
+  if (btnResumeCaptcha) {
+    btnResumeCaptcha.addEventListener("click", async () => {
+      try {
+        btnResumeCaptcha.disabled = true;
+        await window.api.resumeScheduler();
+        if (captchaModal) captchaModal.style.display = "none";
+        state.captchaActive = false;
+        state.schedulerRunning = true;
+        updateTopBar();
+        addLogEntry("SUCCESS", "security", "Automação retomada com sucesso após resolução de captcha.");
+        const status = await window.api.getStatus();
+        updateDashboard(status);
+      } catch (err) {
+        alert(`Falha ao retomar: ${err.message}`);
+      } finally {
+        btnResumeCaptcha.disabled = false;
+      }
+    });
+  }
+
+  if (elements.btnSwitchAccount) {
+    elements.btnSwitchAccount.addEventListener("click", () => {
+      showAccountHub();
+    });
+  }
+
+  if (elements.btnHubAddAccount) {
+    elements.btnHubAddAccount.addEventListener("click", openAddAccountModal);
+  }
+
+  if (elements.btnCancelAccountModal && elements.accountModal) {
+    elements.btnCancelAccountModal.addEventListener("click", () => {
+      elements.accountModal.style.display = "none";
+    });
+  }
+
+  if (elements.btnSaveAccountModal) {
+    elements.btnSaveAccountModal.addEventListener("click", async () => {
+      const accId = elements.inputAccId.value.trim();
+      const name = elements.inputAccName.value.trim();
+      const worldDomain = elements.inputAccWorldDomain.value.trim();
+      const sid = elements.inputAccSid.value.trim();
+      const villageIdStr = elements.inputAccVillageId.value.trim();
+      const proxy = elements.inputAccProxy.value.trim() || null;
+      const template = elements.inputAccTemplate.value;
+
+      if (!name) {
+        alert("Por favor indique um nome para a conta.");
+        return;
+      }
+      if (!worldDomain) {
+        alert("Por favor indique o mundo ou subdomínio (ex: pt117).");
+        return;
+      }
+
+      const payload = {
+        name,
+        world_domain: worldDomain,
+        session_cookie: sid,
+        sid: sid,
+        village_id: villageIdStr ? parseInt(villageIdStr, 10) : null,
+        proxy,
+        build_order_strategy: template,
+      };
+
+      try {
+        elements.btnSaveAccountModal.disabled = true;
+        elements.btnSaveAccountModal.innerHTML = "<span>⏳</span> A guardar...";
+        if (accId) {
+          await window.api.updateAccount(accId, payload);
+          addLogEntry("SUCCESS", "account", `Conta '${name}' atualizada.`);
+        } else {
+          await window.api.createAccount(payload);
+          addLogEntry("SUCCESS", "account", `Conta '${name}' criada.`);
+        }
+        elements.accountModal.style.display = "none";
+        loadAndRenderAccounts();
+      } catch (err) {
+        alert(`Erro ao guardar conta: ${err.message}`);
+      } finally {
+        elements.btnSaveAccountModal.disabled = false;
+        elements.btnSaveAccountModal.innerHTML = "Guardar Perfil";
+      }
     });
   }
 
@@ -1056,16 +1719,48 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // Seletor de Aldeia Ativa no Dashboard
+  const vSelectElem = document.getElementById("village-selector");
+  if (vSelectElem) {
+    vSelectElem.addEventListener("change", async () => {
+      const vid = parseInt(vSelectElem.value, 10);
+      if (vid && (!state.village || state.village.id !== vid)) {
+        try {
+          addLogEntry("INFO", "village", `A alternar para a aldeia ${vid}...`);
+          vSelectElem.disabled = true;
+          await window.api.switchVillage(vid);
+          const status = await window.api.getStatus();
+          updateDashboard(status);
+        } catch (err) {
+          console.error("Erro ao alternar aldeia via seletor:", err);
+          addLogEntry("ERROR", "village", `Falha ao alternar aldeia: ${err.message}`);
+        } finally {
+          vSelectElem.disabled = false;
+        }
+      }
+    });
+  }
+
   if (elements.btnSyncAllVillages) {
     elements.btnSyncAllVillages.addEventListener("click", async () => {
       try {
         console.log("A sincronizar todas as aldeias...");
+        elements.btnSyncAllVillages.disabled = true;
+        elements.btnSyncAllVillages.innerHTML = "<span>⏳</span> A sincronizar...";
+        addLogEntry("INFO", "village", "A consultar todas as aldeias e recursos no servidor do jogo...");
         const res = await window.api.getAccountVillages();
         if (res && res.villages) {
           renderVillagesOverview(res.villages, res.balance);
+          addLogEntry("SUCCESS", "village", `Sincronizadas ${res.villages.length} aldeias com sucesso!`);
         }
+        const status = await window.api.getStatus();
+        updateDashboard(status);
       } catch (err) {
         console.error("Erro ao sincronizar aldeias:", err);
+        addLogEntry("ERROR", "village", `Falha ao sincronizar aldeias: ${err.message}`);
+      } finally {
+        elements.btnSyncAllVillages.disabled = false;
+        elements.btnSyncAllVillages.innerHTML = "<span>🔄</span> Sincronizar Aldeias";
       }
     });
   }
@@ -3735,16 +4430,26 @@ document.addEventListener("DOMContentLoaded", async () => {
   elements.btnMetricStone?.addEventListener("click", () => setStatsMetric("stone"));
   elements.btnMetricIron?.addEventListener("click", () => setStatsMetric("iron"));
 
+  let initialLoaded = false;
+
   async function refreshStatus() {
     try {
       const statusData = await window.api.getStatus();
       applyStateData(statusData);
+      refreshDiscoveredWorlds();
+      if (!initialLoaded) {
+        initialLoaded = true;
+        // O bot arranca SEMPRE no Gestor de Contas (Hub) com todas as contas Offline
+        showAccountHub();
+      }
     } catch (e) {
       // Sidecar ainda pode estar a iniciar
     }
   }
 
-  // Polling de segurança a cada 15 segundos para atualizar dados
+  // Descoberta inicial de mundos e polling de segurança a cada 15 segundos
+  refreshDiscoveredWorlds();
+  refreshStatus();
   setInterval(refreshStatus, 15000);
 });
 

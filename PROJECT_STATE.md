@@ -2,8 +2,8 @@
 
 > **Propósito deste ficheiro:** Manter o histórico de progresso, decisões arquiteturais, mapa de ficheiros e diretrizes de desenvolvimento para que qualquer sessão de IA recupere o contexto instantaneamente com consumo mínimo de tokens e sem perda de continuidade.
 
-**Última Atualização:** 2026-08-28  
-**Estado Geral:** Fases 1, 3 e 4 Concluídas | Modelos Dinâmicos de Recrutamento (Ataque, Defesa e Customizados com Persistência em config.json), Verificação Dinâmica de Recursos e Recrutamento Prioritário por Menor Custo em Lotes de 5 Tropas, Sincronização em Tempo Real de Tropas da Praça de Reunião no Painel Principal, Sincronização e Persistência de Categorias Multi-Aldeias, Conexão Dinâmica de min_transfer_amount no Mercado, Conclusão Gratuita de Edifícios (< 3 min), Módulo de Pesquisas Tecnológicas no Ferreiro (SmithManager), Telemetria de Rede | 199 Testes Unitários Automatizados (100% OK)  
+**Última Atualização:** 2026-08-29 (Sessão Noturna)  
+**Estado Geral:** Fases 1, 3 e 4 Concluídas | Base de Dados Local SQLite (`data/accounts.db`), Arranque Estrito Offline (Sem Auto-Login), Hub de Gestão de Contas no Frontend com Badges Online/Offline, Ativação Monousuário Manual (Single-Active Session), Login Direto no Tribos via WebView, Eliminação Atómica de Contas, Sincronização de Multi-Aldeias e Recursos Agregados | 204 Testes Unitários Automatizados (100% OK)  
 **Ambiente Validado:** macOS 12+ / Windows 11 / Python 3.11-3.14 / `curl_cffi` 0.16.2 / `fastapi` 0.141.1 / `uvicorn` 0.52.4 / `pywebview` 6.2 (Edge WebView2 & Cocoa WebKit) / Git Branch: `main`
 
 ---
@@ -11,6 +11,15 @@
 ## 1. Visão Geral e Arquitetura
 
 * **Conceito:** Cliente desktop autónomo (*estilo PS Evolution*) para automação do jogo Tribal Wars (Tribos).
+* **Camada de Persistência (SQLite Local):**
+  * Base de dados local `data/accounts.db` gerida pela classe `AccountsDatabase` (`engine/storage/database.py`).
+  * Tabela `accounts` com schema relacional: `id`, `name`, `world_domain`, `world`, `domain`, `session_cookie`, `username`, `password_enc`, `village_id`, `proxy`, `build_order_strategy`, `farm_presets`, `keep_alive`, `is_active`, `last_used`, `created_at`.
+  * Gestão de conexões via `contextmanager` atómico (auto-close) para libertação de locks no Windows.
+* **Ciclo de Vida Offline & Single-Active Session:**
+  * O motor arranca **sempre em modo Standby/Offline** (`active_profile_id = None`), sem instanciar conexões de rede nem agendador.
+  * O frontend abre **sempre no Gestor de Contas (Account Hub)** com todas as contas marcadas como `⚪ OFFLINE`.
+  * Ativação manual com `▶ Conectar` fecha qualquer sessão anterior, adquire o lock monousuário, instancia `TribalAccount`, inicializa o agendador e desbloqueia a Dashboard.
+  * Logout com `🚪 Sair` desconecta a sessão, esvazia filas e regressa ao Hub em modo Offline.
 * **Camada de Rede:** Emulação pura HTTP sobre a versão mobile (`page=mobile`), sem instâncias pesadas de Chromium/Puppeteer, garantindo consumo ultrabaixo de RAM (<60MB) e CPU.
 * **Evasão de Assinaturas (TLS/JA3/JA4):** `curl_cffi` com `impersonate="chrome124"`, cabeçalhos consistentes de Chrome Mobile Android (`Sec-CH-UA-Mobile: ?1`, `Sec-CH-UA-Platform: "Android"`).
 * **Arquitetura de Processos (Sidecar Pattern):**
@@ -19,17 +28,7 @@
   * **Comunicação IPC:** FastAPI / WebSockets locais em `127.0.0.1` com token efêmero de segurança gerado em `.sidecar_auth.json`.
 * **Fluxo de Autenticação Manual & Interceção de Rede:**
   * Modo 100% manual e seguro: o utilizador faz login diretamente no ecrã nativo do Tribal Wars (resolvendo captchas humanos se surgirem).
-  * **Intercetor de Rede em Tempo Real:** O WebView2 captura instantaneamente os cookies `sid` (incluindo `HttpOnly`) dos cabeçalhos HTTP (`request_sent` e `response_received`), persistindo no `config.json` e renovando a sessão `curl_cffi` via `account.update_sid()`.
-* **Controlo Modular, Arbitragem Económica & Filas em Tempo Real:**
-  * Controles dedicados de ativação/desativação de **Construção Automática**, **Recrutamento Automático** e **Arbitragem Económica** integrados nas respetivas abas com parâmetros de intervalo dinâmicos.
-  * **Filosofia "Fila Sempre Ativa" (Item 2.12):** Diagnóstico das 4 filas (Edifício Principal, Quartel, Estábulo, Oficina) com projeção de fluxo de caixa em tempo real, priorização de emergência e micro-lotes para evitar qualquer segundo ocioso sem canibalizar recursos do próximo edifício planeado.
-  * **Radar de Bárbaras & Saque Recorrente (Item 2.3):** Varredura contínua de aldeias bárbaras vizinhas via grelha de mapa com alocação dinâmica de micro-esquadrões de tropas disponíveis.
-* **Recrutamento Militar Dinâmico e Eficiente:**
-  * Avaliação prévia e rigorosa de recursos disponíveis na aldeia antes de submeter ordens de treino militar.
-  * Ordenação e priorização de unidades por **menor custo total de recursos** (`Lanceiro` -> `Espião` -> `Espadachim/Bárbaro` -> `Arqueiro` -> `Cavalaria Leve` -> `Aríete` -> `Catapulta` -> `Cavalaria Pesada`).
-  * Treino gradual e balanceado em **porções de 5 unidades** para todas as tropas.
-  * Sincronização imediata de tropas da Praça de Reunião no Painel Principal (`InitialStateSync`) e nos ciclos de polling periódico.
-* **HUD Timer de Ultra-Alta Precisão:** Relógio digital no topo da aplicação exibindo horas, minutos, segundos e microssegundos (`HH:MM:SS.uuuuuu`) a 60 FPS com `requestAnimationFrame` e `performance.now()`.
+  * **Intercetor de Rede em Tempo Real:** O WebView2 captura instantaneamente os cookies `sid` (incluindo `HttpOnly`) dos cabeçalhos HTTP (`request_sent` e `response_received`), persistindo no SQLite e renovando a sessão `curl_cffi` via `account.update_sid()`.
 
 ---
 
@@ -39,8 +38,8 @@
 |---|---|---|---|
 | **Fase 1** | **Fundação do Core & Rede** | ✅ Concluída | Estrutura modular, `TribalAccount`, `TaskScheduler`, parsers, anti-bot e 10 testes unitários. |
 | **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (auto-build + filas), `place`, `farm` (Radar de Bárbaras e Assistente de Farm), `recruitment` (auto-recruit em lotes de 5 por custo + filas ativas), `quest`, `map`, `market` (balanceamento) e `economic_arbitrage` (Fila Sempre Ativa) concluídos. Scavenging, Snob e Defesa/Dodge planeados. |
-| **Fase 3** | **Camada Sidecar IPC, Multi-Aldeia & Perfis** | ✅ Concluída | FastAPI REST, WebSockets, autenticação efêmera, proxies, perfis, `MultiWorldManager` (orquestrador concorrente paralelo) e `MultiVillageCoordinator` (gestão de múltiplas aldeias com categorização Ataque/Defesa/Balanceado e balanceamento de recursos). |
-| **Fase 4** | **Shell Desktop & Frontend Nativo** | 🔄 Em Expansão | Cockpit Dark Glassmorphism, HUD timer, réplica interativa do mapa 2D, seletor de mundos na barra superior, monitor de tropas e filas ativas e controlos modulares nas abas de domínio. |
+| **Fase 3** | **Camada Sidecar IPC, SQLite & Multi-Conta** | ✅ Concluída | Base de dados SQLite (`data/accounts.db`), arranque estrito Offline, Single-Active Session, FastAPI REST, WebSockets, autenticação efêmera, proxies, `MultiWorldManager` e `MultiVillageCoordinator`. |
+| **Fase 4** | **Shell Desktop & Frontend Nativo** | 🔄 Em Expansão | Cockpit Dark Glassmorphism, Hub de Contas com badges Online/Offline, login direto no Tribos pelo navegador integrado, HUD timer, réplica interativa do mapa 2D, seletor de mundos na barra superior, monitor de tropas e filas ativas e controlos modulares nas abas de domínio. |
 | **Fase 5** | **Empacotamento & Release** | 📋 Pendente | Empacotamento executável com PyInstaller e instalador desktop. |
 
 ---
@@ -156,14 +155,23 @@ TribalwarsBot/
 
 ## 5. Como Validar o Estado Atual
 
-Para rodar a suíte completa de 199 testes automatizados:
+Para rodar a suíte completa de 204 testes automatizados:
 ```powershell
-python -m unittest discover tests -v
+python -m pytest
 ```
-*Status esperado:* `Ran 199 tests in ~4.5s - OK`.
+*Status esperado:* `204 passed, 19 warnings in ~7s - OK`.
 
 Para iniciar a aplicação desktop completa com interface gráfica nativa:
 ```powershell
 python -m engine.main --gui
 ```
+
+---
+
+## 6. Próxima Sessão (Roadmap Imediato)
+
+* **Migração dos Modelos de Construção e Recrutamento para a Base de Dados SQLite (`data/accounts.db`):**
+  1. Adicionar tabelas `building_templates` e `recruitment_models` no SQLite com suporte a templates globais e personalizados por conta.
+  2. Implementar endpoints REST `/api/templates/building` e `/api/templates/recruitment`.
+  3. Criar modal / gestor visual na UI para criação, edição, duplicação e associação direta de modelos a contas/aldeias sem editar ficheiros JSON.
 

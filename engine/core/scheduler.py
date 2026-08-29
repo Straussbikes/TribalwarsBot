@@ -58,6 +58,14 @@ class TaskScheduler:
     def queue_size(self) -> int:
         return self.queue.qsize()
 
+    def clear(self) -> None:
+        """Esvazia todas as tarefas pendentes na fila do agendador."""
+        while not self.queue.empty():
+            try:
+                self.queue.get_nowait()
+                self.queue.task_done()
+            except Exception:
+                break
 
     def on_bot_protection(self, handler: Callable[[BotProtectionError], Coroutine]) -> None:
         """Regista um callback assíncrono executado quando um captcha/bot protect é detetado."""
@@ -116,10 +124,12 @@ class TaskScheduler:
         priority: TaskPriority,
         action: Callable[..., Coroutine[Any, Any, Any]],
         *args,
-        base_seconds: float,
-        std_dev: float,
-        min_seconds: float,
-        max_seconds: float,
+        base_seconds: Optional[float] = None,
+        base_delay: Optional[float] = None,
+        std_dev: Optional[float] = None,
+        jitter_sigma: Optional[float] = None,
+        min_seconds: Optional[float] = None,
+        max_seconds: Optional[float] = None,
         task_id: str = "",
         max_retries: int = 3,
         metadata: Optional[Dict[str, Any]] = None,
@@ -129,7 +139,12 @@ class TaskScheduler:
         Agenda uma tarefa com delay baseado em distribuição normal (gaussiana),
         simulando o comportamento de um jogador humano real.
         """
-        human_delay = get_human_delay(base_seconds, std_dev, min_seconds, max_seconds)
+        base = base_seconds if base_seconds is not None else (base_delay if base_delay is not None else 60.0)
+        sigma = std_dev if std_dev is not None else (jitter_sigma if jitter_sigma is not None else max(1.0, base * 0.15))
+        min_s = min_seconds if min_seconds is not None else max(0.5, base - 3 * sigma)
+        max_s = max_seconds if max_seconds is not None else (base + 3 * sigma)
+
+        human_delay = get_human_delay(base, sigma, min_s, max_s)
         return self.schedule(
             name,
             priority,
