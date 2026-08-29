@@ -206,12 +206,12 @@
   - [x] Hub de Gestão de Contas no Frontend com badges Online/Offline, login direto no Tribos pelo navegador integrado (`renewSession`) e criação/edição/eliminação atómica.
   - [x] Suporte a proxy dedicado ou residencial por conta com diagnóstico ativo (`test_proxy_connection`).
   - [x] Suíte de testes unitários dedicada cobrindo SQLite, perfis, ativação monousuário, multi-aldeia e proxies (204 testes 100% OK).
-- [ ] **Migração e Gestão de Modelos de Construção e Recrutamento para SQLite (`data/accounts.db`)**
-  - [ ] Schema para `building_templates` (`id`, `account_id`, `name`, `target_levels`, `priority_list`, `is_default`, `created_at`).
-  - [ ] Schema para `recruitment_models` (`id`, `account_id`, `name`, `units`, `batch_sizes`, `is_default`, `created_at`).
-  - [ ] Métodos CRUD no `AccountsDatabase` (`engine/storage/database.py`) e no `EngineContext`.
-  - [ ] Endpoints REST `/api/templates/building` e `/api/templates/recruitment` para criação, edição, clonagem e exclusão de modelos.
-  - [ ] Interface visual no Frontend para gerir, personalizar e associar modelos a aldeias/contas sem editar o `config.json`.
+- [x] **Migração e Gestão de Modelos de Construção e Recrutamento para SQLite (`data/accounts.db`)**
+  - [x] Schema para `building_templates` (`id`, `account_id`, `name`, `target_levels`, `priority_list`, `is_default`, `created_at`).
+  - [x] Schema para `recruitment_models` (`id`, `account_id`, `name`, `units`, `batch_sizes`, `is_default`, `created_at`).
+  - [x] Métodos CRUD no `AccountsDatabase` (`engine/storage/database.py`) e no `EngineContext`.
+  - [x] Endpoints REST `/api/templates/building` e `/api/templates/recruitment` para criação, edição, clonagem e exclusão de modelos.
+  - [x] Interface visual no Frontend para gerir, personalizar e associar modelos a aldeias/contas sem editar o `config.json`.
 
 ---
 

@@ -73,6 +73,7 @@ class AccountProfile:
     building_template: str = "rush_resources"        # Alias para compatibilidade
     farm_presets: Dict[str, Any] = field(default_factory=dict)
     recruitment_models: Dict[str, Any] = field(default_factory=dict)
+    config_data: Dict[str, Any] = field(default_factory=dict)
     proxy: Optional[str] = None
     username: Optional[str] = None
     password_enc: Optional[str] = None
@@ -148,6 +149,86 @@ class AccountProfile:
             profile.password = pwd
         return profile
 
+    def to_bot_config(self) -> Any:
+        """Reconstrói uma instância de BotConfig com as configurações personalizadas desta conta."""
+        from engine.config.settings import (
+            BotConfig, AuthConfig, BuildingConfig, FarmConfig,
+            RecruitmentConfig, QuestConfig, MarketConfig, ArbitrageConfig, VillageConfig
+        )
+        
+        cfg_data = dict(self.config_data) if isinstance(self.config_data, dict) else {}
+        
+        # Constrói BotConfig base
+        bot_cfg = BotConfig(
+            world=self.world or "pt117",
+            sid=self.session_cookie or self.sid or "",
+            domain=self.domain or "tribalwars.com.pt",
+            proxy=self.proxy,
+            auth=AuthConfig(
+                username=self.username or "",
+                password=self.password or "",
+                auto_login=self.auto_login,
+                keep_alive=self.keep_alive,
+            ),
+        )
+
+        # Se houver secções específicas no config_data, aplica-as
+        if "building" in cfg_data and isinstance(cfg_data["building"], dict):
+            b_data = dict(cfg_data["building"])
+            if self.build_order_strategy and "template" not in b_data:
+                b_data["template"] = self.build_order_strategy
+            valid_b = {k: v for k, v in b_data.items() if k in BuildingConfig.__dataclass_fields__}
+            bot_cfg.building = BuildingConfig(**valid_b)
+        elif self.build_order_strategy:
+            bot_cfg.building.template = self.build_order_strategy
+
+        if "farm" in cfg_data and isinstance(cfg_data["farm"], dict):
+            f_data = dict(cfg_data["farm"])
+            valid_f = {k: v for k, v in f_data.items() if k in FarmConfig.__dataclass_fields__}
+            bot_cfg.farm = FarmConfig(**valid_f)
+
+        if "recruitment" in cfg_data and isinstance(cfg_data["recruitment"], dict):
+            r_data = dict(cfg_data["recruitment"])
+            valid_r = {k: v for k, v in r_data.items() if k in RecruitmentConfig.__dataclass_fields__}
+            bot_cfg.recruitment = RecruitmentConfig(**valid_r)
+
+        if "quest" in cfg_data and isinstance(cfg_data["quest"], dict):
+            q_data = dict(cfg_data["quest"])
+            valid_q = {k: v for k, v in q_data.items() if k in QuestConfig.__dataclass_fields__}
+            bot_cfg.quest = QuestConfig(**valid_q)
+
+        if "market" in cfg_data and isinstance(cfg_data["market"], dict):
+            m_data = dict(cfg_data["market"])
+            valid_m = {k: v for k, v in m_data.items() if k in MarketConfig.__dataclass_fields__}
+            bot_cfg.market = MarketConfig(**valid_m)
+
+        if "arbitrage" in cfg_data and isinstance(cfg_data["arbitrage"], dict):
+            a_data = dict(cfg_data["arbitrage"])
+            valid_a = {k: v for k, v in a_data.items() if k in ArbitrageConfig.__dataclass_fields__}
+            bot_cfg.arbitrage = ArbitrageConfig(**valid_a)
+
+        if "villages" in cfg_data and isinstance(cfg_data["villages"], dict):
+            v_dict = {}
+            for vid, vcfg in cfg_data["villages"].items():
+                if isinstance(vcfg, dict):
+                    valid_v = {k: v for k, v in vcfg.items() if k in VillageConfig.__dataclass_fields__}
+                    v_dict[str(vid)] = VillageConfig(**valid_v)
+            bot_cfg.villages = v_dict
+
+        return bot_cfg
+
+    def update_from_bot_config(self, bot_cfg: Any) -> None:
+        """Atualiza os campos do perfil e config_data a partir de uma instância BotConfig."""
+        if hasattr(bot_cfg, "to_dict"):
+            self.config_data = bot_cfg.to_dict()
+        elif isinstance(bot_cfg, dict):
+            self.config_data = dict(bot_cfg)
+        if hasattr(bot_cfg, "world") and bot_cfg.world:
+            self.world = bot_cfg.world
+        if hasattr(bot_cfg, "sid") and bot_cfg.sid:
+            self.session_cookie = bot_cfg.sid
+            self.sid = bot_cfg.sid
+
 
 from engine.storage.database import AccountsDatabase
 
@@ -155,15 +236,23 @@ from engine.storage.database import AccountsDatabase
 class ProfileManager:
     """Gestor de persistência e isolamento de perfis de conta com suporte a SQLite e JSON."""
 
-    def __init__(self, profiles_dir: Path = DEFAULT_PROFILES_DIR, db_path: Optional[Path] = None):
+    def __init__(
+        self,
+        profiles_dir: Path = DEFAULT_PROFILES_DIR,
+        db_path: Optional[Path] = None,
+        db: Optional[AccountsDatabase] = None,
+    ):
         self.profiles_dir = Path(profiles_dir)
         self.profiles: Dict[str, AccountProfile] = {}
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
-        if db_path is None and self.profiles_dir != DEFAULT_PROFILES_DIR:
-            db_path = self.profiles_dir / "accounts.db"
-        self.db = AccountsDatabase(db_path=db_path)
-        # Migração automática inicial de perfis JSON legados para a base de dados SQLite
-        self.db.migrate_from_sources(profiles_dir=self.profiles_dir)
+        if db is not None:
+            self.db = db
+        else:
+            if db_path is None and self.profiles_dir != DEFAULT_PROFILES_DIR:
+                db_path = self.profiles_dir / "accounts.db"
+            self.db = AccountsDatabase(db_path=db_path)
+            # Migração automática inicial de perfis JSON legados para a base de dados SQLite
+            self.db.migrate_from_sources(profiles_dir=self.profiles_dir)
         self.load()
 
     def load(self) -> Dict[str, AccountProfile]:
@@ -270,6 +359,17 @@ class ProfileManager:
             except Exception as e:
                 logger.error(f"Erro ao eliminar ficheiro do perfil {file_path}: {e}")
         return True
+
+    def get_account_config(self, profile_id: str) -> Dict[str, Any]:
+        """Obtém as configurações personalizadas de uma conta."""
+        return self.db.get_account_config(profile_id)
+
+    def save_account_config(self, profile_id: str, config_dict: Dict[str, Any]) -> bool:
+        """Atualiza e persiste as configurações personalizadas de uma conta."""
+        success = self.db.save_account_config(profile_id, config_dict)
+        if profile_id in self.profiles:
+            self.profiles[profile_id].config_data.update(config_dict)
+        return success
 
     def list_profiles(self) -> List[Dict[str, Any]]:
         """Retorna a lista de perfis para apresentação na UI a partir da base de dados."""

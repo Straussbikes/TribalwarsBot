@@ -41,13 +41,14 @@ class EngineContext:
 
     def __init__(
         self,
-        scheduler: TaskScheduler,
-        config: BotConfig,
+        scheduler: Optional[TaskScheduler] = None,
+        config: Optional[BotConfig] = None,
         account: Optional[TribalAccount] = None,
         config_path: Optional[Path] = None,
+        db: Optional[Any] = None,
     ):
-        self.scheduler = scheduler
-        self.config = config
+        self.scheduler = scheduler or TaskScheduler()
+        self.config = config or BotConfig()
         self.account = account
         self.config_path = config_path or Path("config.json")
 
@@ -72,7 +73,7 @@ class EngineContext:
             market_manager=self.market_manager,
         )
         # Gestor de Perfis e Base de Dados SQLite (Single-Active Session)
-        self.profile_manager = ProfileManager()
+        self.profile_manager = ProfileManager(db=db) if db else ProfileManager()
         self._account_lock = asyncio.Lock()
         self.active_profile_id: Optional[str] = None
 
@@ -391,18 +392,12 @@ class EngineContext:
 
 
     def update_config_and_save(self, new_data: Dict[str, Any]) -> Dict[str, Any]:
-
         """
-        Atualiza as configurações do bot em memória e grava as alterações no config.json.
+        Atualiza as configurações do bot em memória e grava as alterações agregadas à conta ativa no SQLite (data/accounts.db).
         """
         try:
-            # Lê o JSON atual para preservar comentários e estrutura
-            current_raw = {}
-            if self.config_path.exists():
-                try:
-                    current_raw = json.loads(self.config_path.read_text(encoding="utf-8"))
-                except Exception:
-                    current_raw = {}
+            # 1. Obtém a configuração atual como dicionário
+            current_raw = self.get_config_dict()
 
             # Atualiza recursivamente campos permitidos com fusão profunda (deep merge)
             def _deep_merge(target: dict, source: dict) -> None:
@@ -414,13 +409,17 @@ class EngineContext:
 
             _deep_merge(current_raw, new_data)
 
-            # Grava no disco de forma atómica e persistente
-            self.config_path.write_text(json.dumps(current_raw, indent=2), encoding="utf-8")
+            # 2. Reconstrói BotConfig em memória
+            from engine.config.settings import parse_config_dict
+            self.config = parse_config_dict(current_raw)
 
-            # Recarrega a configuração ativa
-            self.config = load_config(str(self.config_path))
+            # 3. Se houver uma conta ativa, persiste diretamente no SQLite (data/accounts.db)
+            if self.active_profile_id:
+                self.profile_manager.save_account_config(self.active_profile_id, current_raw)
+                logger.info(f"Configurações persistidas no SQLite para a conta ativa '{self.active_profile_id}'.")
+
             self.broadcast_sync("CONFIG_UPDATED", {"config": self.get_config_dict()})
-            return {"status": "success", "message": "Configuração atualizada e persistida."}
+            return {"status": "success", "message": "Configuração atualizada e persistida na base de dados SQLite."}
         except Exception as e:
             logger.error(f"Erro ao salvar configuração: {e}")
             return {"status": "error", "message": str(e)}
@@ -784,16 +783,8 @@ class EngineContext:
             self.profile_manager.set_active_profile(account_id)
             self.active_profile_id = account_id
 
-            # 4. Atualiza BotConfig com as definições do perfil
-            self.config.world = target.world
-            self.config.domain = target.domain
-            self.config.sid = target.sid or target.session_cookie
-            self.config.proxy = target.proxy
-            self.config.building.template = target.build_order_strategy or target.building_template
-            if target.username:
-                self.config.auth.username = target.username
-            if target.password:
-                self.config.auth.password = target.password
+            # 4. Atualiza BotConfig com as definições agregadas do perfil no SQLite
+            self.config = target.to_bot_config()
 
             # 5. Instancia um novo agendador limpo para esta conta
             self.scheduler = TaskScheduler(f"Scheduler-{target.world}")
@@ -1511,16 +1502,165 @@ class EngineContext:
             logger.error(f"Erro ao obter estado de recrutamento: {e}")
             return {"status": "error", "message": str(e)}
 
-    def get_recruitment_models(self) -> Dict[str, Any]:
-        """Retorna os modelos de tropas de Ataque e Defesa configurados."""
-        from engine.config.settings import DEFAULT_ATTACK_MODEL, DEFAULT_DEFENSE_MODEL
-        models = getattr(self.config.recruitment, "models", {
-            "attack": DEFAULT_ATTACK_MODEL.copy(),
-            "defense": DEFAULT_DEFENSE_MODEL.copy(),
+    # --- Gestão de Modelos de Construção (Building Templates - SQLite) ---
+
+    def list_building_templates(self, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Lista todos os modelos de construção registados no SQLite."""
+        target_acc = account_id or self.active_profile_id
+        return self.profile_manager.db.list_building_templates(account_id=target_acc)
+
+    def get_building_template(self, template_id: str) -> Optional[Dict[str, Any]]:
+        """Obtém os detalhes de um modelo de construção específico."""
+        return self.profile_manager.db.get_building_template(template_id)
+
+    def save_building_template(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Cria ou atualiza um modelo de construção no SQLite e notifica a interface."""
+        res = self.profile_manager.db.save_building_template(data)
+        self.broadcast_sync("BUILDING_TEMPLATES_UPDATED", {
+            "templates": self.list_building_templates(),
+            "updated_id": res.get("id") if res else None,
         })
         return {
             "status": "success",
-            "models": models,
+            "message": f"Modelo de construção '{res.get('name', '')}' gravado com sucesso no SQLite.",
+            "template": res,
+        }
+
+    def delete_building_template(self, template_id: str) -> Dict[str, Any]:
+        """Remove um modelo de construção do SQLite."""
+        tmpl = self.get_building_template(template_id)
+        if not tmpl:
+            return {"status": "error", "message": f"Modelo de construção '{template_id}' não encontrado."}
+        if tmpl.get("is_default"):
+            return {"status": "error", "message": "Os modelos de construção padrão do sistema não podem ser eliminados."}
+
+        success = self.profile_manager.db.delete_building_template(template_id)
+        if success:
+            self.broadcast_sync("BUILDING_TEMPLATES_UPDATED", {
+                "templates": self.list_building_templates(),
+                "deleted_id": template_id,
+            })
+            return {"status": "success", "message": f"Modelo '{tmpl.get('name')}' eliminado com sucesso."}
+        return {"status": "error", "message": "Falha ao eliminar modelo de construção."}
+
+    def clone_building_template(
+        self,
+        template_id: str,
+        new_name: Optional[str] = None,
+        account_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Clona um modelo de construção no SQLite."""
+        target_acc = account_id or self.active_profile_id
+        res = self.profile_manager.db.clone_building_template(
+            template_id=template_id,
+            new_name=new_name,
+            account_id=target_acc,
+        )
+        if not res:
+            return {"status": "error", "message": f"Modelo original '{template_id}' não encontrado para clonagem."}
+
+        self.broadcast_sync("BUILDING_TEMPLATES_UPDATED", {
+            "templates": self.list_building_templates(),
+            "cloned_id": res.get("id"),
+        })
+        return {
+            "status": "success",
+            "message": f"Modelo clonado com sucesso: '{res.get('name')}'.",
+            "template": res,
+        }
+
+    # --- Gestão de Modelos de Recrutamento (Recruitment Models - SQLite) ---
+
+    def list_recruitment_models(self, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Lista todos os modelos de tropas de recrutamento guardados no SQLite."""
+        target_acc = account_id or self.active_profile_id
+        return self.profile_manager.db.list_recruitment_models(account_id=target_acc)
+
+    def get_recruitment_model(self, model_id: str) -> Optional[Dict[str, Any]]:
+        """Obtém os detalhes de um modelo de tropas de recrutamento específico."""
+        return self.profile_manager.db.get_recruitment_model(model_id)
+
+    def save_recruitment_model(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Cria ou atualiza um modelo de tropas de recrutamento no SQLite."""
+        res = self.profile_manager.db.save_recruitment_model(data)
+        
+        # Sincroniza em memória e no BotConfig
+        if res and res.get("id"):
+            m_id = res["id"].lower().strip()
+            if hasattr(self.config.recruitment, "models"):
+                self.config.recruitment.models[m_id] = res.get("units", {})
+
+        self.broadcast_sync("RECRUITMENT_MODELS_UPDATED", {
+            "models": self.list_recruitment_models(),
+            "updated_id": res.get("id") if res else None,
+        })
+        return {
+            "status": "success",
+            "message": f"Modelo de tropas '{res.get('name', '')}' gravado com sucesso no SQLite.",
+            "model": res,
+        }
+
+    def delete_recruitment_model_db(self, model_id: str) -> Dict[str, Any]:
+        """Remove um modelo de tropas de recrutamento do SQLite."""
+        m = self.get_recruitment_model(model_id)
+        if not m:
+            return {"status": "error", "message": f"Modelo de recrutamento '{model_id}' não encontrado."}
+        if m.get("is_default") or model_id in ("attack", "defense"):
+            return {"status": "error", "message": "Os modelos de tropas padrão do sistema ('attack', 'defense') não podem ser eliminados."}
+
+        success = self.profile_manager.db.delete_recruitment_model(model_id)
+        if success:
+            if hasattr(self.config.recruitment, "models") and model_id in self.config.recruitment.models:
+                del self.config.recruitment.models[model_id]
+            self.broadcast_sync("RECRUITMENT_MODELS_UPDATED", {
+                "models": self.list_recruitment_models(),
+                "deleted_id": model_id,
+            })
+            return {"status": "success", "message": f"Modelo '{m.get('name')}' eliminado com sucesso."}
+        return {"status": "error", "message": "Falha ao eliminar modelo de tropas."}
+
+    def clone_recruitment_model(
+        self,
+        model_id: str,
+        new_name: Optional[str] = None,
+        account_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Clona um modelo de tropas de recrutamento no SQLite."""
+        target_acc = account_id or self.active_profile_id
+        res = self.profile_manager.db.clone_recruitment_model(
+            model_id=model_id,
+            new_name=new_name,
+            account_id=target_acc,
+        )
+        if not res:
+            return {"status": "error", "message": f"Modelo original '{model_id}' não encontrado para clonagem."}
+
+        if res and res.get("id"):
+            m_id = res["id"].lower().strip()
+            if hasattr(self.config.recruitment, "models"):
+                self.config.recruitment.models[m_id] = res.get("units", {})
+
+        self.broadcast_sync("RECRUITMENT_MODELS_UPDATED", {
+            "models": self.list_recruitment_models(),
+            "cloned_id": res.get("id"),
+        })
+        return {
+            "status": "success",
+            "message": f"Modelo de tropas clonado com sucesso: '{res.get('name')}'.",
+            "model": res,
+        }
+
+    # Aliases e compatibilidade
+    def get_recruitment_models(self) -> Dict[str, Any]:
+        """Retorna todos os modelos de tropas de recrutamento configurados."""
+        models_list = self.list_recruitment_models()
+        models_dict = {m["id"]: m["units"] for m in models_list if "id" in m and "units" in m}
+        if hasattr(self.config.recruitment, "models") and self.config.recruitment.models:
+            models_dict.update(self.config.recruitment.models)
+        return {
+            "status": "success",
+            "models": models_dict,
+            "models_list": models_list,
         }
 
     def save_recruitment_models(
@@ -1529,53 +1669,46 @@ class EngineContext:
         defense: Optional[Dict[str, int]] = None,
         models: Optional[Dict[str, Dict[str, int]]] = None,
     ) -> Dict[str, Any]:
-        """Salva todos os modelos de tropas (Ataque, Defesa e Customizados) no config.json."""
+        """Salva modelos de tropas garantindo persistência no SQLite e retrocompatibilidade."""
         from engine.config.settings import DEFAULT_ATTACK_MODEL, DEFAULT_DEFENSE_MODEL
-        current_models = getattr(self.config.recruitment, "models", {
-            "attack": DEFAULT_ATTACK_MODEL.copy(),
-            "defense": DEFAULT_DEFENSE_MODEL.copy(),
-        }).copy()
-
         if models is not None and isinstance(models, dict):
-            # Salva o dicionário completo de modelos recebido
-            current_models = {
-                str(m_name).lower().strip(): {str(k): max(0, int(v)) for k, v in m_dict.items()}
-                for m_name, m_dict in models.items()
-                if isinstance(m_dict, dict)
-            }
-            if "attack" not in current_models:
-                current_models["attack"] = DEFAULT_ATTACK_MODEL.copy()
-            if "defense" not in current_models:
-                current_models["defense"] = DEFAULT_DEFENSE_MODEL.copy()
+            for m_name, m_units in models.items():
+                if isinstance(m_units, dict):
+                    self.save_recruitment_model({
+                        "id": str(m_name).lower().strip(),
+                        "name": str(m_name).title(),
+                        "units": {str(k): max(0, int(v)) for k, v in m_units.items()},
+                        "is_default": str(m_name).lower().strip() in ("attack", "defense"),
+                    })
         else:
             if attack is not None:
-                current_models["attack"] = {str(k): max(0, int(v)) for k, v in attack.items()}
+                self.save_recruitment_model({
+                    "id": "attack",
+                    "name": "Ataque Full",
+                    "units": {str(k): max(0, int(v)) for k, v in attack.items()},
+                    "is_default": True,
+                })
             if defense is not None:
-                current_models["defense"] = {str(k): max(0, int(v)) for k, v in defense.items()}
+                self.save_recruitment_model({
+                    "id": "defense",
+                    "name": "Defesa Full",
+                    "units": {str(k): max(0, int(v)) for k, v in defense.items()},
+                    "is_default": True,
+                })
 
+        current_models = {m["id"]: m["units"] for m in self.list_recruitment_models()}
         self.config.recruitment.models = current_models
         self.update_config_and_save({"recruitment": {"models": current_models}})
         self.broadcast_sync("RECRUITMENT_MODELS_UPDATED", {"models": current_models})
         return {
             "status": "success",
-            "message": "Modelos de tropas guardados e persistidos no config.json com sucesso!",
+            "message": "Modelos de tropas guardados e persistidos no SQLite com sucesso!",
             "models": current_models,
         }
 
     def delete_recruitment_model(self, model_name: str) -> Dict[str, Any]:
-        """Remove um modelo de tropas customizado e persiste no config.json."""
-        m_name = str(model_name).lower().strip()
-        if m_name in ("attack", "defense"):
-            return {"status": "error", "message": "Os modelos padrão 'attack' e 'defense' não podem ser removidos."}
-
-        current_models = getattr(self.config.recruitment, "models", {}).copy()
-        if m_name in current_models:
-            del current_models[m_name]
-            self.config.recruitment.models = current_models
-            self.update_config_and_save({"recruitment": {"models": current_models}})
-            self.broadcast_sync("RECRUITMENT_MODELS_UPDATED", {"models": current_models})
-            return {"status": "success", "message": f"Modelo '{m_name}' removido com sucesso!", "models": current_models}
-        return {"status": "error", "message": f"Modelo '{m_name}' não encontrado."}
+        """Remove um modelo de tropas customizado do SQLite e da configuração."""
+        return self.delete_recruitment_model_db(model_name.lower().strip())
 
     def toggle_recruitment_module(
         self,
@@ -1911,13 +2044,8 @@ class EngineContext:
             self.profile_manager.set_active_profile(account_id)
             self.active_profile_id = account_id
 
-            # 3. Atualiza BotConfig com as credenciais do perfil
-            self.config.world = prof.world
-            self.config.domain = prof.domain
-            self.config.sid = prof.sid or prof.session_cookie or ""
-            self.config.proxy = prof.proxy
-            if prof.build_order_strategy:
-                self.config.building.template = prof.build_order_strategy
+            # 3. Atualiza BotConfig com as definições completas e agregadas do perfil no SQLite
+            self.config = prof.to_bot_config()
 
             # 4. Instancia e inicializa o cliente de rede da nova conta
             account = TribalAccount(

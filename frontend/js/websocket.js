@@ -92,6 +92,12 @@ class SidecarWebSocket {
         this.playAlertSound();
         this.emit("captcha", msg.data);
         break;
+      case "BUILDING_TEMPLATES_UPDATED":
+        this.emit("building_templates_updated", msg.data);
+        break;
+      case "RECRUITMENT_MODELS_UPDATED":
+        this.emit("recruitment_models_updated", msg.data);
+        break;
       case "PONG":
         break;
       default:

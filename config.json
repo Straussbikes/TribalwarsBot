@@ -1,6 +1,6 @@
 {
   "world": "pt117",
-  "sid": "0%3A73b17af147e7f09f1356cdc5f53129e17116e93c1d71da54533ffd78edb95f01961adc5626ae84e7fce76783c5bba526f1c3c517396d3676d7c96145f1016cc0",
+  "sid": "0%3A2024661a38044ac80c887f70d3b3c25ec518bd718f1e7e9aec7b0453be6c13801183ecf0dc0846f2692e31ad11b060ecca5d903a0e4aaa251a408ab38fbbad65",
   "building": {
     "_comentario": "Templates dispon\u00edveis: 'rush_resources' (recursos), 'balanced' (balanceado), 'military_rush' (tropas/cavalaria) ou 'custom'",
     "template": "custom",
@@ -1112,8 +1112,21 @@
   "recruitment": {
     "_comentario": "Metas de tropas e lotes por ciclo para Quartel, Est\u00e1bulo e Oficina",
     "enabled": true,
+    "default_model": "attack",
     "interval_minutes": 5,
     "min_free_pop": 2,
+    "targets": {
+      "spear": 50,
+      "sword": 0,
+      "axe": 6000,
+      "archer": 0,
+      "spy": 50,
+      "light": 3000,
+      "marcher": 0,
+      "heavy": 0,
+      "ram": 250,
+      "catapult": 10
+    },
     "models": {
       "attack": {
         "spear": 50,

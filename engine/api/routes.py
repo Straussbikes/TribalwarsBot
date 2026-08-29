@@ -4,9 +4,9 @@ Endpoints para controlo de tarefas, consulta de estado, ações manuais e config
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from engine.api.auth import TokenVerifier
@@ -16,6 +16,44 @@ logger = logging.getLogger(__name__)
 
 
 # --- Modelos Pydantic para Validação de Entrada ---
+
+class BuildingTemplateCreateRequest(BaseModel):
+    id: Optional[str] = None
+    account_id: Optional[str] = None
+    name: str
+    target_levels: Optional[Dict[str, int]] = None
+    priority_list: Optional[List[Any]] = None
+    is_default: Optional[bool] = False
+
+
+class BuildingTemplateUpdateRequest(BaseModel):
+    account_id: Optional[str] = None
+    name: Optional[str] = None
+    target_levels: Optional[Dict[str, int]] = None
+    priority_list: Optional[List[Any]] = None
+    is_default: Optional[bool] = None
+
+
+class RecruitmentModelCreateRequest(BaseModel):
+    id: Optional[str] = None
+    account_id: Optional[str] = None
+    name: str
+    units: Optional[Dict[str, int]] = None
+    batch_sizes: Optional[Dict[str, int]] = None
+    is_default: Optional[bool] = False
+
+
+class RecruitmentModelUpdateRequest(BaseModel):
+    account_id: Optional[str] = None
+    name: Optional[str] = None
+    units: Optional[Dict[str, int]] = None
+    batch_sizes: Optional[Dict[str, int]] = None
+    is_default: Optional[bool] = None
+
+
+class CloneTemplateRequest(BaseModel):
+    new_name: Optional[str] = None
+    account_id: Optional[str] = None
 
 class ConfigUpdateRequest(BaseModel):
     """Payload de atualização de configurações do bot."""
@@ -750,6 +788,7 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
             update_data["enabled"] = payload.enabled
         if payload.auto_balance_enabled is not None:
             update_data["auto_balance_enabled"] = payload.auto_balance_enabled
+            update_data["auto_balance"] = payload.auto_balance_enabled
         res = context.update_config_and_save({"market": update_data})
         return ActionResponse(status=res["status"], message=res.get("message"))
 
@@ -789,6 +828,97 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         )
         return ActionResponse(status=res["status"], message=res.get("message"))
 
+    # --- Gestão de Modelos de Construção (Building Templates - SQLite) ---
+
+    @router.get("/templates/building")
+    def list_building_templates(account_id: Optional[str] = None):
+        """Lista todos os modelos de construção disponíveis no SQLite."""
+        return {"templates": context.list_building_templates(account_id=account_id)}
+
+    @router.post("/templates/building")
+    def create_building_template(payload: BuildingTemplateCreateRequest):
+        """Cria um novo modelo de evolução de edifícios no SQLite."""
+        return context.save_building_template(payload.model_dump(exclude_unset=True))
+
+    @router.get("/templates/building/{template_id}")
+    def get_building_template(template_id: str):
+        """Obtém os detalhes de um modelo de construção específico."""
+        tmpl = context.get_building_template(template_id)
+        if not tmpl:
+            raise HTTPException(status_code=404, detail=f"Modelo de construção '{template_id}' não encontrado.")
+        return tmpl
+
+    @router.put("/templates/building/{template_id}")
+    def update_building_template(template_id: str, payload: BuildingTemplateUpdateRequest):
+        """Atualiza a configuração ou lista de prioridades de um modelo de construção."""
+        data = payload.model_dump(exclude_unset=True)
+        data["id"] = template_id
+        return context.save_building_template(data)
+
+    @router.post("/templates/building/{template_id}/clone")
+    def clone_building_template(template_id: str, payload: Optional[CloneTemplateRequest] = None):
+        """Clona um modelo de construção existente para permitir customização."""
+        new_name = payload.new_name if payload else None
+        account_id = payload.account_id if payload else None
+        res = context.clone_building_template(template_id, new_name=new_name, account_id=account_id)
+        if res.get("status") == "error":
+            raise HTTPException(status_code=404, detail=res.get("message"))
+        return res
+
+    @router.delete("/templates/building/{template_id}")
+    def delete_building_template(template_id: str):
+        """Remove um modelo de construção personalizado do SQLite."""
+        res = context.delete_building_template(template_id)
+        if res.get("status") == "error":
+            raise HTTPException(status_code=400, detail=res.get("message"))
+        return res
+
+    # --- Gestão de Modelos de Recrutamento (Recruitment Models - SQLite) ---
+
+    @router.get("/templates/recruitment")
+    def list_recruitment_models_db(account_id: Optional[str] = None):
+        """Lista todos os modelos de recrutamento de tropas disponíveis no SQLite."""
+        return {"models": context.list_recruitment_models(account_id=account_id)}
+
+    @router.post("/templates/recruitment")
+    def create_recruitment_model_db(payload: RecruitmentModelCreateRequest):
+        """Cria um novo modelo de tropas no SQLite."""
+        return context.save_recruitment_model(payload.model_dump(exclude_unset=True))
+
+    @router.get("/templates/recruitment/{model_id}")
+    def get_recruitment_model_db(model_id: str):
+        """Obtém detalhes de um modelo de tropas de recrutamento."""
+        m = context.get_recruitment_model(model_id)
+        if not m:
+            raise HTTPException(status_code=404, detail=f"Modelo de recrutamento '{model_id}' não encontrado.")
+        return m
+
+    @router.put("/templates/recruitment/{model_id}")
+    def update_recruitment_model_db(model_id: str, payload: RecruitmentModelUpdateRequest):
+        """Atualiza quantidades de tropas e tamanhos de lote de um modelo no SQLite."""
+        data = payload.model_dump(exclude_unset=True)
+        data["id"] = model_id
+        return context.save_recruitment_model(data)
+
+    @router.post("/templates/recruitment/{model_id}/clone")
+    def clone_recruitment_model_db(model_id: str, payload: Optional[CloneTemplateRequest] = None):
+        """Clona um modelo de tropas para gerar uma variante customizada."""
+        new_name = payload.new_name if payload else None
+        account_id = payload.account_id if payload else None
+        res = context.clone_recruitment_model(model_id, new_name=new_name, account_id=account_id)
+        if res.get("status") == "error":
+            raise HTTPException(status_code=404, detail=res.get("message"))
+        return res
+
+    @router.delete("/templates/recruitment/{model_id}")
+    def delete_recruitment_model_db_route(model_id: str):
+        """Remove um modelo de tropas personalizado do SQLite."""
+        res = context.delete_recruitment_model_db(model_id)
+        if res.get("status") == "error":
+            raise HTTPException(status_code=400, detail=res.get("message"))
+        return res
+
+    # Aliases e compatibilidade legada para recrutamento
     @router.get("/recruitment/models")
     async def get_recruitment_models():
         """Retorna todos os modelos de tropas configurados (Ataque, Defesa e Customizados)."""
@@ -796,7 +926,7 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
 
     @router.post("/recruitment/models", response_model=ActionResponse)
     async def save_recruitment_models(payload: RecruitmentModelsRequest):
-        """Salva os modelos de tropas (Ataque, Defesa e Customizados) no config.json."""
+        """Salva os modelos de tropas (Ataque, Defesa e Customizados) no SQLite e config.json."""
         res = context.save_recruitment_models(
             attack=payload.attack,
             defense=payload.defense,
@@ -806,7 +936,7 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
 
     @router.delete("/recruitment/models/{name}", response_model=ActionResponse)
     async def delete_recruitment_model(name: str):
-        """Remove um modelo de tropas customizado do config.json."""
+        """Remove um modelo de tropas customizado do SQLite e config.json."""
         res = context.delete_recruitment_model(name)
         return ActionResponse(status=res["status"], message=res.get("message"))
 

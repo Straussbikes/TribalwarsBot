@@ -472,6 +472,80 @@ class SidecarApi {
       method: "POST",
     });
   }
+
+  // --- Gestão de Modelos de Construção (Building Templates - SQLite) ---
+  async getBuildingTemplates(accountId = null) {
+    const query = accountId ? `?account_id=${encodeURIComponent(accountId)}` : "";
+    return await this.request(`/api/templates/building${query}`);
+  }
+
+  async getBuildingTemplate(templateId) {
+    return await this.request(`/api/templates/building/${encodeURIComponent(templateId)}`);
+  }
+
+  async createBuildingTemplate(data) {
+    return await this.request("/api/templates/building", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateBuildingTemplate(templateId, data) {
+    return await this.request(`/api/templates/building/${encodeURIComponent(templateId)}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async cloneBuildingTemplate(templateId, newName = null, accountId = null) {
+    return await this.request(`/api/templates/building/${encodeURIComponent(templateId)}/clone`, {
+      method: "POST",
+      body: JSON.stringify({ new_name: newName, account_id: accountId }),
+    });
+  }
+
+  async deleteBuildingTemplate(templateId) {
+    return await this.request(`/api/templates/building/${encodeURIComponent(templateId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  // --- Gestão de Modelos de Recrutamento (Recruitment Models - SQLite) ---
+  async getRecruitmentTemplates(accountId = null) {
+    const query = accountId ? `?account_id=${encodeURIComponent(accountId)}` : "";
+    return await this.request(`/api/templates/recruitment${query}`);
+  }
+
+  async getRecruitmentTemplate(modelId) {
+    return await this.request(`/api/templates/recruitment/${encodeURIComponent(modelId)}`);
+  }
+
+  async createRecruitmentTemplate(data) {
+    return await this.request("/api/templates/recruitment", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateRecruitmentTemplate(modelId, data) {
+    return await this.request(`/api/templates/recruitment/${encodeURIComponent(modelId)}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async cloneRecruitmentTemplate(modelId, newName = null, accountId = null) {
+    return await this.request(`/api/templates/recruitment/${encodeURIComponent(modelId)}/clone`, {
+      method: "POST",
+      body: JSON.stringify({ new_name: newName, account_id: accountId }),
+    });
+  }
+
+  async deleteRecruitmentTemplate(modelId) {
+    return await this.request(`/api/templates/recruitment/${encodeURIComponent(modelId)}`, {
+      method: "DELETE",
+    });
+  }
 }
 
 // Exporta instância global

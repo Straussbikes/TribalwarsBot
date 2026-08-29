@@ -45,18 +45,15 @@ async def main():
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host local do servidor API (padrão: 127.0.0.1)")
     args, _ = parser.parse_known_args()
 
-    # Carrega definições do config.json e variáveis de ambiente
-
+    # Carrega definições a partir do SQLite (data/accounts.db) ou variáveis de ambiente
     config = load_config()
 
     world = config.world
     sid = config.sid
 
-
     if not sid:
-        logger.warning(
-            "Cookie 'sid' não configurado (nem em config.json nem via TW_SID). "
-            "A executar em modo de demonstração com componentes isolados."
+        logger.info(
+            "Nenhuma sessão ativa encontrada. A inicializar a aplicação com o Hub de Contas (Modo Offline)."
         )
 
     # 1. Instanciação do motor de agendamento prioritário

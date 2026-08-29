@@ -203,6 +203,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     bldBadgeStatus: document.getElementById("bld-badge-status"),
     bldIntervalSeconds: document.getElementById("bld-interval-seconds"),
     bldTemplateBadge: document.getElementById("bld-template-badge"),
+    bldTemplateSelect: document.getElementById("bld-template-select"),
+    btnManageBuildingTemplates: document.getElementById("btn-manage-building-templates"),
+    buildingTemplateModal: document.getElementById("building-template-modal"),
+    btnCloseBuildingTemplateModal: document.getElementById("btn-close-building-template-modal"),
+    btnModalNewBldTemplate: document.getElementById("btn-modal-new-bld-template"),
+    bldTemplatesListContainer: document.getElementById("bld-templates-list-container"),
+    inputBldTemplateId: document.getElementById("input-bld-template-id"),
+    inputBldTemplateName: document.getElementById("input-bld-template-name"),
+    btnModalCloneBldTemplate: document.getElementById("btn-modal-clone-bld-template"),
+    btnModalDeleteBldTemplate: document.getElementById("btn-modal-delete-bld-template"),
+    bldTemplateStepsCount: document.getElementById("bld-template-steps-count"),
+    selectAddBldType: document.getElementById("select-add-bld-type"),
+    inputAddBldLevel: document.getElementById("input-add-bld-level"),
+    btnAddBldStep: document.getElementById("btn-add-bld-step"),
+    bldTemplateStepsTbody: document.getElementById("bld-template-steps-tbody"),
+    btnCancelEditBldTemplate: document.getElementById("btn-cancel-edit-bld-template"),
+    btnSaveEditBldTemplate: document.getElementById("btn-save-edit-bld-template"),
+    bldTemplateSaveMsg: document.getElementById("bld-template-save-msg"),
     bldQueueCount: document.getElementById("bld-queue-count"),
     bldMaxQueue: document.getElementById("bld-max-queue"),
     bldQueueStatusText: document.getElementById("bld-queue-status-text"),
@@ -224,6 +242,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     btnRefreshRecTab: document.getElementById("btn-refresh-rec-tab"),
     recActiveQueueBadge: document.getElementById("rec-active-queue-badge"),
     recActiveQueueContainer: document.getElementById("rec-active-queue-container"),
+    btnCloneRecModel: document.getElementById("btn-clone-rec-model"),
 
     // Mercado Switches
     marketToggleEnabled: document.getElementById("market-toggle-enabled"),
@@ -1210,7 +1229,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           sel.style.opacity = "1";
           sel.style.borderColor = "var(--neon-emerald)";
           setTimeout(() => { sel.style.borderColor = ""; }, 1500);
-          addLogEntry("SUCCESS", "village", `Aldeia ${vid} configurada com modelo '${catLabel}'. Persistido no config.json.`);
+          addLogEntry("SUCCESS", "village", `Aldeia ${vid} configurada com modelo '${catLabel}'. Persistido no SQLite.`);
         } catch (err) {
           sel.style.opacity = "1";
           sel.style.borderColor = "var(--neon-crimson)";
@@ -2348,6 +2367,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (elements.bldTemplateBadge) {
       elements.bldTemplateBadge.textContent = (data.template || "custom").toUpperCase();
     }
+    if (elements.bldTemplateSelect && data.template) {
+      elements.bldTemplateSelect.value = data.template;
+    }
 
     const queue = data.queue || [];
     const maxQ = data.max_queue || 2;
@@ -2620,6 +2642,324 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     });
   }
+
+  // --- Gestão de Templates de Construção no SQLite ---
+  let cachedBuildingTemplates = [];
+  let currentEditingTemplate = null;
+  let currentEditingSteps = [];
+
+  async function loadBuildingTemplatesList(selectedId = null) {
+    try {
+      const res = await window.api.getBuildingTemplates();
+      if (res && res.templates) {
+        cachedBuildingTemplates = res.templates;
+        
+        // Atualiza Dropdown da Aba de Edifícios
+        if (elements.bldTemplateSelect) {
+          const currentVal = selectedId || elements.bldTemplateSelect.value || "rush_resources";
+          elements.bldTemplateSelect.innerHTML = cachedBuildingTemplates.map(t => {
+            const label = t.name + (t.is_default ? " (Padrão)" : "");
+            return `<option value="${t.id}">${label}</option>`;
+          }).join("");
+          if (cachedBuildingTemplates.some(t => t.id === currentVal)) {
+            elements.bldTemplateSelect.value = currentVal;
+          }
+        }
+
+        // Atualiza Dropdown do Modal de Contas
+        if (elements.inputAccTemplate) {
+          elements.inputAccTemplate.innerHTML = cachedBuildingTemplates.map(t => {
+            const label = t.name + (t.is_default ? " (Padrão)" : "");
+            return `<option value="${t.id}">${label}</option>`;
+          }).join("");
+        }
+      }
+    } catch (err) {
+      console.warn("Falha ao carregar templates de construção:", err);
+    }
+  }
+
+  if (elements.bldTemplateSelect) {
+    elements.bldTemplateSelect.addEventListener("change", async () => {
+      const targetTmpl = elements.bldTemplateSelect.value;
+      try {
+        addLogEntry("INFO", "building", `A alterar estratégia de construção ativa para '${targetTmpl}'...`);
+        await window.api.updateConfig({ building: { template: targetTmpl } });
+        addLogEntry("SUCCESS", "building", `Estratégia de construção alterada para '${targetTmpl}'.`);
+        await loadBuildingData();
+      } catch (err) {
+        addLogEntry("ERROR", "building", `Falha ao alternar template de construção: ${err.message}`);
+      }
+    });
+  }
+
+  // Abertura e Gestão do Modal de Templates de Construção
+  if (elements.btnManageBuildingTemplates) {
+    elements.btnManageBuildingTemplates.addEventListener("click", () => {
+      openBuildingTemplateModal();
+    });
+  }
+
+  if (elements.btnCloseBuildingTemplateModal) {
+    elements.btnCloseBuildingTemplateModal.addEventListener("click", closeBuildingTemplateModal);
+  }
+  if (elements.btnCancelEditBldTemplate) {
+    elements.btnCancelEditBldTemplate.addEventListener("click", closeBuildingTemplateModal);
+  }
+
+  function openBuildingTemplateModal() {
+    if (!elements.buildingTemplateModal) return;
+    elements.buildingTemplateModal.style.display = "flex";
+    renderBuildingTemplatesModalList();
+    const activeId = elements.bldTemplateSelect?.value || cachedBuildingTemplates[0]?.id;
+    const found = cachedBuildingTemplates.find(t => t.id === activeId) || cachedBuildingTemplates[0];
+    if (found) {
+      selectTemplateForEditing(found);
+    } else {
+      createNewTemplateInEditor();
+    }
+  }
+
+  function closeBuildingTemplateModal() {
+    if (elements.buildingTemplateModal) {
+      elements.buildingTemplateModal.style.display = "none";
+    }
+    if (elements.bldTemplateSaveMsg) elements.bldTemplateSaveMsg.textContent = "";
+  }
+
+  function renderBuildingTemplatesModalList() {
+    if (!elements.bldTemplatesListContainer) return;
+    elements.bldTemplatesListContainer.innerHTML = cachedBuildingTemplates.map(t => {
+      const isSelected = currentEditingTemplate && currentEditingTemplate.id === t.id;
+      const badge = t.is_default 
+        ? `<span style="font-size:0.65rem; background:rgba(6,182,212,0.2); color:var(--neon-cyan); padding:1px 5px; border-radius:4px;">Padrão</span>`
+        : `<span style="font-size:0.65rem; background:rgba(245,158,11,0.2); color:var(--neon-amber); padding:1px 5px; border-radius:4px;">Custom</span>`;
+      return `
+        <div class="bld-tmpl-list-item ${isSelected ? 'active' : ''}" data-id="${t.id}" style="padding: 8px 10px; border-radius: 6px; cursor: pointer; background: ${isSelected ? 'rgba(6,182,212,0.15)' : 'rgba(15,23,42,0.5)'}; border: 1px solid ${isSelected ? 'var(--neon-cyan)' : 'var(--border-subtle)'}; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-size: 0.82rem; font-weight: 700; color: ${isSelected ? 'var(--neon-cyan)' : '#fff'};">${t.name}</div>
+            <div style="font-size: 0.7rem; color: var(--text-muted);">${(t.priority_list || []).length} passos</div>
+          </div>
+          ${badge}
+        </div>
+      `;
+    }).join("");
+
+    elements.bldTemplatesListContainer.querySelectorAll(".bld-tmpl-list-item").forEach(el => {
+      el.addEventListener("click", () => {
+        const id = el.getAttribute("data-id");
+        const tmpl = cachedBuildingTemplates.find(t => t.id === id);
+        if (tmpl) selectTemplateForEditing(tmpl);
+      });
+    });
+  }
+
+  function selectTemplateForEditing(tmpl) {
+    currentEditingTemplate = tmpl;
+    currentEditingSteps = JSON.parse(JSON.stringify(tmpl.priority_list || []));
+    if (elements.inputBldTemplateId) elements.inputBldTemplateId.value = tmpl.id;
+    if (elements.inputBldTemplateName) elements.inputBldTemplateName.value = tmpl.name;
+    if (elements.bldTemplateSaveMsg) elements.bldTemplateSaveMsg.textContent = "";
+
+    if (elements.btnModalDeleteBldTemplate) {
+      elements.btnModalDeleteBldTemplate.style.display = tmpl.is_default ? "none" : "inline-block";
+    }
+
+    renderBuildingTemplatesModalList();
+    renderEditingStepsTable();
+  }
+
+  function createNewTemplateInEditor() {
+    currentEditingTemplate = {
+      id: null,
+      name: "Novo Modelo Personalizado",
+      priority_list: [],
+      is_default: false,
+    };
+    currentEditingSteps = [];
+    if (elements.inputBldTemplateId) elements.inputBldTemplateId.value = "";
+    if (elements.inputBldTemplateName) elements.inputBldTemplateName.value = "Novo Modelo Personalizado";
+    if (elements.btnModalDeleteBldTemplate) elements.btnModalDeleteBldTemplate.style.display = "none";
+    if (elements.bldTemplateSaveMsg) elements.bldTemplateSaveMsg.textContent = "";
+
+    renderBuildingTemplatesModalList();
+    renderEditingStepsTable();
+  }
+
+  if (elements.btnModalNewBldTemplate) {
+    elements.btnModalNewBldTemplate.addEventListener("click", createNewTemplateInEditor);
+  }
+
+  function renderEditingStepsTable() {
+    if (elements.bldTemplateStepsCount) {
+      elements.bldTemplateStepsCount.textContent = currentEditingSteps.length.toString();
+    }
+    if (!elements.bldTemplateStepsTbody) return;
+
+    if (currentEditingSteps.length === 0) {
+      elements.bldTemplateStepsTbody.innerHTML = `
+        <tr>
+          <td colspan="4" style="padding: 18px; text-align: center; color: var(--text-muted);">
+            Nenhum passo definido. Use o formulário acima para adicionar passos de construção.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    elements.bldTemplateStepsTbody.innerHTML = currentEditingSteps.map((step, idx) => {
+      const bldId = Array.isArray(step) ? step[0] : step.building;
+      const lvl = Array.isArray(step) ? step[1] : step.level;
+      const icon = BUILDING_ICONS[bldId] || "🏛️";
+      const bName = BUILDING_PT_NAMES[bldId] || bldId;
+
+      return `
+        <tr style="border-bottom: 1px solid var(--border-subtle);">
+          <td style="padding: 6px 10px; font-family: var(--font-mono); color: var(--text-muted);">${idx + 1}</td>
+          <td style="padding: 6px 10px; font-weight: 600; color: #fff;">${icon} ${bName} <span style="font-size:0.7rem; color:var(--text-muted);">(${bldId})</span></td>
+          <td style="padding: 6px 10px; font-family: var(--font-mono); color: var(--neon-cyan); font-weight: 700;">Nível ${lvl}</td>
+          <td style="padding: 6px 10px; text-align: right;">
+            <button type="button" class="btn btn-secondary btn-sm btn-step-up" data-idx="${idx}" style="padding: 1px 5px; font-size: 0.7rem;" title="Mover para cima" ${idx === 0 ? 'disabled' : ''}>▲</button>
+            <button type="button" class="btn btn-secondary btn-sm btn-step-down" data-idx="${idx}" style="padding: 1px 5px; font-size: 0.7rem;" title="Mover para baixo" ${idx === currentEditingSteps.length - 1 ? 'disabled' : ''}>▼</button>
+            <button type="button" class="btn btn-outline btn-sm btn-step-del" data-idx="${idx}" style="padding: 1px 5px; font-size: 0.7rem; color: #f87171; border-color: rgba(239,68,68,0.4);" title="Remover passo">✕</button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    elements.bldTemplateStepsTbody.querySelectorAll(".btn-step-up").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const i = parseInt(btn.getAttribute("data-idx"), 10);
+        if (i > 0) {
+          const temp = currentEditingSteps[i];
+          currentEditingSteps[i] = currentEditingSteps[i - 1];
+          currentEditingSteps[i - 1] = temp;
+          renderEditingStepsTable();
+        }
+      });
+    });
+
+    elements.bldTemplateStepsTbody.querySelectorAll(".btn-step-down").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const i = parseInt(btn.getAttribute("data-idx"), 10);
+        if (i < currentEditingSteps.length - 1) {
+          const temp = currentEditingSteps[i];
+          currentEditingSteps[i] = currentEditingSteps[i + 1];
+          currentEditingSteps[i + 1] = temp;
+          renderEditingStepsTable();
+        }
+      });
+    });
+
+    elements.bldTemplateStepsTbody.querySelectorAll(".btn-step-del").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const i = parseInt(btn.getAttribute("data-idx"), 10);
+        currentEditingSteps.splice(i, 1);
+        renderEditingStepsTable();
+      });
+    });
+  }
+
+  if (elements.btnAddBldStep) {
+    elements.btnAddBldStep.addEventListener("click", () => {
+      const bld = elements.selectAddBldType?.value || "wood";
+      const lvl = parseInt(elements.inputAddBldLevel?.value, 10) || 1;
+      currentEditingSteps.push([bld, lvl]);
+      renderEditingStepsTable();
+    });
+  }
+
+  if (elements.btnSaveEditBldTemplate) {
+    elements.btnSaveEditBldTemplate.addEventListener("click", async () => {
+      const name = elements.inputBldTemplateName?.value?.trim();
+      if (!name) {
+        alert("Por favor indique um nome para o modelo de construção.");
+        return;
+      }
+      if (currentEditingSteps.length === 0) {
+        alert("Adicione pelo menos um passo de evolução ao modelo.");
+        return;
+      }
+
+      try {
+        elements.btnSaveEditBldTemplate.disabled = true;
+        elements.btnSaveEditBldTemplate.textContent = "A gravar no SQLite...";
+
+        const templateId = elements.inputBldTemplateId?.value || null;
+        const payload = {
+          name,
+          priority_list: currentEditingSteps,
+          target_levels: {},
+        };
+
+        if (templateId) {
+          await window.api.updateBuildingTemplate(templateId, payload);
+          addLogEntry("SUCCESS", "building", `Modelo de construção '${name}' atualizado no SQLite.`);
+        } else {
+          const res = await window.api.createBuildingTemplate(payload);
+          addLogEntry("SUCCESS", "building", `Novo modelo de construção '${name}' criado no SQLite.`);
+        }
+
+        if (elements.bldTemplateSaveMsg) {
+          elements.bldTemplateSaveMsg.textContent = "✓ Guardado no SQLite com sucesso!";
+        }
+
+        await loadBuildingTemplatesList(templateId);
+        renderBuildingTemplatesModalList();
+      } catch (err) {
+        alert(`Falha ao guardar modelo no SQLite: ${err.message}`);
+      } finally {
+        elements.btnSaveEditBldTemplate.disabled = false;
+        elements.btnSaveEditBldTemplate.textContent = "💾 Guardar no SQLite";
+      }
+    });
+  }
+
+  if (elements.btnModalCloneBldTemplate) {
+    elements.btnModalCloneBldTemplate.addEventListener("click", async () => {
+      if (!currentEditingTemplate || !currentEditingTemplate.id) {
+        alert("Selecione um modelo existente para clonar.");
+        return;
+      }
+      const newName = prompt(`Introduza o nome da cópia de '${currentEditingTemplate.name}':`, `${currentEditingTemplate.name} (Cópia)`);
+      if (!newName) return;
+
+      try {
+        const res = await window.api.cloneBuildingTemplate(currentEditingTemplate.id, newName);
+        if (res && res.template) {
+          addLogEntry("SUCCESS", "building", `Modelo '${newName}' clonado no SQLite com sucesso.`);
+          await loadBuildingTemplatesList(res.template.id);
+          selectTemplateForEditing(res.template);
+        }
+      } catch (err) {
+        alert(`Falha ao clonar modelo: ${err.message}`);
+      }
+    });
+  }
+
+  if (elements.btnModalDeleteBldTemplate) {
+    elements.btnModalDeleteBldTemplate.addEventListener("click", async () => {
+      if (!currentEditingTemplate || !currentEditingTemplate.id) return;
+      if (currentEditingTemplate.is_default) {
+        alert("Não é possível eliminar modelos padrão do sistema.");
+        return;
+      }
+
+      if (confirm(`Tem a certeza que deseja eliminar o modelo '${currentEditingTemplate.name}' do SQLite?`)) {
+        try {
+          await window.api.deleteBuildingTemplate(currentEditingTemplate.id);
+          addLogEntry("SUCCESS", "building", `Modelo '${currentEditingTemplate.name}' removido do SQLite.`);
+          await loadBuildingTemplatesList();
+          createNewTemplateInEditor();
+        } catch (err) {
+          alert(`Falha ao eliminar modelo: ${err.message}`);
+        }
+      }
+    });
+  }
+
+  // Carrega templates de construção na inicialização
+  loadBuildingTemplatesList();
 
   // Ticker decrescente de contagem de tempo da fila
   setInterval(() => {
@@ -3716,7 +4056,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       await window.api.updateConfig(payload);
-      addLogEntry("SUCCESS", "settings", "Configurações gravadas com sucesso no config.json.");
+      addLogEntry("SUCCESS", "settings", "Configurações gravadas com sucesso no SQLite para a conta ativa.");
       alert("Configurações atualizadas com sucesso!");
     } catch (err) {
       alert(`Falha ao gravar configurações: ${err.message}`);
@@ -3805,15 +4145,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  state.recruitmentBatchSizes = {};
+
   function renderActiveModelUnits() {
     const gridContainer = document.getElementById("grid-model-active-units");
     if (!gridContainer) return;
 
     const activeKey = state.activeRecModelTab || "attack";
     const activeModel = state.recruitmentModels[activeKey] || {};
+    const activeBatch = (state.recruitmentBatchSizes && state.recruitmentBatchSizes[activeKey]) || {};
 
     gridContainer.innerHTML = REC_UNITS_METADATA.map(u => {
-      const val = activeModel[u.id] !== undefined ? activeModel[u.id] : 0;
+      const targetVal = activeModel[u.id] !== undefined ? activeModel[u.id] : 0;
+      const batchVal = activeBatch[u.id] !== undefined ? activeBatch[u.id] : (u.id === "spear" || u.id === "sword" || u.id === "axe" ? 10 : (u.id === "light" ? 5 : 1));
       return `
         <div class="unit-model-card" style="flex: 1 1 200px; max-width: 320px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; transition: border-color 0.2s ease;">
           <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -3825,9 +4169,15 @@ document.addEventListener("DOMContentLoaded", async () => {
               </div>
             </div>
           </div>
-          <div>
-            <label style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Alvo de Tropas:</label>
-            <input type="number" class="form-control model-rec-input" data-model="${activeKey}" data-unit="${u.id}" value="${val}" min="0" style="width: 100%; font-family: var(--font-mono); font-size: 0.9rem; text-align: right; padding: 6px 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); color: #fff; border-radius: 6px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div>
+              <label style="font-size: 0.73rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Alvo Total:</label>
+              <input type="number" class="form-control model-rec-input" data-model="${activeKey}" data-unit="${u.id}" value="${targetVal}" min="0" style="width: 100%; font-family: var(--font-mono); font-size: 0.88rem; text-align: right; padding: 5px 8px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); color: #fff; border-radius: 6px;">
+            </div>
+            <div>
+              <label style="font-size: 0.73rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Lote Treino:</label>
+              <input type="number" class="form-control model-batch-input" data-model="${activeKey}" data-unit="${u.id}" value="${batchVal}" min="1" style="width: 100%; font-family: var(--font-mono); font-size: 0.88rem; text-align: right; padding: 5px 8px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); color: var(--neon-cyan); border-radius: 6px;">
+            </div>
           </div>
         </div>
       `;
@@ -3842,6 +4192,17 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (!state.recruitmentModels[model]) state.recruitmentModels[model] = {};
         state.recruitmentModels[model][unit] = count;
         updateModelTotalPopDisplay();
+      });
+    });
+
+    gridContainer.querySelectorAll(".model-batch-input").forEach(inp => {
+      inp.addEventListener("input", (e) => {
+        const model = e.target.dataset.model;
+        const unit = e.target.dataset.unit;
+        const count = parseInt(e.target.value, 10) || 1;
+        if (!state.recruitmentBatchSizes) state.recruitmentBatchSizes = {};
+        if (!state.recruitmentBatchSizes[model]) state.recruitmentBatchSizes[model] = {};
+        state.recruitmentBatchSizes[model][unit] = count;
       });
     });
 
@@ -3869,7 +4230,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         banner.style.background = "rgba(245, 158, 11, 0.08)";
         banner.style.borderLeftColor = "#f59e0b";
         banner.style.color = "#fde68a";
-        banner.innerHTML = `<strong>✨ Modelo Customizado '${cap}':</strong> Modelo personalizado para atribuição direta em aldeias conquistadas no Mundo 117.`;
+        banner.innerHTML = `<strong>✨ Modelo Customizado '${cap}':</strong> Modelo personalizado salvo no SQLite para atribuição direta em aldeias no Mundo ativo.`;
       }
     }
 
@@ -3883,7 +4244,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Botão: Adicionar Modelo Customizado
-  document.getElementById("btn-add-custom-model")?.addEventListener("click", () => {
+  document.getElementById("btn-add-custom-model")?.addEventListener("click", async () => {
     const rawName = prompt("Introduza o nome do novo modelo de tropas (ex: Nuke, Farm, Apoio_Rapido):");
     if (!rawName) return;
     const name = rawName.toLowerCase().replace(/[^a-z0-9_]/g, "_").trim();
@@ -3897,13 +4258,54 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    // Cria novo modelo com valores zerados
-    const newModel = {};
-    REC_UNITS_METADATA.forEach(u => { newModel[u.id] = 0; });
-    state.recruitmentModels[name] = newModel;
+    // Cria novo modelo no SQLite
+    const newUnits = {};
+    const newBatches = {};
+    REC_UNITS_METADATA.forEach(u => {
+      newUnits[u.id] = 0;
+      newBatches[u.id] = u.id === "spear" || u.id === "sword" || u.id === "axe" ? 10 : (u.id === "light" ? 5 : 1);
+    });
 
-    switchRecModelTab(name);
-    addLogEntry("INFO", "recruitment", `Novo modelo de tropas '${name}' criado. Ajuste os alvos e clique em 'Guardar Modelos'.`);
+    try {
+      await window.api.createRecruitmentTemplate({
+        id: name,
+        name: rawName,
+        units: newUnits,
+        batch_sizes: newBatches,
+      });
+
+      state.recruitmentModels[name] = newUnits;
+      if (!state.recruitmentBatchSizes) state.recruitmentBatchSizes = {};
+      state.recruitmentBatchSizes[name] = newBatches;
+
+      switchRecModelTab(name);
+      addLogEntry("SUCCESS", "recruitment", `Novo modelo de tropas '${rawName}' criado e guardado no SQLite. Ajuste as quantidades e guarde.`);
+    } catch (err) {
+      alert(`Falha ao criar modelo no SQLite: ${err.message}`);
+    }
+  });
+
+  // Botão: Clonar Modelo Ativo
+  document.getElementById("btn-clone-rec-model")?.addEventListener("click", async () => {
+    const activeKey = state.activeRecModelTab || "attack";
+    const rawName = prompt(`Introduza o nome da cópia do modelo '${activeKey}':`, `${activeKey}_copia`);
+    if (!rawName) return;
+    const name = rawName.toLowerCase().replace(/[^a-z0-9_]/g, "_").trim();
+    if (!name) {
+      alert("Nome inválido!");
+      return;
+    }
+
+    try {
+      const res = await window.api.cloneRecruitmentTemplate(activeKey, rawName);
+      if (res && res.model) {
+        addLogEntry("SUCCESS", "recruitment", `Modelo de recrutamento '${rawName}' clonado no SQLite com sucesso.`);
+        await loadRecruitmentData();
+        switchRecModelTab(res.model.id || name);
+      }
+    } catch (err) {
+      alert(`Falha ao clonar modelo no SQLite: ${err.message}`);
+    }
   });
 
   // Botão: Eliminar Modelo Ativo
@@ -3914,12 +4316,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    if (!confirm(`Tem a certeza que deseja eliminar o modelo '${targetModel}'?`)) return;
+    if (!confirm(`Tem a certeza que deseja eliminar o modelo '${targetModel}' do SQLite?`)) return;
 
     try {
-      await window.api.deleteRecruitmentModel(targetModel);
+      await window.api.deleteRecruitmentTemplate(targetModel);
       delete state.recruitmentModels[targetModel];
-      addLogEntry("SUCCESS", "recruitment", `Modelo '${targetModel}' removido com sucesso.`);
+      if (state.recruitmentBatchSizes) delete state.recruitmentBatchSizes[targetModel];
+      addLogEntry("SUCCESS", "recruitment", `Modelo '${targetModel}' removido do SQLite com sucesso.`);
+      await loadRecruitmentData();
       switchRecModelTab("attack");
       
       // Atualiza dropdown de categorias no multi-aldeia
@@ -3927,7 +4331,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         renderVillagesOverview(state.account.villages, state.resource_balance);
       }
     } catch (err) {
-      alert(`Falha ao eliminar modelo: ${err.message}`);
+      alert(`Falha ao eliminar modelo do SQLite: ${err.message}`);
     }
   });
 
@@ -3939,10 +4343,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
       const vId = villageId || (state.village && state.village.id);
       
-      // Carrega modelos de tropas
-      const modelsRes = await window.api.getRecruitmentModels();
-      if (modelsRes && modelsRes.models) {
-        state.recruitmentModels = { ...state.recruitmentModels, ...modelsRes.models };
+      // Carrega modelos de tropas do SQLite
+      const resTemplates = await window.api.getRecruitmentTemplates();
+      if (resTemplates && resTemplates.models) {
+        if (!state.recruitmentBatchSizes) state.recruitmentBatchSizes = {};
+        resTemplates.models.forEach(m => {
+          state.recruitmentModels[m.id] = m.units || {};
+          state.recruitmentBatchSizes[m.id] = m.batch_sizes || {};
+        });
         renderModelTabs();
         renderActiveModelUnits();
       }
@@ -4018,13 +4426,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   async function saveRecruitmentModelsHandler() {
     const btnTop = document.getElementById("btn-save-recruitment");
     const btnBottom = document.getElementById("btn-save-recruitment-bottom");
-    if (btnTop) { btnTop.disabled = true; btnTop.textContent = "A guardar..."; }
-    if (btnBottom) { btnBottom.disabled = true; btnBottom.textContent = "A guardar..."; }
+    if (btnTop) { btnTop.disabled = true; btnTop.textContent = "A gravar no SQLite..."; }
+    if (btnBottom) { btnBottom.disabled = true; btnBottom.textContent = "A gravar no SQLite..."; }
+    state._isSavingRecruitment = true;
 
     try {
       // Coleta valores do modelo atualmente visível
       const activeKey = state.activeRecModelTab;
       if (!state.recruitmentModels[activeKey]) state.recruitmentModels[activeKey] = {};
+      if (!state.recruitmentBatchSizes) state.recruitmentBatchSizes = {};
+      if (!state.recruitmentBatchSizes[activeKey]) state.recruitmentBatchSizes[activeKey] = {};
       
       document.querySelectorAll(".model-rec-input").forEach(inp => {
         const model = inp.dataset.model;
@@ -4034,9 +4445,27 @@ document.addEventListener("DOMContentLoaded", async () => {
         state.recruitmentModels[model][unit] = count;
       });
 
+      document.querySelectorAll(".model-batch-input").forEach(inp => {
+        const model = inp.dataset.model;
+        const unit = inp.dataset.unit;
+        const count = parseInt(inp.value, 10) || 1;
+        if (!state.recruitmentBatchSizes[model]) state.recruitmentBatchSizes[model] = {};
+        state.recruitmentBatchSizes[model][unit] = count;
+      });
+
+      // Grava diretamente no SQLite para cada modelo
+      for (const [mId, uTargets] of Object.entries(state.recruitmentModels)) {
+        const bSizes = state.recruitmentBatchSizes[mId] || {};
+        await window.api.updateRecruitmentTemplate(mId, {
+          name: mId.charAt(0).toUpperCase() + mId.slice(1),
+          units: uTargets,
+          batch_sizes: bSizes,
+        });
+      }
+
       await window.api.saveRecruitmentModels(null, null, state.recruitmentModels);
-      addLogEntry("SUCCESS", "recruitment", "Todos os modelos de tropas (Ataque, Defesa e Customizados) foram guardados e persistidos no config.json.");
-      alert("Modelos de tropas guardados e persistidos com sucesso!");
+      addLogEntry("SUCCESS", "recruitment", "Todos os modelos de tropas e lotes foram salvos e persistidos no SQLite (`data/accounts.db`).");
+      alert("Modelos de tropas guardados e persistidos no SQLite com sucesso!");
       
       // Atualiza lista de modelos na interface e nos dropdowns de multi-aldeia
       renderModelTabs();
@@ -4046,8 +4475,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     } catch (err) {
       addLogEntry("ERROR", "recruitment", `Erro ao guardar modelos: ${err.message}`);
-      alert(`Falha ao guardar modelos: ${err.message}`);
+      alert(`Falha ao guardar modelos no SQLite: ${err.message}`);
     } finally {
+      state._isSavingRecruitment = false;
       if (btnTop) { btnTop.disabled = false; btnTop.innerHTML = "<span>💾</span> Guardar Modelos"; }
       if (btnBottom) { btnBottom.disabled = false; btnBottom.innerHTML = "<span>💾</span> Guardar Modelos"; }
     }
@@ -4070,6 +4500,23 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (btn) { btn.disabled = false; btn.innerHTML = "<span>🔄</span> Atualizar"; }
     }
   });
+
+  // Listeners de WebSocket para templates em tempo real
+  if (window.wsClient) {
+    window.wsClient.on("building_templates_updated", () => {
+      addLogEntry("INFO", "building", "Notificação WebSocket: Modelos de construção atualizados no SQLite.");
+      loadBuildingTemplatesList();
+      if (elements.buildingTemplateModal && elements.buildingTemplateModal.style.display !== "none") {
+        renderBuildingTemplatesModalList();
+      }
+    });
+
+    window.wsClient.on("recruitment_models_updated", () => {
+      if (state._isSavingRecruitment) return;
+      addLogEntry("INFO", "recruitment", "Notificação WebSocket: Modelos de recrutamento atualizados no SQLite.");
+      loadRecruitmentData();
+    });
+  }
 
   // Inicialização do painel de modelos de tropas
   renderModelTabs();

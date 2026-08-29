@@ -357,9 +357,14 @@
               <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                 <div style="display: flex; align-items: center; gap: 6px;">
                   <span style="font-size: 0.8rem; color: var(--text-muted);">Template:</span>
-                  <span id="bld-template-badge" class="badge" style="background: rgba(6,182,212,0.2); color: var(--neon-cyan); font-weight: 700; font-size: 0.8rem;">
-                    CUSTOM
-                  </span>
+                  <select id="bld-template-select" class="form-control" style="padding: 3px 8px; font-size: 0.8rem; font-weight: 700; color: var(--neon-cyan); background: rgba(15,23,42,0.8); border: 1px solid var(--neon-cyan); border-radius: 6px; cursor: pointer;">
+                    <option value="rush_resources">Rush Recursos</option>
+                    <option value="balanced">Equilibrado</option>
+                    <option value="military_rush">Rush Militar</option>
+                  </select>
+                  <button class="btn btn-secondary btn-sm" id="btn-manage-building-templates" title="Gerir, Criar e Clonar Modelos de Construção no SQLite" style="padding: 4px 8px; font-size: 0.75rem;">
+                    <span>⚙️</span> Gerir
+                  </button>
                 </div>
                 <!-- Switch Ligar/Desligar Auto-Construção -->
                 <label class="switch-container" style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-main); cursor: pointer; background: rgba(15,23,42,0.6); padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border-subtle);">
@@ -551,12 +556,17 @@
               <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                 <!-- Botão Adicionar Modelo Customizado -->
                 <button type="button" class="btn btn-secondary" id="btn-add-custom-model" style="padding: 6px 14px; font-size: 0.82rem; border-color: rgba(6, 182, 212, 0.5); color: var(--neon-cyan);">
-                  <span>➕</span> Adicionar Modelo
+                  <span>➕</span> Novo Modelo
+                </button>
+
+                <!-- Botão Clonar Modelo Ativo -->
+                <button type="button" class="btn btn-secondary" id="btn-clone-rec-model" style="padding: 6px 12px; font-size: 0.82rem; border-color: rgba(245, 158, 11, 0.5); color: var(--neon-amber);" title="Clonar este modelo de tropas para uma variante personalizada">
+                  <span>📑</span> Clonar
                 </button>
 
                 <!-- Botão Eliminar Modelo Ativo (para customizados) -->
                 <button type="button" class="btn btn-outline" id="btn-delete-active-model" style="display: none; padding: 6px 12px; font-size: 0.82rem; border-color: rgba(239, 68, 68, 0.5); color: #fca5a5;">
-                  <span>🗑️</span> Eliminar Modelo
+                  <span>🗑️</span> Eliminar
                 </button>
 
                 <!-- Indicador de População Total do Modelo Selecionado -->
@@ -1395,7 +1405,7 @@
         <div class="glass-card" style="max-width: 900px; margin: 0 auto">
           <div class="card-header">
             <div class="card-title">
-              <span class="icon">⚙</span> Configurações do Bot (config.json)
+              <span class="icon">⚙</span> Configurações do Bot (Definições da Conta)
             </div>
           </div>
 
@@ -1718,6 +1728,103 @@
           <button class="btn btn-secondary" id="btn-resume-after-captcha" style="background: rgba(16,185,129,0.2); border: 1px solid var(--neon-emerald); color: var(--neon-emerald); padding: 8px 16px;">
             <span>▶</span> Já Resolvi / Retomar
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal de Gestão de Modelos de Construção (Building Templates - SQLite) -->
+    <div class="modal-overlay" id="building-template-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); z-index: 2100; align-items: center; justify-content: center;">
+      <div class="modal-box" style="max-width: 840px; width: 90%; text-align: left; max-height: 90vh; display: flex; flex-direction: column; padding: 24px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-glass); padding-bottom: 14px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 1.5rem;">🏛️</span>
+            <div>
+              <h2 class="modal-title" style="margin: 0; font-size: 1.25rem;">Gestor de Modelos de Construção</h2>
+              <span style="font-size: 0.75rem; color: var(--text-muted);">Base de Dados Local SQLite (`data/accounts.db`)</span>
+            </div>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-close-building-template-modal">✕ Fechar</button>
+        </div>
+
+        <div style="display: flex; gap: 20px; flex: 1; min-height: 0; overflow: hidden;">
+          <!-- Lista Lateral de Templates -->
+          <div style="width: 240px; border-right: 1px solid var(--border-subtle); padding-right: 14px; display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Modelos</span>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-modal-new-bld-template" style="padding: 2px 8px; font-size: 0.72rem;">➕ Novo</button>
+            </div>
+            <div id="bld-templates-list-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+              <!-- Injetado via JS -->
+            </div>
+          </div>
+
+          <!-- Painel de Edição do Template Selecionado -->
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; padding-left: 6px;">
+            <input type="hidden" id="input-bld-template-id">
+            <div style="display: flex; gap: 10px; align-items: center;">
+              <div style="flex: 1;">
+                <label style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Nome do Modelo:</label>
+                <input type="text" id="input-bld-template-name" class="form-control" placeholder="ex: Rush Recursos v2" style="width: 100%; font-weight: 600;">
+              </div>
+              <div style="padding-top: 18px;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-modal-clone-bld-template" title="Clonar este modelo">📑 Clonar</button>
+                <button type="button" class="btn btn-outline btn-sm" id="btn-modal-delete-bld-template" style="color: #f87171; border-color: rgba(239,68,68,0.4);" title="Eliminar modelo">🗑️</button>
+              </div>
+            </div>
+
+            <!-- Editor da Sequência de Passos (Priority List) -->
+            <div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 0.8rem; font-weight: 700; color: #fff;">Sequência de Evolução (<span id="bld-template-steps-count">0</span> passos):</span>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                  <select id="select-add-bld-type" class="form-control" style="font-size: 0.75rem; padding: 2px 6px;">
+                    <option value="wood">🌲 Bosque</option>
+                    <option value="stone">🧱 Argila</option>
+                    <option value="iron">⛏️ Ferro</option>
+                    <option value="main">🏛️ Edifício Principal</option>
+                    <option value="barracks">🗡️ Quartel</option>
+                    <option value="stable">🐎 Estábulo</option>
+                    <option value="garage">🚜 Oficina</option>
+                    <option value="smith">🔨 Ferreiro</option>
+                    <option value="place">🚩 Praça de Reunião</option>
+                    <option value="statue">🗿 Estátua</option>
+                    <option value="market">⚖️ Mercado</option>
+                    <option value="farm">🌾 Fazenda</option>
+                    <option value="storage">📦 Armazém</option>
+                    <option value="hide">🕳️ Esconderijo</option>
+                    <option value="wall">🧱 Muralha</option>
+                    <option value="snob">👑 Academia</option>
+                  </select>
+                  <input type="number" id="input-add-bld-level" value="1" min="1" max="30" style="width: 46px; font-size: 0.75rem; text-align: center; background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); color: #fff; border-radius: 4px;">
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-add-bld-step" style="padding: 2px 8px; font-size: 0.75rem; color: var(--neon-cyan);">+ Adicionar Passo</button>
+                </div>
+              </div>
+
+              <div style="border: 1px solid var(--border-subtle); border-radius: 6px; max-height: 280px; overflow-y: auto; background: rgba(0,0,0,0.2);">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem;">
+                  <thead style="background: rgba(30,41,59,0.8); position: sticky; top: 0;">
+                    <tr>
+                      <th style="padding: 6px 10px; width: 40px;">#</th>
+                      <th style="padding: 6px 10px;">Edifício</th>
+                      <th style="padding: 6px 10px;">Nível Alvo</th>
+                      <th style="padding: 6px 10px; text-align: right; width: 90px;">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bld-template-steps-tbody">
+                    <!-- Injetado via JS -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; border-top: 1px solid var(--border-glass); padding-top: 12px;">
+              <span id="bld-template-save-msg" style="font-size: 0.75rem; color: var(--neon-emerald);"></span>
+              <div style="display: flex; gap: 10px;">
+                <button type="button" class="btn btn-secondary" id="btn-cancel-edit-bld-template">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btn-save-edit-bld-template" style="background: var(--gradient-primary); font-weight: 700;">💾 Guardar no SQLite</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

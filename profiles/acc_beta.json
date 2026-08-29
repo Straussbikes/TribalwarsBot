@@ -1,0 +1,31 @@
+{
+  "id": "acc_beta",
+  "name": "Beta",
+  "world_domain": "pt118.tribalwars.com.pt",
+  "world": "pt118",
+  "domain": "tribalwars.com.pt",
+  "village_id": null,
+  "session_cookie": "sid_beta",
+  "sid": "sid_beta",
+  "build_order_strategy": "rush_resources",
+  "building_template": "rush_resources",
+  "farm_presets": [],
+  "recruitment_models": {},
+  "config_data": {
+    "building": {
+      "template": "military_rush",
+      "max_queue": 5
+    },
+    "farm": {
+      "enabled": false
+    }
+  },
+  "proxy": null,
+  "username": "",
+  "password_enc": "",
+  "auto_login": true,
+  "keep_alive": true,
+  "last_used": "2026-08-29T12:31:05.132329",
+  "created_at": 1788003064.5785701,
+  "is_active": true
+}
