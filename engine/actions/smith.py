@@ -116,9 +116,9 @@ def parse_smith_page(html: str) -> Dict[str, Any]:
     normalized = html.replace("&amp;", "&")
 
     # 1. Extração da fila de pesquisa ativa (se houver)
-    for tr_match in re.finditer(r'<tr[^>]*>(?:(?!</tr>).)*?</tr>', normalized, re.DOTALL | re.IGNORECASE):
+    for tr_match in re.finditer(r'<tr[^>]*>(?:(?!</tr>).)*?</tr>|<div[^>]*class=["\'][^"\']*queueItem[^"\']*["\'][^>]*>.*?</div>', normalized, re.DOTALL | re.IGNORECASE):
         row_content = tr_match.group(0)
-        if "action=cancel" not in row_content:
+        if "action=cancel" not in row_content and "action=cancel_research" not in row_content:
             continue
 
         unit_found = None
@@ -163,13 +163,38 @@ def parse_smith_page(html: str) -> Dict[str, Any]:
             }
             continue
 
-        # Procura a linha ou bloco da unidade
+        # Procura a linha ou bloco da unidade por ID, data-unit, imagem ou aliases em texto
+        block_content = ""
         unit_block_regex = re.compile(
-            rf'<tr[^>]*?(?:id=["\'](?:unit_smith_|unit_){canonic_key}["\']|data-unit=["\']{canonic_key}["\'])[^>]*>(?:(?!</tr>).)*?</tr>',
+            rf'<tr[^>]*?(?:id=["\'](?:unit_smith_|unit_){canonic_key}["\']|data-unit=["\']{canonic_key}["\']|class=["\'][^"\']*\bunit_smith_{canonic_key}\b[^"\']*["\'])[^>]*>(?:(?!</tr>).)*?</tr>',
             re.DOTALL | re.IGNORECASE,
         )
         block_m = unit_block_regex.search(normalized)
-        block_content = block_m.group(0) if block_m else ""
+        if block_m:
+            block_content = block_m.group(0)
+
+        if not block_content:
+            # Procura por linhas com a imagem correspondente da unidade (ex: unit_axe.png ou unit_axe)
+            img_row_regex = re.compile(
+                rf'<tr[^>]*>(?:(?!</tr>).)*?unit_{canonic_key}(?:\.png|\.webp|\.gif|["\'])(?:(?!</tr>).)*?</tr>',
+                re.DOTALL | re.IGNORECASE,
+            )
+            img_m = img_row_regex.search(normalized)
+            if img_m:
+                block_content = img_m.group(0)
+
+        if not block_content:
+            # Procura por aliases conhecidos no texto da linha da tabela
+            unit_aliases = [k for k, v in SMITH_UNIT_ALIASES.items() if v == canonic_key]
+            for alias in unit_aliases:
+                alias_row_regex = re.compile(
+                    rf'<tr[^>]*>(?:(?!</tr>).)*?\b{re.escape(alias)}\b(?:(?!</tr>).)*?</tr>',
+                    re.DOTALL | re.IGNORECASE,
+                )
+                alias_m = alias_row_regex.search(normalized)
+                if alias_m:
+                    block_content = alias_m.group(0)
+                    break
 
         if not block_content:
             wide_regex = re.compile(
@@ -180,10 +205,10 @@ def parse_smith_page(html: str) -> Dict[str, Any]:
             if wide_m:
                 block_content = wide_m.group(0)
 
-        # Procura link de pesquisa explícito: action=research&id=canonic_key
+        # Procura link de pesquisa explícito: action=research&id=canonic_key ou ajaxaction=research
         research_link_m = re.search(
-            rf'<a[^>]*href=["\']([^"\']*[?&]action=research[^"\']*[?&]id={canonic_key}[^"\']*)["\'][^>]*>(.*?)</a>|'
-            rf'<a[^>]*href=["\']([^"\']*[?&]id={canonic_key}[^"\']*[?&]action=research[^"\']*)["\'][^>]*>(.*?)</a>',
+            rf'<a[^>]*href=["\']([^"\']*[?&](?:action|ajaxaction)=research[^"\']*[?&]id={canonic_key}[^"\']*)["\'][^>]*>(.*?)</a>|'
+            rf'<a[^>]*href=["\']([^"\']*[?&]id={canonic_key}[^"\']*[?&](?:action|ajaxaction)=research[^"\']*)["\'][^>]*>(.*?)</a>',
             normalized,
             re.IGNORECASE,
         )
@@ -192,45 +217,56 @@ def parse_smith_page(html: str) -> Dict[str, Any]:
         if research_link_m:
             research_url = research_link_m.group(1) or research_link_m.group(3)
 
-        # Determina status da unidade
-        status = "unavailable"
-        level = 0
-
-        # Verifica se já está pesquisado
-        is_researched = False
-        if block_content:
-            if re.search(r'pesquisado|nível\s+1|level\s+1|icon header checked', block_content, re.IGNORECASE):
-                if "não pesquisado" not in block_content.lower() and "requisitos não" not in block_content.lower():
-                    is_researched = True
-            elif not research_url and "requisito" not in block_content.lower() and "inactive" not in block_content.lower():
-                is_researched = True
-
-        if research_url:
-            status = "can_research"
-            level = 0
-        elif is_researched:
-            status = "researched"
-            level = 1
-        elif "em pesquisa" in block_content.lower() or "a pesquisar" in block_content.lower():
-            status = "researching"
-            level = 0
-
-        # Extração de custos se disponível no bloco
+        # Extração de custos se disponível no bloco ou página
         wood, stone, iron = 0, 0, 0
+        def to_int(m):
+            if not m:
+                return 0
+            val = m.group(1).replace(".", "").strip()
+            return int(val) if val.isdigit() else 0
+
+        target_text_for_cost = block_content or normalized
         if block_content:
             w_m = re.search(r'(?:icon header wood|cost_wood|wood)[^>]*>.*?([\d\.]+)', block_content, re.IGNORECASE)
             s_m = re.search(r'(?:icon header stone|cost_stone|stone)[^>]*>.*?([\d\.]+)', block_content, re.IGNORECASE)
             i_m = re.search(r'(?:icon header iron|cost_iron|iron)[^>]*>.*?([\d\.]+)', block_content, re.IGNORECASE)
-
-            def to_int(m):
-                if not m:
-                    return 0
-                val = m.group(1).replace(".", "").strip()
-                return int(val) if val.isdigit() else 0
-
             wood = to_int(w_m)
             stone = to_int(s_m)
             iron = to_int(i_m)
+
+        # Determina status da unidade
+        status = "unavailable"
+        level = 0
+
+        has_costs = (wood > 0 or stone > 0 or iron > 0)
+        lower_block = block_content.lower()
+
+        is_explicit_researched = False
+        if block_content:
+            if re.search(r'\b(?:pesquisado|nível\s+1|level\s+1)\b|icon header checked', lower_block):
+                if "não pesquisado" not in lower_block and "requisitos não" not in lower_block and "não atingidos" not in lower_block:
+                    if not has_costs and not research_url:
+                        is_explicit_researched = True
+
+        if research_url:
+            status = "can_research"
+            level = 0
+        elif "em pesquisa" in lower_block or "a pesquisar" in lower_block or re.search(r'<span[^>]*class=["\']timer["\']', lower_block):
+            status = "researching"
+            level = 0
+        elif is_explicit_researched:
+            status = "researched"
+            level = 1
+        elif "requisito" in lower_block or "requisitos não" in lower_block or "não atingidos" in lower_block or "não cumpridos" in lower_block:
+            status = "unavailable"
+            level = 0
+        elif has_costs:
+            # Requisitos cumpridos, unidade disponível para pesquisa (ou a aguardar recursos)
+            status = "can_research"
+            level = 0
+        elif not block_content:
+            status = "unavailable"
+            level = 0
 
         result["units"][canonic_key] = {
             "unit": canonic_key,
@@ -243,6 +279,21 @@ def parse_smith_page(html: str) -> Dict[str, Any]:
         }
 
     return result
+
+
+# Tabela de pré-requisitos mínimos de edifícios para pesquisa no Ferreiro
+UNIT_RESEARCH_BUILDING_REQUIREMENTS: Dict[str, Dict[str, int]] = {
+    "spear": {"barracks": 1},
+    "sword": {"barracks": 1, "smith": 1},
+    "axe": {"barracks": 2, "smith": 2},
+    "archer": {"barracks": 5, "smith": 5},
+    "spy": {"stable": 1},
+    "light": {"stable": 3, "smith": 5},
+    "marcher": {"stable": 5, "smith": 5},
+    "heavy": {"stable": 10, "smith": 15},
+    "ram": {"garage": 1, "smith": 10},
+    "catapult": {"garage": 2, "smith": 12},
+}
 
 
 class SmithManager:
@@ -307,6 +358,7 @@ class SmithManager:
     ) -> bool:
         """
         Submete uma ordem de pesquisa para a unidade pretendida no Ferreiro.
+        Emite INFO log imediato quando a pesquisa é colocada na fila.
         """
         v_id = village_id or account.current_village_id or 0
         canonic_unit = SMITH_UNIT_ALIASES.get(unit.lower(), unit.lower())
@@ -320,13 +372,29 @@ class SmithManager:
                 "h": account.csrf_token or "",
             }
 
-            await account.get_screen(
+            resp_html = await account.get_screen(
                 screen="smith",
                 village_id=v_id,
                 extra_params=extra_params,
                 apply_jitter=True,
             )
-            logger.info(f"[{account.world}] ✅ Pesquisa de '{canonic_unit.capitalize()}' iniciada com sucesso!")
+
+            # Inspeciona se houve erro reportado pelo jogo
+            if isinstance(resp_html, str):
+                error_m = re.search(
+                    r'<div[^>]*class=["\'][^"\']*(?:error_box|info_box\s+error|error_message)[^"\']*["\'][^>]*>(.*?)</div>|<span[^>]*class=["\']error["\'][^>]*>(.*?)</span>',
+                    resp_html,
+                    re.DOTALL | re.IGNORECASE,
+                )
+                if error_m:
+                    raw_err = error_m.group(1) or error_m.group(2) or ""
+                    clean_err = re.sub(r'<[^>]+>', ' ', raw_err).strip()
+                    if clean_err:
+                        logger.warning(f"[{account.world}] ⚠️ Aviso do jogo ao pesquisar '{canonic_unit}': {clean_err}")
+                        return False
+
+            unit_label = "Vikings (Machados/Axe)" if canonic_unit == "axe" else ("Cavalaria Leve (CL/Light)" if canonic_unit == "light" else canonic_unit.capitalize())
+            logger.info(f"[{account.world}] ⚡ [PESQUISA INICIADA] Pesquisa de {unit_label} iniciada com sucesso no Ferreiro da aldeia {v_id}!")
             return True
         except Exception as e:
             logger.error(f"[{account.world}] Falha ao pesquisar '{canonic_unit}': {e}")
@@ -341,17 +409,17 @@ class SmithManager:
         """
         Verifica se há unidades necessárias não pesquisadas e inicia a sua pesquisa
         caso o Ferreiro e os edifícios pré-requisitos já estejam no nível requerido.
+        Prioriza com prioridade máxima Vikings ('axe') e Cavalaria Leve ('light').
         """
         v_id = village_id or account.current_village_id or 0
         researched_list: List[str] = []
 
-        # Se os edifícios da aldeia são conhecidos e o Ferreiro ainda não existe (nível 0)
         curr_blds = {}
         if v_id in account.villages and account.villages[v_id].buildings:
             curr_blds = account.villages[v_id].buildings
 
         if curr_blds and curr_blds.get("smith", 0) < 1:
-            logger.debug(f"[{account.world}] Ferreiro não construído na aldeia {v_id}. Pesquisa suspensa.")
+            logger.debug(f"[{account.world}] Ferreiro não construído na aldeia {v_id} (nível 0). Pesquisa suspensa.")
             return researched_list
 
         try:
@@ -360,9 +428,11 @@ class SmithManager:
             logger.warning(f"Não foi possível ler o Ferreiro para auto-pesquisa: {e}")
             return researched_list
 
-        # Se já há pesquisas na fila (normalmente o Ferreiro só permite 1 pesquisa simultânea)
+        # Se já há pesquisas na fila (o Ferreiro só permite 1 pesquisa simultânea)
         if state.is_researching_any:
-            logger.debug(f"[{account.world}] Ferreiro ocupado com pesquisa em andamento ({state.queue[0].unit}).")
+            active_unit = state.queue[0].unit
+            timer_info = f" ({state.queue[0].timer_str})" if state.queue[0].timer_str else ""
+            logger.debug(f"[{account.world}] Ferreiro ocupado com pesquisa em andamento: {active_unit}{timer_info}.")
             return researched_list
 
         # Unidades a verificar ordenadas por prioridade máxima (Vikings e CL primeiro)
@@ -375,18 +445,82 @@ class SmithManager:
         remaining = [u for u in (needed_clean or ["spear", "sword", "axe", "spy", "light", "ram"]) if u not in priority_needed]
         check_list = priority_needed + remaining
 
+        # Obtém recursos atuais da aldeia
+        village_res = None
+        if v_id in account.villages and account.villages[v_id].resources:
+            village_res = account.villages[v_id].resources
+
         for u in check_list:
             u_info = state.units.get(u)
             if not u_info:
                 continue
 
-            if u_info.can_research:
-                if u == "axe":
-                    logger.info(f"[{account.world}] ⚡ [RUSH VIKINGS] Pesquisa de Vikings ('axe') iniciada com prioridade máxima no Ferreiro!")
-                elif u == "light":
-                    logger.info(f"[{account.world}] ⚡ [RUSH CL] Pesquisa de Cavalaria Leve ('light') iniciada com prioridade máxima no Ferreiro!")
+            if u_info.is_researched or u_info.is_researching:
+                continue
 
-                # Dispara a pesquisa
+            # Valida pré-requisitos de edifícios se conhecidos
+            reqs = UNIT_RESEARCH_BUILDING_REQUIREMENTS.get(u, {})
+            if curr_blds and reqs:
+                unmet = [
+                    f"{b_req} nv{lvl_req} (atual: {curr_blds.get(b_req, 0)})"
+                    for b_req, lvl_req in reqs.items()
+                    if curr_blds.get(b_req, 0) < lvl_req
+                ]
+                if unmet:
+                    if u == "axe":
+                        logger.info(
+                            f"[{account.world}] ⏳ [RUSH VIKINGS] Pesquisa de Vikings ('axe') aguarda edifícios na aldeia {v_id}: "
+                            f"{', '.join(unmet)}."
+                        )
+                    elif u == "light":
+                        logger.info(
+                            f"[{account.world}] ⏳ [RUSH CL] Pesquisa de Cavalaria Leve ('light') aguarda edifícios na aldeia {v_id}: "
+                            f"{', '.join(unmet)}."
+                        )
+                    continue
+
+            # Custos canónicos de pesquisa se a página não reportar
+            default_research_costs = {
+                "axe": {"wood": 700, "stone": 840, "iron": 820},
+                "spy": {"wood": 560, "stone": 480, "iron": 480},
+                "light": {"wood": 2200, "stone": 2400, "iron": 2000},
+                "heavy": {"wood": 4000, "stone": 4200, "iron": 3800},
+                "ram": {"wood": 1400, "stone": 1600, "iron": 1200},
+                "catapult": {"wood": 1600, "stone": 2000, "iron": 1200},
+            }
+            req_wood = u_info.wood or default_research_costs.get(u, {}).get("wood", 0)
+            req_stone = u_info.stone or default_research_costs.get(u, {}).get("stone", 0)
+            req_iron = u_info.iron or default_research_costs.get(u, {}).get("iron", 0)
+
+            # Verifica se os recursos da aldeia cobrem o custo de pesquisa
+            has_resources = True
+            if village_res and req_wood > 0 and isinstance(getattr(village_res, "wood", None), (int, float)):
+                v_wood = getattr(village_res, "wood", 0)
+                v_stone = getattr(village_res, "stone", 0)
+                v_iron = getattr(village_res, "iron", 0)
+                if isinstance(v_stone, (int, float)) and isinstance(v_iron, (int, float)):
+                    if v_wood < req_wood or v_stone < req_stone or v_iron < req_iron:
+                        has_resources = False
+                        missing = []
+                        if v_wood < req_wood:
+                            missing.append(f"{req_wood - v_wood} Madeira")
+                        if v_stone < req_stone:
+                            missing.append(f"{req_stone - v_stone} Argila")
+                        if v_iron < req_iron:
+                            missing.append(f"{req_iron - v_iron} Ferro")
+                        logger.info(
+                            f"[{account.world}] ⏳ Pesquisa de '{u.capitalize()}' aguarda recursos "
+                            f"(Em falta: {', '.join(missing)} | Necessário: {req_wood}M, {req_stone}A, {req_iron}F | Aldeia: {v_wood}M, {v_stone}A, {v_iron}F)."
+                        )
+
+            if u_info.can_research or (has_resources and u_info.status != "unavailable"):
+                if u == "axe":
+                    logger.info(f"[{account.world}] ⚡ [RUSH VIKINGS] Pré-requisitos cumpridos! A disparar pesquisa de Vikings ('axe') no Ferreiro...")
+                elif u == "light":
+                    logger.info(f"[{account.world}] ⚡ [RUSH CL] Pré-requisitos cumpridos! A disparar pesquisa de Cavalaria Leve ('light') no Ferreiro...")
+                else:
+                    logger.info(f"[{account.world}] 🔬 Pré-requisitos cumpridos! A disparar pesquisa de '{u.capitalize()}' no Ferreiro...")
+
                 success = await self.research_unit(account, u, village_id=v_id)
                 if success:
                     researched_list.append(u)

@@ -128,6 +128,7 @@ async def main():
             plan=build_plan,
             max_queue=config.building.max_queue,
             interval_seconds=config.building.interval_seconds,
+            bot_config=config,
         )
         logger.info(
             f"Módulo do Edifício Principal ativado (Template: '{config.building.template}', "

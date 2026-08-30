@@ -5,16 +5,16 @@
   "world": "pt117",
   "domain": "tribalwars.com.pt",
   "village_id": null,
-  "session_cookie": "0%3Af892bd8dba7e927ebf8ff7edfc81b38f25a859392d9da33d3294c28ecd27f5516fe24dbc332108197a79d4a807fe103770ce6f986734309e2d4ddca011f5e245",
+  "session_cookie": "0%3A09f1e493452fa714d29599235ae3993877070d77ca534a3d5e05c99c5c6b815ffb9b4c9936a3f1989c022426ecc39092edd5cc665c8c8575f43dab358265f4ef",
   "sid": "new_fresh_sid_456",
-  "build_order_strategy": "rush_resources",
-  "building_template": "rush_resources",
+  "build_order_strategy": "default_plan",
+  "building_template": "default_plan",
   "farm_presets": [],
   "recruitment_models": {},
   "config_data": {
     "world": "pt117",
     "domain": "tribalwars.com.pt",
-    "sid": "0%3Af892bd8d...",
+    "sid": "0%3A09f1e493...",
     "auth": {
       "username": "",
       "has_password": false,
@@ -24,7 +24,7 @@
     },
     "building": {
       "enabled": true,
-      "template": "rush_ataque",
+      "template": "default_plan",
       "max_queue": 2,
       "interval_seconds": 75.0,
       "custom_plan": []
@@ -44,9 +44,9 @@
       }
     },
     "recruitment": {
-      "enabled": false,
+      "enabled": true,
       "interval_minutes": 5.0,
-      "min_free_pop": 10,
+      "min_free_pop": 5,
       "targets": {
         "spear": 50,
         "sword": 50,
@@ -94,7 +94,7 @@
   "password_enc": "",
   "auto_login": true,
   "keep_alive": true,
-  "last_used": "2026-08-30T02:53:55.934444",
-  "created_at": 1788052942.597563,
+  "last_used": "2026-08-30T12:18:21.180467",
+  "created_at": 1788086026.320369,
   "is_active": true
 }

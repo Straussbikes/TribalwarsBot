@@ -43,10 +43,10 @@ UNIT_BUILDING_REQUIREMENTS: Dict[str, Dict[str, int]] = {
     "axe": {"barracks": 2, "smith": 2},
     "archer": {"barracks": 5, "smith": 5},
     "spy": {"stable": 1},
-    "light": {"stable": 3},
-    "marcher": {"stable": 5},
+    "light": {"stable": 3, "smith": 5},
+    "marcher": {"stable": 5, "smith": 5},
     "heavy": {"stable": 10, "smith": 15},
-    "ram": {"garage": 1},
+    "ram": {"garage": 1, "smith": 10},
     "catapult": {"garage": 2, "smith": 12},
 }
 

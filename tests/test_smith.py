@@ -80,6 +80,43 @@ class TestSmithParsers(unittest.TestCase):
         self.assertEqual(units["spy"]["status"], "unavailable")
 
 
+    def test_parse_smith_page_insufficient_resources_not_falsely_researched(self):
+        # Quando faltam recursos, o botão é desabilitado (<span class="btn-disabled">)
+        html = """
+        <table>
+          <tr id="unit_smith_axe">
+            <td>Bárbaro</td>
+            <td><span class="icon header wood"></span> 700 <span class="icon header stone"></span> 840 <span class="icon header iron"></span> 820</td>
+            <td><span class="btn btn-default btn-disabled">Recursos insuficientes</span></td>
+          </tr>
+        </table>
+        """
+        data = parse_smith_page(html)
+        axe_info = data["units"]["axe"]
+        # Não deve ser marcado falsamente como 'researched'!
+        self.assertFalse(axe_info["status"] == "researched")
+        self.assertEqual(axe_info["status"], "can_research")
+        self.assertEqual(axe_info["wood"], 700)
+        self.assertEqual(axe_info["stone"], 840)
+        self.assertEqual(axe_info["iron"], 820)
+
+    def test_parse_smith_page_mobile_layout_without_ids(self):
+        # Layout mobile do TW sem id no <tr>, apenas com imagem e nome
+        html = """
+        <table class="vis">
+          <tr>
+            <td><img src="https://dspt.innogamescdn.com/asset/123/graphic/unit/unit_axe.png"> Viking</td>
+            <td><span class="cost_wood"></span> 700 <span class="cost_stone"></span> 840 <span class="cost_iron"></span> 820</td>
+            <td><a class="btn btn-default" href="/game.php?village=6810&screen=smith&action=research&id=axe&h=token123">Pesquisar</a></td>
+          </tr>
+        </table>
+        """
+        data = parse_smith_page(html)
+        axe_info = data["units"]["axe"]
+        self.assertEqual(axe_info["status"], "can_research")
+        self.assertIsNotNone(axe_info["research_url"])
+
+
 class TestSmithAsyncActions(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.account = MagicMock(spec=TribalAccount)
@@ -143,3 +180,4 @@ class TestSmithAsyncActions(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -1235,11 +1235,19 @@ class MainBuildingManager:
         v_id = village_id or account.current_village_id or 0
 
         # Se não foram fornecidas metas explícitas, tenta obter da configuração da aldeia
-        if recruitment_targets is None and hasattr(account, "config") and account.config:
-            try:
-                recruitment_targets = account.config.get_village_recruitment_targets(v_id)
-            except Exception as e:
-                logger.debug(f"Aviso ao obter metas de recrutamento para auto-build rush: {e}")
+        if recruitment_targets is None:
+            if hasattr(account, "config") and account.config:
+                try:
+                    recruitment_targets = account.config.get_village_recruitment_targets(v_id)
+                except Exception as e:
+                    logger.debug(f"Aviso ao obter metas de recrutamento para auto-build rush: {e}")
+            if recruitment_targets is None:
+                try:
+                    from engine.config.settings import load_config
+                    cfg = load_config()
+                    recruitment_targets = cfg.get_village_recruitment_targets(v_id)
+                except Exception as e:
+                    logger.debug(f"Aviso ao carregar config para rush militar: {e}")
 
         # 1. Verifica e conclui ordens gratuitas (< 3 min)
         await self.check_and_complete_instant_builds(account, village_id=v_id)
@@ -1287,6 +1295,19 @@ class MainBuildingManager:
                     break
             else:
                 break
+
+        # Se os requisitos de tropas foram concluídos e o Ferreiro existe, dispara auto-pesquisa imediata
+        if recruitment_targets and state.levels.get("smith", 0) >= 1:
+            try:
+                from engine.actions.smith import SmithManager
+                smith_mgr = getattr(self, "smith_manager", None) or SmithManager()
+                await smith_mgr.auto_research_needed_units(
+                    account=account,
+                    village_id=v_id,
+                    needed_units=[u for u, cnt in recruitment_targets.items() if cnt > 0],
+                )
+            except Exception as e:
+                logger.debug(f"Aviso ao verificar auto-pesquisa no ciclo de construção: {e}")
 
         return last_built
 

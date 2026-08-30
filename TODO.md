@@ -80,17 +80,22 @@
 ### 2.5. Recrutamento Militar (Quartel, Estábulo, Oficina)
 - [x] Parsing do ecrã do Quartel (`screen=barracks`), Estábulo (`screen=stable`) e Oficina (`screen=garage`).
 - [x] Leitura das filas de recrutamento ativas e tempo de conclusão.
+- [x] **Deteção Fiel de Unidades Desbloqueadas:** Filtro inteligente de unidades bloqueadas/não pesquisadas ou com inputs desabilitados para impedir submissão de ordens inválidas.
 - [x] **Divisão de Abas no Cockpit:** Separação entre a gestão de **Modelos de Tropas** (`tab-troop-models`) e o monitor de **Recrutamento Ativo** (`tab-recruitment`).
 - [x] **Modelos Padrão Globais no SQLite (`recruitment_models`):** `attack` ("Ataque Full") e `defense` ("Defesa Full") semeados globalmente (`account_id IS NULL`, `is_default = 1`) com suporte a criação, clonagem e gravação de modelos customizados.
 - [x] **Atribuição Multi-Aldeias:** Seletor reativo de modelo militar por aldeia na tabela de aldeias com persistência imediata.
 - [x] Recrutamento inteligente em lotes dinâmicos com verificação prévia de recursos disponíveis.
 - [x] Priorização de treino por menor custo total de recursos (`Lanceiro` -> `Espião` -> `Espadachim/Bárbaro` -> `Arqueiro` -> `Cavalaria Leve` -> `Aríete` -> `Catapulta` -> `Cavalaria Pesada`).
 - [x] Validação de limite de população livre da Fazenda antes de recrutar (`min_free_pop`).
-- [x] Auto-pesquisa no Ferreiro (`SmithManager`) para tropas requeridas com pré-requisitos cumpridos.
+- [x] **Gestão do Ferreiro & Auto-Pesquisa de Tecnologias (`SmithManager` / `screen=smith`):**
+  - [x] Parsing multi-estratégia de unidades por IDs, classes, imagens (`unit_axe.png`) e nomes localizados ("Bárbaro", "Viking", "Machado", "CL").
+  - [x] Extração de custos de pesquisa e eliminação de falsos positivos de estado "pesquisado".
+  - [x] **Prioridade Máxima para Vikings (`axe`) e Cavalaria Leve (`light`):** Disparo autónomo imediato da pesquisa assim que os pré-requisitos de edifícios e recursos forem alcançados.
+  - [x] Emissão de `⚡ [PESQUISA INICIADA]` INFO log em tempo real no terminal e Cockpit.
 - [x] **Controlo Modular de Auto-Recrutamento:** Switch LIGADO/DESLIGADO, ajuste dinâmico de intervalo em minutos e limites de população via REST e UI.
 - [x] Monitorização em tempo real das **Filas Ativas de Treino** (Quartel, Estábulo, Oficina) com quantidade de tropas, hora de conclusão e cronómetro decrescente.
 - [x] Comparador visual em tempo real de exército presente vs meta do modelo atribuído.
-- [x] Suíte de testes unitários para Recrutamento Militar (11 testes dedicados).
+- [x] Suíte de testes unitários para Recrutamento Militar e Ferreiro (17 testes dedicados).
 
 ### 2.6. Academia & Cunha de Moedas (`screen=snob`)
 - [ ] Leitura de moedas cunhadas / pacotes acumulados.

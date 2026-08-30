@@ -2,8 +2,8 @@
 
 > **Propósito deste ficheiro:** Manter o histórico de progresso, decisões arquiteturais, mapa de ficheiros e diretrizes de desenvolvimento para que qualquer sessão de IA recupere o contexto instantaneamente com consumo mínimo de tokens e sem perda de continuidade.
 
-**Última Atualização:** 2026-08-30 (Sessão Noturna)  
-**Estado Geral:** Fases 1, 3 e 4 Concluídas | Base de Dados Local SQLite (`data/accounts.db`), Modelos de Tropas (`attack`, `defense`) e Modelo Padrão Único Oficial de Construção (`default_plan` com 268 passos) Persistidos no SQLite, Remoção Total de Modelos Legados, Divisão de Abas Militares ("Modelos de Tropas" & "Recrutamento"), Atribuição de Modelos no Multi-Aldeias, Rush de Prioridade Máxima para Vikings e CL, Desativação de Farm/Ataques | 218 Testes Unitários e de Integração Automatizados (100% OK)  
+**Última Atualização:** 2026-08-30  
+**Estado Geral:** Fases 1, 3 e 4 Concluídas | Base de Dados Local SQLite (`data/accounts.db`), Modelos de Tropas (`attack`, `defense`) e Modelo Padrão Único Oficial de Construção (`default_plan` com 268 passos) Persistidos no SQLite, Remoção Total de Modelos Legados, Divisão de Abas Militares ("Modelos de Tropas" & "Recrutamento"), Atribuição de Modelos no Multi-Aldeias, Motor de Auto-Pesquisa no Ferreiro Robusto com Prioridade Máxima para Vikings (`axe`) e Cavalaria Leve (`light`), Sincronização com Rush de Pré-Requisitos no Edifício Principal e Deteção Fiel de Unidades Desbloqueadas no Quartel | 213 Testes Unitários e de Integração Automatizados (100% OK)  
 **Ambiente Validado:** macOS 12+ / Windows 11 / Python 3.11-3.14 / `curl_cffi` 0.16.2 / `fastapi` 0.141.1 / `uvicorn` 0.52.4 / `pywebview` 6.2 (Edge WebView2 & Cocoa WebKit) / Git Branch: `main`
 
 ---
@@ -39,7 +39,7 @@
 | Fase | Descrição | Status | Detalhes |
 |---|---|---|---|
 | **Fase 1** | **Fundação do Core & Rede** | ✅ Concluída | Estrutura modular, `TribalAccount`, `TaskScheduler`, parsers, anti-bot e testes unitários. |
-| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (auto-build + filas + rush militar de Vikings/CL), `recruitment` (lotes graduais, filas ativas, comparador de exército), `quest`, `map`, `market` (balanceamento) e `economic_arbitrage` (Fila Sempre Ativa) concluídos. Scavenging, Snob e Defesa/Dodge planeados. |
+| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (auto-build + filas + rush militar de Vikings/CL), `recruitment` (lotes graduais, filas ativas, comparador de exército), `smith` (pesquisa automática prioritária de Vikings/CL com monitorização de recursos), `quest`, `map`, `market` (balanceamento) e `economic_arbitrage` (Fila Sempre Ativa) concluídos. Scavenging, Snob e Defesa/Dodge planeados. |
 | **Fase 3** | **Camada Sidecar IPC, SQLite & Multi-Conta** | ✅ Concluída | Base de dados SQLite (`data/accounts.db`), modelos de construção e recrutamento persistidos, arranque estrito Offline, Single-Active Session, FastAPI REST, WebSockets, autenticação efêmera, proxies, `MultiWorldManager` e `MultiVillageCoordinator`. |
 | **Fase 4** | **Shell Desktop & Frontend Nativo** | 🔄 Em Expansão | Cockpit Dark Glassmorphism, Hub de Contas com badges Online/Offline, login direto no Tribos pelo navegador integrado, HUD timer, abas independentes de "Modelos de Tropas" e "Recrutamento", seleção de modelos no Multi-Aldeias, réplica do mapa 2D e monitor de filas. |
 | **Fase 5** | **Empacotamento & Release** | 📋 Pendente | Empacotamento executável com PyInstaller e instalador desktop. |
@@ -78,11 +78,12 @@ TribalwarsBot/
 │   │   ├── parsers.py               # Extração de game_data, CSRF, recursos, bot protect, níveis, fila, tropas, AF e multi-aldeia
 │   │   └── timing.py                # get_human_delay (gaussiano), get_click_jitter
 │   ├── actions/                     # Handlers por ecrã (Fase 2)
-│   │   ├── __init__.py              # Exporta MainBuildingManager, PlaceManager, FarmManager, RecruitmentManager, MarketManager, EconomicArbitrageManager
-│   │   ├── main_building.py         # MainBuildingManager: leitura, níveis virtuais, auto-build, cancelamento
+│   │   ├── __init__.py              # Exporta MainBuildingManager, PlaceManager, FarmManager, RecruitmentManager, SmithManager, MarketManager, EconomicArbitrageManager
+│   │   ├── main_building.py         # MainBuildingManager: leitura, níveis virtuais, auto-build, cancelamento e rush militar
 │   │   ├── place.py                 # PlaceManager: leitura de tropas, capacidade de saque, comandos em 2 etapas
 │   │   ├── farm.py                  # FarmManager: Assistente de Farm (A/B), Radar de Bárbaras e alocação dinâmica de esquadrões (Item 2.3)
 │   │   ├── recruitment.py           # RecruitmentManager: Quartel, Estábulo e Oficina em lotes graduais
+│   │   ├── smith.py                 # SmithManager: Gestão do Ferreiro, tecnologias militares e auto-pesquisa prioritária (Vikings/CL)
 │   │   ├── economic_arbitrage.py    # EconomicArbitrageManager: Filosofia "Fila Sempre Ativa" e projeção de fluxo de caixa (Item 2.12)
 │   │   ├── quest.py                 # QuestManager: Missões, baú diário e inventário manual (Item 2.10)
 │   │   ├── map.py                   # MapManager: Mapa Tático, Scanner de Bárbaras e Map-Driven Farming (Item 2.11)
@@ -110,7 +111,7 @@ TribalwarsBot/
 │       ├── websocket.js             # Conexão WebSocket em tempo real e sintetizador sonoro de alertas
 │       └── app.js                   # Controlador da interface, cronómetro de alta resolução e streaming de logs
 │
-├── tests/                           # Suíte de testes unitários e de integração automatizados (218 testes, 100% OK)
+├── tests/                           # Suíte de testes unitários e de integração automatizados (213 testes, 100% OK)
 │   ├── __init__.py
 │   ├── test_core.py                 # 10 testes cobrindo models, timing, parsers, account e scheduler
 │   ├── test_main_building.py        # 12 testes cobrindo níveis, fila mobile/desktop, auto-build e cancelamento
@@ -130,7 +131,7 @@ TribalwarsBot/
 │   ├── test_stats.py                # 11 testes cobrindo histórico de farm, comandos, KPIs e persistência
 │   ├── test_proxy.py                # 2 testes cobrindo diagnóstico ativo de proxies
 │   ├── test_quest.py                # 13 testes cobrindo missões, segurança de armazém/pop, baú diário e inventário manual
-│   ├── test_smith.py                # 4 testes cobrindo auto-pesquisa de tropas no Ferreiro
+│   ├── test_smith.py                # 6 testes cobrindo auto-pesquisa de tropas, layout mobile e validação de recursos no Ferreiro
 │   ├── test_map.py                  # 7 testes cobrindo parsing de mapa, distância euclidiana, bárbaras/bónus e cache
 │   ├── test_templates_database.py   # 6 testes cobrindo persistência de templates de construção e modelos de recrutamento no SQLite
 │   ├── test_account_config_persistence.py # 4 testes cobrindo persistência atómica de configurações por conta no SQLite

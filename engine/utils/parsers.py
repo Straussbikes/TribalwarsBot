@@ -1291,20 +1291,59 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
     # Padrão 2: <input id="spear_0" name="spear" ... data-max="15" ... />
     # Padrão 3: javascript:insertUnit(...) ou set_max(...)
     for unit_key in ALL_UNITS:
-        # Verifica se o input da unidade existe (indica que está desbloqueada no edifício)
+        # Localiza o bloco/linha correspondente à unidade no edifício militar
+        row_regex = re.compile(
+            rf'<tr[^>]*?(?:id=["\'](?:unit_){unit_key}["\']|data-unit=["\']{unit_key}["\'])[^>]*>(?:(?!</tr>).)*?</tr>',
+            re.DOTALL | re.IGNORECASE,
+        )
+        row_m = row_regex.search(normalized)
+        row_content = row_m.group(0) if row_m else ""
+
+        if not row_content:
+            # Fallback por imagem ou link da unidade
+            fallback_row_regex = re.compile(
+                rf'<tr[^>]*>(?:(?!</tr>).)*?unit_{unit_key}(?:\.png|\.webp|\.gif|["\'])(?:(?!</tr>).)*?</tr>',
+                re.DOTALL | re.IGNORECASE,
+            )
+            fb_m = fallback_row_regex.search(normalized)
+            if fb_m:
+                row_content = fb_m.group(0)
+
+        # Se a linha contiver indicação explícita de bloqueio ou não pesquisada, ignora
+        if row_content:
+            lower_row = row_content.lower()
+            if (
+                "não foi pesquisada" in lower_row
+                or "não pesquisad" in lower_row
+                or "requisitos não" in lower_row
+                or "não cumpridos" in lower_row
+                or "não atingidos" in lower_row
+                or "edifício necessário" in lower_row
+                or "edificio necessario" in lower_row
+            ):
+                continue
+
+        # Verifica se o input ativo da unidade existe (indica que está desbloqueada no edifício)
         input_match = re.search(
             rf'<input[^>]*(?:name=["\'](?:units\[)?{unit_key}(?:\])?["\']|id=["\']{unit_key}(?:_\d+)?["\'])[^>]*>',
-            normalized,
+            row_content if row_content else normalized,
             re.IGNORECASE,
         )
         if not input_match:
             continue
 
+        # Se o input estiver desabilitado ou for hidden, a unidade não está pronta para treino
+        input_tag = input_match.group(0).lower()
+        if "disabled" in input_tag or 'type="hidden"' in input_tag:
+            continue
+
         max_val = 0
+        search_target = row_content if row_content else normalized
+
         # a) <a id="spear_0_a" ...>(15)</a>
         link_max = re.search(
             rf'id=["\']{unit_key}_\d+_a["\'][^>]*>\s*\(?(\d+)\)?\s*<',
-            normalized,
+            search_target,
             re.IGNORECASE,
         )
         if link_max:
@@ -1317,7 +1356,7 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
             # b) data-max="15"
             data_max = re.search(
                 rf'name=["\']{unit_key}["\'][^>]*data-max=["\'](\d+)["\']|data-max=["\'](\d+)["\'][^>]*name=["\']{unit_key}["\']',
-                normalized,
+                search_target,
                 re.IGNORECASE,
             )
             if data_max:
@@ -1332,7 +1371,7 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
             # c) javascript:insertUnit(...) ou set_max(...)
             js_max = re.search(
                 rf'(?:insertUnit|set_max|selectAllUnits)\([^)]*?["\']?{unit_key}["\']?[^)]*?,\s*(\d+)\)',
-                normalized,
+                search_target,
                 re.IGNORECASE,
             )
             if js_max:
