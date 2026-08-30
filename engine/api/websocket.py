@@ -3,7 +3,6 @@ Tribal Wars Mobile Automation Engine - WebSocket Handler & Log Streaming
 Streaming em tempo real de logs, telemetria de aldeia e alertas de captcha para o Tauri v2.
 """
 
-import asyncio
 import json
 import logging
 import time

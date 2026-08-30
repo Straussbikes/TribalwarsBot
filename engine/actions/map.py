@@ -6,7 +6,7 @@ integração com ondas automáticas de farming via Praça de Reunião.
 Suporte para parsing de village.txt/player.txt oficiais e screen=map.
 """
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 import json
 import logging
 import math
@@ -270,8 +270,8 @@ def parse_map_screen_data(
             _extract_from_json_obj(
                 data, villages, center_x, center_y, own_village_id, own_player_id
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Falha ao interpretar resposta como JSON direto: {e}")
 
     # 2. Extrair blocos JSON embutidos em scripts (TWMap.sectorPreCache ou TWMap.initMap)
     sector_matches = re.findall(
@@ -653,55 +653,6 @@ class MapManager:
                 barbarians.append(v)
         barbarians.sort(key=lambda v: v.distance)
         return barbarians
-
-    async def run_map_farm_wave(
-        self,
-        account: TribalAccount,
-        farm_manager: Any,
-        troops: Any,
-        max_attacks: int = 30,
-        radius: float = 15.0,
-        village_id: Optional[int] = None,
-        use_cache: bool = True,
-    ) -> int:
-        """
-        Executa uma onda de saques via Praça de Reunião alimentada automaticamente
-        pelo Scanner de Aldeias Bárbaras mais próximas.
-        """
-        v_id = village_id or account.current_village_id
-        curr_v = account.villages.get(v_id) if account.villages else None
-
-        if not curr_v:
-            logger.warning(f"[{account.world}] Aldeia {v_id} não encontrada para mapa de farm.")
-            return 0
-
-        barbarians = await self.scan_nearby_barbarians(
-            account=account,
-            center_x=curr_v.x,
-            center_y=curr_v.y,
-            radius=radius,
-            village_id=v_id,
-            use_cache=use_cache,
-        )
-
-        if not barbarians:
-            logger.info(f"[{account.world}] Nenhuma aldeia bárbara encontrada no raio de {radius:.1f} campos.")
-            return 0
-
-        target_coords = [b.coords_tuple for b in barbarians]
-        logger.info(
-            f"[{account.world}] A iniciar onda de Map-Driven Farming para as {len(target_coords)} bárbaras mais próximas..."
-        )
-
-        sent_count = await farm_manager.run_place_farm_wave(
-            account=account,
-            targets=target_coords,
-            troops=troops,
-            max_attacks=max_attacks,
-            village_id=v_id,
-        )
-
-        return sent_count
 
     async def _fetch_world_file(
         self, account: TribalAccount, filename: str

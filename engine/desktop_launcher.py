@@ -7,10 +7,10 @@ Compatível com Windows 10/11 sem necessidade de compilação em Rust.
 import argparse
 import asyncio
 import logging
-import os
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 import webview
@@ -24,10 +24,6 @@ from engine.platforms import get_platform_adapter
 from engine.config import load_config
 from engine.core.account import TribalAccount
 from engine.core.scheduler import TaskScheduler
-from engine.actions.main_building import MainBuildingManager
-from engine.actions.place import PlaceManager
-from engine.actions.farm import FarmManager
-from engine.actions.recruitment import RecruitmentManager
 from engine.api.context import EngineContext
 from engine.api.server import start_sidecar_server
 
@@ -143,8 +139,8 @@ class DesktopApp:
         if self.window:
             try:
                 self.window.restore()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Aviso ao restaurar janela: {e}")
 
     def navigate_to_login(self):
         """Redireciona a janela atual para a página de login do Tribal Wars."""
@@ -450,8 +446,6 @@ class DesktopApp:
             cfg = self.context.config
             if cfg.building.enabled:
                 self.context.toggle_building_module(enabled=True)
-            if cfg.farm.enabled:
-                self.context.toggle_farm_module(enabled=True)
             if cfg.recruitment.enabled:
                 self.context.toggle_recruitment_module(enabled=True)
             if cfg.quest.enabled:
@@ -484,7 +478,6 @@ class DesktopApp:
         self.engine_thread.start()
 
         # Aguarda ativamente até que o servidor local esteja a responder
-        import urllib.request
         logger.info(f"A aguardar inicialização do servidor em http://{self.host}:{self.port}...")
         for _ in range(50):
             try:
@@ -529,8 +522,8 @@ class DesktopApp:
             if auth_file.exists():
                 try:
                     auth_file.unlink()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Aviso ao remover ficheiro de autenticação ao fechar: {e}")
 
         self.window.events.closed += on_closed
 

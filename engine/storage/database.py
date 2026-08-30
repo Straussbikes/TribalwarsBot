@@ -35,8 +35,8 @@ class AccountsDatabase:
         finally:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Aviso ao fechar conexão SQLite: {e}")
 
     def _init_db(self) -> None:
         """Cria as tabelas necessárias caso não existam e efetua a semeadura de dados padrão."""
@@ -54,7 +54,7 @@ class AccountsDatabase:
                     username TEXT DEFAULT '',
                     password_enc TEXT DEFAULT '',
                     proxy TEXT,
-                    build_order_strategy TEXT DEFAULT 'rush_resources',
+                    build_order_strategy TEXT DEFAULT 'default_plan',
                     farm_presets TEXT DEFAULT '[]',
                     config_data TEXT DEFAULT '{}',
                     keep_alive INTEGER DEFAULT 1,
@@ -107,99 +107,80 @@ class AccountsDatabase:
             conn.commit()
 
     def _seed_default_templates(self, conn: sqlite3.Connection) -> None:
-        """Semeia os modelos padrão do sistema (Construção e Recrutamento) se as tabelas estiverem vazias."""
-        # 1. Semeadura de building_templates
+        """Semeia os modelos padrão oficiais do sistema (Construção e Recrutamento) na base de dados SQLite."""
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM building_templates")
-        if cursor.fetchone()[0] == 0:
-            from engine.actions.main_building import (
-                BALANCED_TEMPLATE,
-                MILITARY_RUSH_TEMPLATE,
-                RUSH_RESOURCES_TEMPLATE,
-            )
+        now = time.time()
 
-            now = time.time()
-            defaults_bld = [
-                {
-                    "id": "rush_resources",
-                    "name": "Rush Recursos",
-                    "priority_list": RUSH_RESOURCES_TEMPLATE,
-                    "is_default": 1,
-                },
-                {
-                    "id": "balanced",
-                    "name": "Equilibrado",
-                    "priority_list": BALANCED_TEMPLATE,
-                    "is_default": 1,
-                },
-                {
-                    "id": "military_rush",
-                    "name": "Rush Militar",
-                    "priority_list": MILITARY_RUSH_TEMPLATE,
-                    "is_default": 1,
-                },
-            ]
+        # 1. Limpeza de modelos legados de construção
+        cursor.execute("DELETE FROM building_templates WHERE id IN ('rush_resources', 'balanced', 'military_rush')")
 
-            for bld in defaults_bld:
-                # Calcula os target_levels máximos da lista de prioridades
-                t_levels: Dict[str, int] = {}
-                for b_name, b_lvl in bld["priority_list"]:
-                    t_levels[b_name] = max(t_levels.get(b_name, 0), b_lvl)
+        # 2. Semeadura/Atualização do Modelo Padrão Oficial de Construção (config.json)
+        from engine.actions.main_building import DEFAULT_BUILD_PLAN
 
-                conn.execute("""
-                    INSERT INTO building_templates (
-                        id, account_id, name, target_levels, priority_list, is_default, created_at
-                    ) VALUES (?, NULL, ?, ?, ?, ?, ?)
-                """, (
-                    bld["id"],
-                    bld["name"],
-                    json.dumps(t_levels),
-                    json.dumps(bld["priority_list"]),
-                    bld["is_default"],
-                    now,
-                ))
+        t_levels: Dict[str, int] = {}
+        for b_name, b_lvl in DEFAULT_BUILD_PLAN:
+            t_levels[b_name] = max(t_levels.get(b_name, 0), b_lvl)
 
-            logger.info("Modelos padrão de construção semeados com sucesso na base de dados SQLite.")
+        cursor.execute("SELECT id FROM building_templates WHERE id = 'default_plan'")
+        if not cursor.fetchone():
+            conn.execute("""
+                INSERT INTO building_templates (
+                    id, account_id, name, target_levels, priority_list, is_default, created_at
+                ) VALUES ('default_plan', NULL, 'Plano Padrão de Construção', ?, ?, 1, ?)
+            """, (
+                json.dumps(t_levels),
+                json.dumps(DEFAULT_BUILD_PLAN),
+                now,
+            ))
+            logger.info("Modelo padrão oficial de construção ('default_plan') semeado com sucesso no SQLite.")
+        else:
+            conn.execute("""
+                UPDATE building_templates
+                SET account_id = NULL, name = 'Plano Padrão de Construção', target_levels = ?, priority_list = ?, is_default = 1
+                WHERE id = 'default_plan'
+            """, (
+                json.dumps(t_levels),
+                json.dumps(DEFAULT_BUILD_PLAN),
+            ))
 
-        # 2. Semeadura de recruitment_models
-        cursor.execute("SELECT COUNT(*) FROM recruitment_models")
-        if cursor.fetchone()[0] == 0:
-            from engine.config.settings import DEFAULT_ATTACK_MODEL, DEFAULT_DEFENSE_MODEL
+        # 3. Semeadura/Garantia dos Modelos Padrão de Tropas (Ataque Full e Defesa Full)
+        from engine.config.settings import DEFAULT_ATTACK_MODEL, DEFAULT_DEFENSE_MODEL
 
-            now = time.time()
-            default_batch = {
-                "spear": 10,
-                "sword": 10,
-                "axe": 10,
-                "archer": 5,
-                "spy": 5,
-                "light": 5,
-                "marcher": 5,
-                "heavy": 5,
-                "ram": 2,
-                "catapult": 2,
-                "knight": 1,
-                "snob": 1,
-            }
+        default_batch = {
+            "spear": 10,
+            "sword": 10,
+            "axe": 10,
+            "archer": 5,
+            "spy": 5,
+            "light": 5,
+            "marcher": 5,
+            "heavy": 5,
+            "ram": 2,
+            "catapult": 2,
+            "knight": 1,
+            "snob": 1,
+        }
 
-            defaults_rec = [
-                {
-                    "id": "attack",
-                    "name": "Ataque Full",
-                    "units": DEFAULT_ATTACK_MODEL,
-                    "batch_sizes": default_batch,
-                    "is_default": 1,
-                },
-                {
-                    "id": "defense",
-                    "name": "Defesa Full",
-                    "units": DEFAULT_DEFENSE_MODEL,
-                    "batch_sizes": default_batch,
-                    "is_default": 1,
-                },
-            ]
+        defaults_rec = [
+            {
+                "id": "attack",
+                "name": "Ataque Full",
+                "units": DEFAULT_ATTACK_MODEL,
+                "batch_sizes": default_batch,
+                "is_default": 1,
+            },
+            {
+                "id": "defense",
+                "name": "Defesa Full",
+                "units": DEFAULT_DEFENSE_MODEL,
+                "batch_sizes": default_batch,
+                "is_default": 1,
+            },
+        ]
 
-            for rec in defaults_rec:
+        for rec in defaults_rec:
+            cursor.execute("SELECT id FROM recruitment_models WHERE id = ?", (rec["id"],))
+            if not cursor.fetchone():
                 conn.execute("""
                     INSERT INTO recruitment_models (
                         id, account_id, name, units, batch_sizes, is_default, created_at
@@ -212,8 +193,14 @@ class AccountsDatabase:
                     rec["is_default"],
                     now,
                 ))
+            else:
+                conn.execute("""
+                    UPDATE recruitment_models
+                    SET is_default = 1
+                    WHERE id = ? AND is_default = 0
+                """, (rec["id"],))
 
-            logger.info("Modelos padrão de recrutamento semeados com sucesso na base de dados SQLite.")
+        logger.info("Modelos padrão de tropas (Ataque e Defesa) assegurados no SQLite para todas as contas.")
 
     # ==========================================
     # GESTÃO DE CONTAS (ACCOUNTS)
@@ -311,7 +298,7 @@ class AccountsDatabase:
                 village_id = None
 
         proxy = data.get("proxy") or None
-        strategy = data.get("build_order_strategy") or data.get("template") or "rush_resources"
+        strategy = data.get("build_order_strategy") or data.get("template") or "default_plan"
         farm_presets = data.get("farm_presets") or []
         farm_presets_json = json.dumps(farm_presets) if isinstance(farm_presets, (list, dict)) else str(farm_presets)
         
@@ -475,7 +462,7 @@ class AccountsDatabase:
                 "world_domain": f"{cfg_world}.tribalwars.com.pt",
                 "session_cookie": cfg_sid or "",
                 "is_active": 0,  # Inicialmente offline
-                "build_order_strategy": cfg_dict.get("building", {}).get("template", "rush_resources") if isinstance(cfg_dict.get("building"), dict) else "rush_resources",
+                "build_order_strategy": cfg_dict.get("building", {}).get("template", "default_plan") if isinstance(cfg_dict.get("building"), dict) else "default_plan",
                 "config_data": cfg_dict,
             }
             self.save_account(init_data)
@@ -651,6 +638,17 @@ class AccountsDatabase:
                     m["batch_sizes"] = json.loads(m["batch_sizes"]) if m.get("batch_sizes") else {}
                 except Exception:
                     m["batch_sizes"] = {}
+                # Se for attack ou defense, garante que os campos padrão não ficam vazios
+                if m.get("id") == "attack":
+                    from engine.config.settings import DEFAULT_ATTACK_MODEL
+                    full_units = DEFAULT_ATTACK_MODEL.copy()
+                    full_units.update(m["units"])
+                    m["units"] = full_units
+                elif m.get("id") == "defense":
+                    from engine.config.settings import DEFAULT_DEFENSE_MODEL
+                    full_units = DEFAULT_DEFENSE_MODEL.copy()
+                    full_units.update(m["units"])
+                    m["units"] = full_units
                 models.append(m)
             return models
 
@@ -672,6 +670,17 @@ class AccountsDatabase:
                 m["batch_sizes"] = json.loads(m["batch_sizes"]) if m.get("batch_sizes") else {}
             except Exception:
                 m["batch_sizes"] = {}
+
+            if m.get("id") == "attack":
+                from engine.config.settings import DEFAULT_ATTACK_MODEL
+                full_units = DEFAULT_ATTACK_MODEL.copy()
+                full_units.update(m["units"])
+                m["units"] = full_units
+            elif m.get("id") == "defense":
+                from engine.config.settings import DEFAULT_DEFENSE_MODEL
+                full_units = DEFAULT_DEFENSE_MODEL.copy()
+                full_units.update(m["units"])
+                m["units"] = full_units
             return m
 
     def save_recruitment_model(self, data: Dict[str, Any]) -> Dict[str, Any]:

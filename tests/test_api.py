@@ -28,7 +28,7 @@ class TestApiSidecar(unittest.TestCase):
         self.config = BotConfig(
             world="pt117",
             sid="test_token_sid",
-            building=BuildingConfig(template="rush_resources", max_queue=3, interval_seconds=60.0),
+            building=BuildingConfig(template="default_plan", max_queue=3, interval_seconds=60.0),
             farm=FarmConfig(enabled=False, mode="am_farm"),
             recruitment=RecruitmentConfig(enabled=False),
         )

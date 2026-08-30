@@ -8,23 +8,16 @@ import tempfile
 import unittest
 
 from engine.actions.main_building import (
-    BALANCED_TEMPLATE,
-    MILITARY_RUSH_TEMPLATE,
-    RUSH_RESOURCES_TEMPLATE,
+    DEFAULT_BUILD_PLAN,
+    DEFAULT_BUILDING_TEMPLATE,
 )
 from engine.config.settings import BotConfig, BuildingConfig, load_config
 
 
 class TestConfig(unittest.TestCase):
     def test_default_config_templates(self):
-        cfg = BotConfig(building=BuildingConfig(template="rush_resources"))
-        self.assertEqual(cfg.get_active_build_plan(), RUSH_RESOURCES_TEMPLATE)
-
-        cfg.building.template = "balanced"
-        self.assertEqual(cfg.get_active_build_plan(), BALANCED_TEMPLATE)
-
-        cfg.building.template = "military_rush"
-        self.assertEqual(cfg.get_active_build_plan(), MILITARY_RUSH_TEMPLATE)
+        cfg = BotConfig(building=BuildingConfig(template="default_plan"))
+        self.assertEqual(cfg.get_active_build_plan(), DEFAULT_BUILD_PLAN)
 
         custom = [("wood", 1), ("stone", 1)]
         cfg.building.template = "custom"

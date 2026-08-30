@@ -46,7 +46,7 @@ class TestProfileManager(unittest.TestCase):
             village_id=6810,
             username="jogador_pt",
             proxy="http://1.2.3.4:8080",
-            build_order_strategy="rush_resources",
+            build_order_strategy="default_plan",
             is_active=True,
         )
         prof.password = "secret_pass"
@@ -65,7 +65,7 @@ class TestProfileManager(unittest.TestCase):
         self.assertEqual(loaded.session_cookie, "test_sid_123")
         self.assertEqual(loaded.sid, "test_sid_123")
         self.assertEqual(loaded.village_id, 6810)
-        self.assertEqual(loaded.build_order_strategy, "rush_resources")
+        self.assertEqual(loaded.build_order_strategy, "default_plan")
         self.assertEqual(loaded.password, "secret_pass")
         self.assertEqual(loaded.proxy, "http://1.2.3.4:8080")
         self.assertTrue(loaded.is_active)

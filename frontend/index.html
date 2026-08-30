@@ -84,9 +84,6 @@
         <button class="btn btn-warning btn-sm" id="btn-toggle-scheduler" style="padding: 4px 8px; font-size: 0.72rem;">
           <span>⏸</span> Pausar
         </button>
-        <button class="btn btn-secondary btn-sm" id="btn-farm-now" title="Dispara uma onda imediata do Assistente de Farm" style="padding: 4px 8px; font-size: 0.72rem;">
-          <span>🌾</span> Farm
-        </button>
         <button class="btn btn-danger btn-sm" id="btn-logout" title="Terminar sessão da conta ativa e regressar ao Gestor de Contas" style="padding: 4px 8px; font-size: 0.72rem;">
           <span>🚪</span> Sair
         </button>
@@ -129,8 +126,11 @@
         <button class="nav-tab" data-tab="tab-building" id="tab-btn-building">
           <span class="tab-icon">🏛</span> Edifícios & Fila
         </button>
-        <button class="nav-tab" data-tab="tab-military" id="tab-btn-military">
-          <span class="tab-icon">⚔</span> Recrutamento & Tropas
+        <button class="nav-tab" data-tab="tab-troop-models" id="tab-btn-troop-models">
+          <span class="tab-icon">🛡️</span> Modelos de Tropas
+        </button>
+        <button class="nav-tab" data-tab="tab-recruitment" id="tab-btn-recruitment">
+          <span class="tab-icon">⚔️</span> Recrutamento
         </button>
         <button class="nav-tab" data-tab="tab-map" id="tab-btn-map">
           <span class="tab-icon">🗺</span> Mapa Tático
@@ -309,11 +309,11 @@
             </div>
           </section>
 
-          <!-- Card: Assistente de Farm & Rendimento -->
-          <section class="glass-card col-6">
-            <div class="card-header">
+          <!-- Card: Atividade & Rendimento do Bot -->
+          <section class="glass-card col-4">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
               <div class="card-title">
-                <span class="icon">🌾</span> Assistente de Farm & Rendimento
+                <span class="icon">📈</span> Atividade & Rendimento
               </div>
               <button class="btn btn-secondary btn-sm" id="btn-dashboard-view-stats" style="font-size: 0.75rem; padding: 2px 8px; border-color: rgba(6,182,212,0.4); color: var(--neon-cyan);">
                 📈 Ver Gráficos →
@@ -321,18 +321,18 @@
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
               <div style="background: rgba(15,23,42,0.6); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-subtle);">
-                <div style="font-size: 0.72rem; color: var(--text-muted);">Saque Últimas 24h</div>
+                <div style="font-size: 0.72rem; color: var(--text-muted);">Produção Estimada</div>
                 <div style="font-size: 1.15rem; font-weight: 700; color: #fff; font-family: var(--font-mono);" id="dash-loot-24h">0</div>
                 <div style="font-size: 0.7rem; color: var(--neon-emerald);" id="dash-hourly-rate">+0 / hora</div>
               </div>
               <div style="background: rgba(15,23,42,0.6); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-subtle);">
-                <div style="font-size: 0.72rem; color: var(--text-muted);">Taxa de Sucesso</div>
+                <div style="font-size: 0.72rem; color: var(--text-muted);">Eficiência de Ciclos</div>
                 <div style="font-size: 1.15rem; font-weight: 700; color: var(--neon-cyan); font-family: var(--font-mono);" id="dash-success-rate">100%</div>
-                <div style="font-size: 0.7rem; color: var(--text-muted);"><span id="dash-attacks-24h">0</span> comandos hoje</div>
+                <div style="font-size: 0.7rem; color: var(--text-muted);"><span id="dash-attacks-24h">0</span> ações hoje</div>
               </div>
             </div>
             <div style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.5">
-              <span>• Micro-farming automático com distribuição gaussiana e proteção anti-bot.</span>
+              <span>• Gestão inteligente de construção, recrutamento e arbitragem de mercado.</span>
             </div>
           </section>
 
@@ -358,9 +358,7 @@
                 <div style="display: flex; align-items: center; gap: 6px;">
                   <span style="font-size: 0.8rem; color: var(--text-muted);">Template:</span>
                   <select id="bld-template-select" class="form-control" style="padding: 3px 8px; font-size: 0.8rem; font-weight: 700; color: var(--neon-cyan); background: rgba(15,23,42,0.8); border: 1px solid var(--neon-cyan); border-radius: 6px; cursor: pointer;">
-                    <option value="rush_resources">Rush Recursos</option>
-                    <option value="balanced">Equilibrado</option>
-                    <option value="military_rush">Rush Militar</option>
+                    <option value="default_plan">Plano Padrão de Construção</option>
                   </select>
                   <button class="btn btn-secondary btn-sm" id="btn-manage-building-templates" title="Gerir, Criar e Clonar Modelos de Construção no SQLite" style="padding: 4px 8px; font-size: 0.75rem;">
                     <span>⚙️</span> Gerir
@@ -504,47 +502,31 @@
         </div>
       </main>
 
-      <!-- Panel 3: Recrutamento & Modelos de Tropas -->
-      <main class="tab-content" id="tab-military">
+      <!-- Panel 3: Modelos de Tropas (Ataque, Defesa & Customizados) -->
+      <main class="tab-content" id="tab-troop-models">
         <div class="glass-card" style="max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px;">
           
-          <!-- Cabeçalho Principal do Painel -->
+          <!-- Cabeçalho Principal do Painel de Modelos -->
           <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
             <div>
               <div class="card-title" style="display: flex; align-items: center; gap: 10px;">
-                <span class="icon">⚔️</span> Modelos de Tropas (Ataque & Defesa)
+                <span class="icon">🛡️</span> Modelos de Tropas (Ataque, Defesa & Customizados)
               </div>
               <p style="color: var(--text-muted); font-size: 0.82rem; margin-top: 4px;">
-                Define os alvos de tropas para aldeias de Ataque e Defesa. O bot seguirá estes modelos automaticamente na página de Múltiplas Aldeias.
+                Configura os alvos e lotes de tropas para aldeias de Ataque, Defesa e Modelos Customizados. Todos os modelos são persistidos na base de dados SQLite e associados à conta ativa.
               </p>
             </div>
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-              <button class="btn btn-secondary" id="btn-refresh-rec-tab" style="padding: 6px 14px; font-size: 0.82rem;">
-                <span>🔄</span> Atualizar
+              <button class="btn btn-secondary" id="btn-refresh-troop-models-tab" style="padding: 6px 14px; font-size: 0.82rem;">
+                <span>🔄</span> Atualizar Modelos
               </button>
-              <button class="btn btn-primary" id="btn-save-recruitment" style="padding: 6px 18px; font-size: 0.85rem; font-weight: 700;">
-                <span>💾</span> Guardar Modelos
+              <button class="btn btn-primary" id="btn-save-troop-models" style="padding: 6px 18px; font-size: 0.85rem; font-weight: 700; background: var(--gradient-primary);">
+                <span>💾</span> Guardar Alterações na BD
               </button>
             </div>
           </div>
 
-          <!-- Card: Tropas em Treino no Momento (Filas Ativas de Produção) -->
-          <div class="card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 16px 20px;">
-            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span class="icon" style="font-size: 1.2rem;">🪖</span>
-                <span style="font-weight: 700; font-size: 0.95rem;">Tropas a Ser Produzidas no Momento (Fila Ativa)</span>
-                <span id="rec-active-queue-badge" class="badge" style="background: rgba(6,182,212,0.2); color: var(--neon-cyan); font-size: 0.75rem;">0 ordens</span>
-              </div>
-            </div>
-            <div id="rec-active-queue-container" style="display: flex; flex-direction: column; gap: 8px;">
-              <div style="text-align: center; padding: 18px; color: var(--text-muted); font-size: 0.85rem;">
-                Nenhuma tropa a ser produzida no momento.
-              </div>
-            </div>
-          </div>
-
-          <!-- Card: Definição dos Modelos de Tropas (Ataque, Defesa & Customizados) -->
+          <!-- Card: Definição dos Modelos de Tropas -->
           <div class="card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 18px 20px;">
             
             <!-- Barra Superior de Modelos: Abas Dinâmicas + Botão Adicionar -->
@@ -556,7 +538,7 @@
               <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                 <!-- Botão Adicionar Modelo Customizado -->
                 <button type="button" class="btn btn-secondary" id="btn-add-custom-model" style="padding: 6px 14px; font-size: 0.82rem; border-color: rgba(6, 182, 212, 0.5); color: var(--neon-cyan);">
-                  <span>➕</span> Novo Modelo
+                  <span>➕</span> Novo Modelo Custom
                 </button>
 
                 <!-- Botão Clonar Modelo Ativo -->
@@ -595,9 +577,86 @@
               <span>🌐</span>
               <span>Todos os modelos guardados ficam associados à conta e disponíveis para seleção no menu <strong>Multi-Aldeias</strong>.</span>
             </div>
-            <button class="btn btn-primary" id="btn-save-recruitment-bottom" style="font-weight: 700; padding: 6px 18px;">
-              <span>💾</span> Guardar Modelos
+            <button class="btn btn-primary" id="btn-save-troop-models-bottom" style="font-weight: 700; padding: 6px 18px; background: var(--gradient-primary);">
+              <span>💾</span> Guardar Alterações na BD
             </button>
+          </div>
+
+        </div>
+      </main>
+
+      <!-- Panel 4: Recrutamento Ativo & Monitorização Militar -->
+      <main class="tab-content" id="tab-recruitment">
+        <div class="glass-card" style="max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px;">
+          
+          <!-- Toolbar de Recrutamento Ativo -->
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span class="icon" style="font-size: 1.4rem;">⚔️</span>
+              <div>
+                <h3 style="margin: 0; font-size: 1.1rem; color: #fff;">Recrutamento Militar & Filas de Treino</h3>
+                <span style="font-size: 0.78rem; color: var(--text-muted);">
+                  Produção ativa de tropas no Quartel, Estábulo e Oficina com controlo automatizado
+                </span>
+              </div>
+            </div>
+
+            <!-- Controles de Auto-Recrutamento -->
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <label class="switch-container" style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-main); cursor: pointer; background: rgba(15,23,42,0.6); padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <input type="checkbox" id="rec-auto-toggle" style="accent-color: var(--neon-cyan); cursor: pointer; width: 16px; height: 16px;" checked>
+                <span>Auto-Recrutamento</span>
+                <span id="rec-badge-status" class="badge" style="font-size: 0.7rem; background: rgba(16,185,129,0.2); color: var(--neon-emerald); font-weight: 700;">ATIVO</span>
+              </label>
+
+              <div style="display: flex; align-items: center; gap: 4px; background: rgba(15,23,42,0.6); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <span style="font-size: 0.75rem; color: var(--text-muted);">Intervalo:</span>
+                <input type="number" id="rec-interval-minutes" value="1.5" min="0.5" max="60" step="0.5" style="width: 50px; background: transparent; border: none; color: #fff; font-family: var(--font-mono); font-size: 0.8rem; text-align: right;">
+                <span style="font-size: 0.72rem; color: var(--text-muted);">min</span>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 4px; background: rgba(15,23,42,0.6); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                <span style="font-size: 0.75rem; color: var(--text-muted);">Pop Mín:</span>
+                <input type="number" id="rec-min-free-pop" value="5" min="0" max="500" style="width: 45px; background: transparent; border: none; color: #fff; font-family: var(--font-mono); font-size: 0.8rem; text-align: right;">
+              </div>
+
+              <button class="btn btn-secondary" id="btn-refresh-recruitment-queue" style="padding: 6px 12px; font-size: 0.8rem;">
+                <span>🔄</span> Atualizar
+              </button>
+              <button class="btn btn-primary" id="btn-trigger-recruit-now" style="padding: 6px 14px; font-size: 0.8rem; background: linear-gradient(135deg, var(--neon-cyan), var(--neon-emerald));">
+                <span>⚔️</span> Recrutar Agora
+              </button>
+            </div>
+          </div>
+
+          <!-- Card: Filas Ativas de Treino em Andamento -->
+          <div class="card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 16px 20px;">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="icon" style="font-size: 1.2rem;">🪖</span>
+                <span style="font-weight: 700; font-size: 0.95rem;">Tropas em Treino no Momento (Quartel, Estábulo e Oficina)</span>
+                <span id="rec-active-queue-badge" class="badge" style="background: rgba(6,182,212,0.2); color: var(--neon-cyan); font-size: 0.75rem;">0 ordens</span>
+              </div>
+            </div>
+            <div id="rec-active-queue-container" style="display: flex; flex-direction: column; gap: 8px;">
+              <div style="text-align: center; padding: 18px; color: var(--text-muted); font-size: 0.85rem;">
+                Nenhuma tropa a ser produzida no momento.
+              </div>
+            </div>
+          </div>
+
+          <!-- Card: Comparativo de Tropas na Aldeia vs Meta do Modelo -->
+          <div class="card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 16px 20px;">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="icon" style="font-size: 1.2rem;">📊</span>
+                <span style="font-weight: 700; font-size: 0.95rem;">Tropas na Aldeia vs Meta do Modelo Selecionado</span>
+              </div>
+              <span id="rec-active-village-model-name" class="badge" style="background: rgba(168,85,247,0.2); color: #c084fc; font-weight: 700; border: 1px solid rgba(168,85,247,0.4);">Modelo: Ataque Full</span>
+            </div>
+            <div id="rec-village-troops-progress-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px;">
+              <!-- Injetado dinamicamente via JS -->
+            </div>
           </div>
 
         </div>
@@ -631,9 +690,6 @@
               </button>
               <button class="btn btn-primary" id="btn-map-scan" style="padding: 6px 12px; font-size: 0.82rem;" title="Forçar varredura ativa do mapa oficial">
                 <span>🔍</span> Scan Ativo
-              </button>
-              <button class="btn btn-warning" id="btn-map-farm-nearby" style="padding: 6px 12px; font-size: 0.82rem;" title="Disparar onda de saques contra bárbaras do mapa">
-                <span>🌾</span> Farmar Bárbaras
               </button>
             </div>
           </div>
@@ -691,7 +747,6 @@
               </div>
             </div>
             <div style="display: flex; align-items: center; gap: 8px;">
-              <button class="btn btn-warning" id="btn-selected-attack" style="padding: 6px 14px; font-size: 0.82rem;">⚔ Atacar / Farmar</button>
               <button class="btn btn-secondary" id="btn-selected-center" style="padding: 6px 12px; font-size: 0.82rem;">🎯 Centralizar</button>
               <button class="btn btn-secondary" id="btn-selected-copy" style="padding: 6px 12px; font-size: 0.82rem;">📋 Copiar Coords</button>
             </div>
@@ -775,7 +830,7 @@
                 <tr style="border-bottom: 1px solid var(--border-subtle);">
                   <th style="padding: 10px 14px;">Aldeia</th>
                   <th style="padding: 10px 14px;">Coordenadas</th>
-                  <th style="padding: 10px 14px;">Categoria Tática</th>
+                  <th style="padding: 10px 14px;">Modelo de Tropas (Recrutamento)</th>
                   <th style="padding: 10px 14px;">Recursos (M / A / F)</th>
                   <th style="padding: 10px 14px;">Armazém</th>
                   <th style="padding: 10px 14px;">População Livre</th>
@@ -1463,10 +1518,8 @@
                 <div class="form-group">
                   <label for="cfg-building-template">Template de Construção</label>
                   <select id="cfg-building-template" class="form-control">
-                    <option value="rush_resources">rush_resources (Foco em Recursos)</option>
-                    <option value="balanced">balanced (Balanceado)</option>
-                    <option value="military_rush">military_rush (Tropas e Muralha)</option>
-                    <option value="custom">custom (Plano Personalizado)</option>
+                    <option value="default_plan">Plano Padrão de Construção (default_plan)</option>
+                    <option value="custom">Plano Personalizado (custom)</option>
                   </select>
                 </div>
                 <div class="form-group">
@@ -1476,22 +1529,6 @@
                 <div class="form-group">
                   <label for="cfg-build-interval">Intervalo Entre Ciclos (Segundos)</label>
                   <input type="number" id="cfg-build-interval" class="form-control" min="30" value="75">
-                </div>
-              </div>
-            </div>
-
-            <div class="settings-section">
-              <h3>Micro-Farming (Assistente de Farm)</h3>
-              <div class="form-grid">
-                <div class="form-group">
-                  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer">
-                    <input type="checkbox" id="cfg-farm-enabled" style="accent-color: var(--neon-cyan)">
-                    Ativar Micro-Farming Automático
-                  </label>
-                </div>
-                <div class="form-group">
-                  <label for="cfg-farm-interval">Intervalo Entre Ondas (Minutos)</label>
-                  <input type="number" id="cfg-farm-interval" class="form-control" min="1" value="5">
                 </div>
               </div>
             </div>
@@ -1583,11 +1620,8 @@
                 </div>
               </div>
               <div class="popover-actions">
-                <button class="btn btn-primary btn-sm" id="btn-popover-quick-attack">
-                  ⚔️ Atacar / Saquear
-                </button>
-                <button class="btn btn-secondary btn-sm" id="btn-popover-add-farm">
-                  📌 Fixar Alvo Farm
+                <button class="btn btn-secondary btn-sm" id="btn-popover-copy-coords">
+                  📋 Copiar Coordenadas
                 </button>
               </div>
             </div>
@@ -1693,9 +1727,7 @@
             <div>
               <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Estratégia de Construção:</label>
               <select id="input-acc-template" class="form-control" style="width: 100%;">
-                <option value="rush_resources">Avanço Rápido de Recursos (rush_resources)</option>
-                <option value="balanced">Desenvolvimento Balanceado (balanced)</option>
-                <option value="military_rush">Rush Militar e Quartel (military_rush)</option>
+                <option value="default_plan">Plano Padrão de Construção (default_plan)</option>
               </select>
             </div>
           </div>

@@ -4,7 +4,6 @@ Mantém o estado unificado, distribui eventos para WebSockets e fornece acesso �
 """
 
 import asyncio
-import json
 import logging
 from pathlib import Path
 import time
@@ -21,7 +20,7 @@ from engine.actions.place import PlaceManager, UnitsCount
 from engine.actions.quest import QuestManager
 from engine.actions.recruitment import RecruitmentManager
 from engine.actions.village_coordinator import MultiVillageCoordinator
-from engine.config.settings import BotConfig, load_config
+from engine.config.settings import BotConfig
 from engine.core.account import TribalAccount
 from engine.core.models import TaskPriority
 from engine.core.multi_world import MultiWorldManager, WorldInstance
@@ -599,8 +598,8 @@ class EngineContext:
             # Atualiza recursos após os resgates
             try:
                 await self.account.refresh_state()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Aviso ao atualizar estado pós-missões: {e}")
             status_dict = self.get_status_dict()
             await self.broadcast("QUESTS_CLAIMED", res)
             await self.broadcast("VILLAGE_UPDATED", status_dict)
@@ -933,8 +932,8 @@ class EngineContext:
                 except Exception as e:
                     try:
                         await test_account.close()
-                    except Exception:
-                        pass
+                    except Exception as close_err:
+                        logger.debug(f"Aviso ao fechar sessão de teste: {close_err}")
                     logger.warning(f"Falha ao validar conta no mundo '{world_key}': {e}")
                     return {
                         "status": "error",
@@ -1412,6 +1411,7 @@ class EngineContext:
                 max_queue=self.config.building.max_queue,
                 interval_seconds=self.config.building.interval_seconds,
                 enabled_check=lambda: self.config.building.enabled,
+                bot_config=self.config,
             )
         self.broadcast_sync("MODULE_TOGGLED", {"module": "building", "enabled": self.config.building.enabled})
         self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
@@ -2005,8 +2005,8 @@ class EngineContext:
             if self.account:
                 try:
                     asyncio.create_task(self.account.close())
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Aviso ao encerrar conta eliminada: {e}")
                 self.account = None
             self.active_profile_id = None
         
@@ -2078,13 +2078,7 @@ class EngineContext:
                         max_queue=self.config.building.max_queue,
                         interval_seconds=self.config.building.interval_seconds,
                         enabled_check=lambda: self.config.building.enabled,
-                    )
-                # Farm
-                if self.config.farm.enabled:
-                    self.farm_manager.schedule_auto_farm(
-                        scheduler=self.scheduler,
-                        account=self.account,
-                        farm_config=self.config.farm,
+                        bot_config=self.config,
                     )
                 # Recruitment
                 if self.config.recruitment.enabled:

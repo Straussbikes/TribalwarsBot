@@ -4,7 +4,6 @@ Gestão de Recrutamento Militar: Quartel, Estábulo e Oficina com controlo de me
 produção contínua em pequenos lotes e validação de população livre da Fazenda.
 """
 
-import asyncio
 from dataclasses import dataclass, field
 import logging
 from typing import Any, Dict, List, Optional
@@ -346,18 +345,40 @@ class RecruitmentManager:
                         if village_buildings.get(req_b, 0) < req_lvl
                     ]
                     if unmet:
-                        logger.info(
-                            f"[{account.world}] Pré-requisitos não cumpridos para {unit.capitalize()} na aldeia {v_id}: "
-                            f"{', '.join(unmet)}. Ignorando."
-                        )
+                        if unit == "axe":
+                            logger.info(
+                                f"[{account.world}] ⚔️ [RUSH VIKINGS ATIVADO] Quartel parado/inapto para Vikings na aldeia {v_id} "
+                                f"por falta de requisitos ({', '.join(unmet)}). Rush de Edifício Principal/Quartel/Ferreiro em prioridade máxima!"
+                            )
+                        elif unit == "light":
+                            logger.info(
+                                f"[{account.world}] 🐎 [RUSH CL ATIVADO] Estábulo parado/inapto para CL na aldeia {v_id} "
+                                f"por falta de requisitos ({', '.join(unmet)}). Rush de Edifício Principal/Quartel/Ferreiro/Estábulo em prioridade máxima!"
+                            )
+                        else:
+                            logger.info(
+                                f"[{account.world}] Pré-requisitos não cumpridos para {unit.capitalize()} na aldeia {v_id}: "
+                                f"{', '.join(unmet)}. Ignorando."
+                            )
                         continue
 
                 # Verificação 3: Unidade desbloqueada/pesquisada no ecrã de treino
                 if unit not in b_state.available_units:
-                    logger.info(
-                        f"[{account.world}] {unit.capitalize()} não está pesquisado ou desbloqueado no {building.capitalize()} "
-                        f"da aldeia {v_id}. Ignorando."
-                    )
+                    if unit == "axe":
+                        logger.info(
+                            f"[{account.world}] ⚔️ [RUSH VIKINGS] Vikings não pesquisados no Ferreiro da aldeia {v_id}. "
+                            f"Pesquisa priorizada com urgência máxima no Ferreiro."
+                        )
+                    elif unit == "light":
+                        logger.info(
+                            f"[{account.world}] 🐎 [RUSH CL] Cavalaria Leve não pesquisada no Ferreiro da aldeia {v_id}. "
+                            f"Pesquisa priorizada com urgência máxima no Ferreiro."
+                        )
+                    else:
+                        logger.info(
+                            f"[{account.world}] {unit.capitalize()} não está pesquisado ou desbloqueado no {building.capitalize()} "
+                            f"da aldeia {v_id}. Ignorando."
+                        )
                     continue
 
                 home_count = troops_home.get(unit, 0)

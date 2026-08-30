@@ -390,8 +390,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       } else if (targetId === "tab-map") {
         loadMapGrid();
         loadMapBarbarians();
-      } else if (targetId === "tab-military") {
-        loadRecruitmentIntoForm();
+      } else if (targetId === "tab-troop-models") {
+        loadRecruitmentData();
+      } else if (targetId === "tab-recruitment") {
+        loadRecruitmentData();
       } else if (targetId === "tab-building") {
         loadBuildingData();
       } else if (targetId === "tab-villages") {
@@ -977,7 +979,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (elements.inputAccSid) elements.inputAccSid.value = "";
     if (elements.inputAccVillageId) elements.inputAccVillageId.value = "";
     if (elements.inputAccProxy) elements.inputAccProxy.value = "";
-    if (elements.inputAccTemplate) elements.inputAccTemplate.value = "rush_resources";
+    if (elements.inputAccTemplate) elements.inputAccTemplate.value = "default_plan";
     elements.accountModal.style.display = "flex";
   }
 
@@ -993,7 +995,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (elements.inputAccSid) elements.inputAccSid.value = acc.session_cookie || acc.sid || "";
       if (elements.inputAccVillageId) elements.inputAccVillageId.value = acc.village_id || "";
       if (elements.inputAccProxy) elements.inputAccProxy.value = acc.proxy || "";
-      if (elements.inputAccTemplate) elements.inputAccTemplate.value = acc.build_order_strategy || acc.building_template || "rush_resources";
+      if (elements.inputAccTemplate) elements.inputAccTemplate.value = acc.build_order_strategy || acc.building_template || "default_plan";
       elements.accountModal.style.display = "flex";
     } catch (err) {
       alert(`Erro ao carregar detalhes da conta: ${err.message}`);
@@ -1230,6 +1232,10 @@ document.addEventListener("DOMContentLoaded", async () => {
           sel.style.borderColor = "var(--neon-emerald)";
           setTimeout(() => { sel.style.borderColor = ""; }, 1500);
           addLogEntry("SUCCESS", "village", `Aldeia ${vid} configurada com modelo '${catLabel}'. Persistido no SQLite.`);
+          if (state.village && state.village.id === parseInt(vid, 10)) {
+            state.village.category = newCat;
+            renderRecruitmentData({ active_orders: [] });
+          }
         } catch (err) {
           sel.style.opacity = "1";
           sel.style.borderColor = "var(--neon-crimson)";
@@ -1373,7 +1379,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (elements.inputAccSid) elements.inputAccSid.value = "";
     if (elements.inputAccVillageId) elements.inputAccVillageId.value = "";
     if (elements.inputAccProxy) elements.inputAccProxy.value = "";
-    if (elements.inputAccTemplate) elements.inputAccTemplate.value = "rush_resources";
+    if (elements.inputAccTemplate) elements.inputAccTemplate.value = "default_plan";
     elements.accountModal.style.display = "flex";
   }
 
@@ -1387,7 +1393,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (elements.inputAccSid) elements.inputAccSid.value = acc.session_cookie || acc.sid || "";
     if (elements.inputAccVillageId) elements.inputAccVillageId.value = acc.village_id || "";
     if (elements.inputAccProxy) elements.inputAccProxy.value = acc.proxy || "";
-    if (elements.inputAccTemplate) elements.inputAccTemplate.value = acc.build_order_strategy || "rush_resources";
+    if (elements.inputAccTemplate) elements.inputAccTemplate.value = acc.build_order_strategy || "default_plan";
     elements.accountModal.style.display = "flex";
   }
 
@@ -1469,7 +1475,7 @@ document.addEventListener("DOMContentLoaded", async () => {
               <div style="font-size: 0.75rem; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px;">
                 <div><strong>Sessão:</strong> ${hasSid ? '<span style="color:var(--neon-emerald)">🟢 Guardada</span>' : '<span style="color:var(--neon-amber)">🟡 Sem SID</span>'}</div>
                 <div><strong>Aldeia:</strong> ${acc.village_id || 'Automática'}</div>
-                <div><strong>Estratégia:</strong> ${acc.build_order_strategy || 'rush_resources'}</div>
+                <div><strong>Estratégia:</strong> ${acc.build_order_strategy || 'default_plan'}</div>
                 <div><strong>Último Acesso:</strong> ${lastUsedStr}</div>
               </div>
             </div>
@@ -2656,7 +2662,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         
         // Atualiza Dropdown da Aba de Edifícios
         if (elements.bldTemplateSelect) {
-          const currentVal = selectedId || elements.bldTemplateSelect.value || "rush_resources";
+          const currentVal = selectedId || elements.bldTemplateSelect.value || "default_plan";
           elements.bldTemplateSelect.innerHTML = cachedBuildingTemplates.map(t => {
             const label = t.name + (t.is_default ? " (Padrão)" : "");
             return `<option value="${t.id}">${label}</option>`;
@@ -3024,34 +3030,38 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Controles do Terminal
-  elements.btnClearLogs.addEventListener("click", () => {
+  elements.btnClearLogs?.addEventListener("click", () => {
     state.logs = [];
-    elements.terminalLogs.innerHTML = "";
+    if (elements.terminalLogs) elements.terminalLogs.innerHTML = "";
   });
 
-  elements.btnAutoScroll.addEventListener("click", () => {
+  elements.btnAutoScroll?.addEventListener("click", () => {
     state.autoScrollLogs = !state.autoScrollLogs;
-    elements.btnAutoScroll.textContent = state.autoScrollLogs ? "Scroll: Ativo" : "Scroll: Pausado";
-    elements.btnAutoScroll.className = state.autoScrollLogs ? "btn btn-secondary" : "btn btn-warning";
+    if (elements.btnAutoScroll) {
+      elements.btnAutoScroll.textContent = state.autoScrollLogs ? "Scroll: Ativo" : "Scroll: Pausado";
+      elements.btnAutoScroll.className = state.autoScrollLogs ? "btn btn-secondary" : "btn btn-warning";
+    }
   });
 
-  elements.selectLogFilter.addEventListener("change", (e) => {
+  elements.selectLogFilter?.addEventListener("change", (e) => {
     state.logFilter = e.target.value;
     refreshTerminalView();
   });
 
-  elements.inputSearchLogs.addEventListener("input", (e) => {
+  elements.inputSearchLogs?.addEventListener("input", (e) => {
     state.logSearch = e.target.value;
     refreshTerminalView();
   });
 
   function refreshTerminalView() {
-    elements.terminalLogs.innerHTML = "";
-    state.logs.forEach(renderLogEntry);
+    if (elements.terminalLogs) {
+      elements.terminalLogs.innerHTML = "";
+      state.logs.forEach(renderLogEntry);
+    }
   }
 
   // --- 6. Ações Manuais e Botões da Barra Superior ---
-  elements.btnToggleScheduler.addEventListener("click", async () => {
+  elements.btnToggleScheduler?.addEventListener("click", async () => {
     try {
       if (state.schedulerRunning) {
         await window.api.pauseScheduler();
@@ -3082,13 +3092,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     } catch (e) {
       addLogEntry("CRITICAL", "auth", `Erro: ${e.message}`);
     } finally {
-      elements.btnRenewSession.disabled = false;
-      elements.btnRenewSession.innerHTML = "<span>🔑</span> Entrar / Login";
+      if (elements.btnRenewSession) {
+        elements.btnRenewSession.disabled = false;
+        elements.btnRenewSession.innerHTML = "<span>🔑</span> Entrar / Login";
+      }
     }
   });
 
-
-  elements.btnBuildNow.addEventListener("click", async () => {
+  elements.btnBuildNow?.addEventListener("click", async () => {
     try {
       addLogEntry("INFO", "app", "Disparo manual: A iniciar ciclo de construção...");
       const res = await window.api.triggerBuild();
@@ -3099,17 +3110,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  elements.btnFarmNow.addEventListener("click", async () => {
-    try {
-      addLogEntry("INFO", "app", "Disparo manual: A iniciar onda de farm...");
-      const res = await window.api.triggerFarm();
-      addLogEntry("SUCCESS", "app", res.message || "Onda de farm disparada!");
-    } catch (e) {
-      alert(`Erro: ${e.message}`);
-    }
-  });
-
-  elements.btnRecruitNow.addEventListener("click", async () => {
+  elements.btnRecruitNow?.addEventListener("click", async () => {
     try {
       addLogEntry("INFO", "app", "Disparo manual: A iniciar ciclo de recrutamento...");
       const res = await window.api.triggerRecruit();
@@ -3120,17 +3121,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   // Modal Captcha
-  elements.btnResolveCaptcha.addEventListener("click", async () => {
+  const handleResumeCaptcha = async () => {
     try {
       await window.api.resumeBotProtection();
       state.captchaActive = false;
-      elements.captchaModal.classList.remove("active");
+      elements.captchaModal?.classList.remove("active");
       updateTopBar();
       addLogEntry("SUCCESS", "anti-bot", "Alerta anti-bot limpo pelo utilizador. Motor retomado.");
     } catch (e) {
       alert(`Erro ao retomar: ${e.message}`);
     }
-  });
+  };
+
+  elements.btnResolveCaptcha?.addEventListener("click", handleResumeCaptcha);
+  document.getElementById("btn-resume-captcha")?.addEventListener("click", handleResumeCaptcha);
 
   elements.btnRefreshData?.addEventListener("click", async () => {
     try {
@@ -3314,8 +3318,8 @@ document.addEventListener("DOMContentLoaded", async () => {
             ${b.is_bonus ? '<span class="badge" style="background: rgba(168,85,247,0.2); color: #c084fc; border: 1px solid rgba(168,85,247,0.4); font-size: 0.7rem;">BÓNUS</span>' : '<span style="color: var(--text-muted); font-size: 0.75rem;">Normal</span>'}
           </td>
           <td style="padding: 8px 12px; text-align: right;">
-            <button class="btn btn-secondary" style="padding: 3px 10px; font-size: 0.75rem;" onclick="window.farmTargetCoords('${b.coordinates}')" title="Disparar ataque para esta bárbara">
-              ⚔ Atacar
+            <button class="btn btn-secondary" style="padding: 3px 10px; font-size: 0.75rem;" onclick="window.focusMapCoord(${b.x}, ${b.y})" title="Centrar mapa nesta aldeia">
+              🎯 Ver
             </button>
           </td>
         </tr>
@@ -3329,19 +3333,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (elements.mapCenterX) elements.mapCenterX.value = x;
     if (elements.mapCenterY) elements.mapCenterY.value = y;
     loadMapGrid(x, y);
-  };
-
-  // Quick Farm Target Helper
-  window.farmTargetCoords = async function(coords) {
-    try {
-      addLogEntry("INFO", "map", `A disparar onda de saque para bárbaras próximas incluindo ${coords}...`);
-      const res = await window.api.triggerMapFarm();
-      if (res && res.status === "scheduled") {
-        addLogEntry("SUCCESS", "map", `Onda de ataque agendada via Praça de Reunião!`);
-      }
-    } catch (e) {
-      alert(`Falha ao enviar ataque: ${e.message}`);
-    }
   };
 
   // --- Renderizador Cartográfico Geográfico Réplica do Tribal Wars ---
@@ -3924,20 +3915,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  elements.btnMapFarmNearby?.addEventListener("click", async () => {
-    try {
-      addLogEntry("INFO", "map", "A disparar onda de saques contra as bárbaras mais próximas...");
-      const res = await window.api.triggerMapFarm();
-      if (res && res.status === "scheduled") {
-        addLogEntry("SUCCESS", "map", "Onda de farm baseada no mapa agendada com sucesso!");
-      } else {
-        addLogEntry("WARNING", "map", res.message || "Nenhuma bárbara disponível ou sem tropas.");
-      }
-    } catch (e) {
-      alert(`Erro: ${e.message}`);
-    }
-  });
-
   elements.btnRefreshBarbs?.addEventListener("click", () => {
     loadMapBarbarians();
   });
@@ -4013,20 +3990,16 @@ document.addEventListener("DOMContentLoaded", async () => {
         document.getElementById("cfg-keep-alive").checked = config.auth.keep_alive !== false;
       }
       if (config.building) {
-        document.getElementById("cfg-building-template").value = config.building.template || "rush_resources";
+        document.getElementById("cfg-building-template").value = config.building.template || "default_plan";
         document.getElementById("cfg-max-queue").value = config.building.max_queue || 2;
         document.getElementById("cfg-build-interval").value = config.building.interval_seconds || 75;
-      }
-      if (config.farm) {
-        document.getElementById("cfg-farm-enabled").checked = !!config.farm.enabled;
-        document.getElementById("cfg-farm-interval").value = config.farm.interval_minutes || 5;
       }
     } catch (e) {
       console.warn("Falha ao carregar configurações:", e);
     }
   }
 
-  elements.btnSaveSettings.addEventListener("click", async (e) => {
+  elements.btnSaveSettings?.addEventListener("click", async (e) => {
     e.preventDefault();
     try {
       const pwdVal = document.getElementById("cfg-password").value.trim();
@@ -4044,10 +4017,6 @@ document.addEventListener("DOMContentLoaded", async () => {
           template: document.getElementById("cfg-building-template").value,
           max_queue: parseInt(document.getElementById("cfg-max-queue").value, 10),
           interval_seconds: parseFloat(document.getElementById("cfg-build-interval").value),
-        },
-        farm: {
-          enabled: document.getElementById("cfg-farm-enabled").checked,
-          interval_minutes: parseFloat(document.getElementById("cfg-farm-interval").value),
         },
       };
 
@@ -4145,7 +4114,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  state.recruitmentBatchSizes = {};
+  state.recruitmentBatchSizes = {
+    attack: { spear: 10, sword: 10, axe: 10, archer: 5, spy: 5, light: 5, marcher: 5, heavy: 5, ram: 2, catapult: 2 },
+    defense: { spear: 10, sword: 10, axe: 10, archer: 5, spy: 5, light: 5, marcher: 5, heavy: 5, ram: 2, catapult: 2 },
+  };
 
   function renderActiveModelUnits() {
     const gridContainer = document.getElementById("grid-model-active-units");
@@ -4210,7 +4182,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   function switchRecModelTab(tabKey) {
-    state.activeRecModelTab = tabKey;
+    state.activeRecModelTab = tabKey || "attack";
     const banner = document.getElementById("rec-model-info-banner");
     const btnDelete = document.getElementById("btn-delete-active-model");
 
@@ -4219,12 +4191,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         banner.style.background = "rgba(239, 68, 68, 0.08)";
         banner.style.borderLeftColor = "#ef4444";
         banner.style.color = "#fca5a5";
-        banner.innerHTML = `<strong>⚔️ Modelo de Aldeia de Ataque:</strong> Foco em poder de destruição (Viking/Bárbaro, Cavalaria Leve, Aríetes). Estas metas serão seguidas em todas as aldeias marcadas como <em>Ataque</em> na página de Multi-Aldeias.`;
+        banner.innerHTML = `<strong>⚔️ Modelo de Aldeia de Ataque (Full):</strong> Foco em poder de destruição (Viking/Bárbaro, Cavalaria Leve, Aríetes). Estas metas serão seguidas em todas as aldeias marcadas como <em>Ataque</em> na página de Multi-Aldeias.`;
       } else if (tabKey === "defense") {
         banner.style.background = "rgba(59, 130, 246, 0.08)";
         banner.style.borderLeftColor = "#3b82f6";
         banner.style.color = "#93c5fd";
-        banner.innerHTML = `<strong>🛡️ Modelo de Aldeia de Defesa:</strong> Foco em sustentação e apoio rápido (Lanceiros, Espadachins, Cavalaria Pesada). Estas metas serão seguidas em todas as aldeias marcadas como <em>Defesa</em> na página de Multi-Aldeias.`;
+        banner.innerHTML = `<strong>🛡️ Modelo de Aldeia de Defesa (Full):</strong> Foco em sustentação e apoio rápido (Lanceiros, Espadachins, Cavalaria Pesada). Estas metas serão seguidas em todas as aldeias marcadas como <em>Defesa</em> na página de Multi-Aldeias.`;
       } else {
         const cap = tabKey.charAt(0).toUpperCase() + tabKey.slice(1);
         banner.style.background = "rgba(245, 158, 11, 0.08)";
@@ -4344,21 +4316,33 @@ document.addEventListener("DOMContentLoaded", async () => {
       const vId = villageId || (state.village && state.village.id);
       
       // Carrega modelos de tropas do SQLite
-      const resTemplates = await window.api.getRecruitmentTemplates();
-      if (resTemplates && resTemplates.models) {
-        if (!state.recruitmentBatchSizes) state.recruitmentBatchSizes = {};
-        resTemplates.models.forEach(m => {
-          state.recruitmentModels[m.id] = m.units || {};
-          state.recruitmentBatchSizes[m.id] = m.batch_sizes || {};
-        });
-        renderModelTabs();
-        renderActiveModelUnits();
+      try {
+        const resTemplates = await window.api.getRecruitmentTemplates();
+        if (resTemplates && resTemplates.models && Array.isArray(resTemplates.models)) {
+          if (!state.recruitmentBatchSizes) state.recruitmentBatchSizes = {};
+          resTemplates.models.forEach(m => {
+            if (m && m.id) {
+              state.recruitmentModels[m.id] = m.units || {};
+              state.recruitmentBatchSizes[m.id] = m.batch_sizes || {};
+            }
+          });
+        }
+      } catch (errTmpl) {
+        console.warn("Aviso ao carregar modelos de recrutamento do SQLite:", errTmpl);
       }
 
-      // Carrega estado de recrutamento e filas ativas
-      const res = await window.api.getRecruitmentState(vId);
-      if (res && res.status === "success") {
-        renderRecruitmentData(res);
+      // Garante renderização consistente da aba ativa
+      if (!state.recruitmentModels[state.activeRecModelTab]) {
+        state.activeRecModelTab = "attack";
+      }
+      switchRecModelTab(state.activeRecModelTab);
+
+      // Carrega estado de recrutamento e filas ativas da aldeia
+      if (vId) {
+        const res = await window.api.getRecruitmentState(vId);
+        if (res && res.status === "success") {
+          renderRecruitmentData(res);
+        }
       }
     } catch (e) {
       console.warn("Falha ao carregar dados de recrutamento:", e);
@@ -4368,14 +4352,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   function renderRecruitmentData(data) {
     if (!data) return;
 
-    // 1. Modelos de Tropas
-    if (data.models) {
-      state.recruitmentModels = { ...state.recruitmentModels, ...data.models };
+    // 1. Modelos de Tropas se vierem no estado
+    if (data.models && typeof data.models === "object") {
+      Object.entries(data.models).forEach(([mKey, mUnits]) => {
+        if (mUnits && typeof mUnits === "object") {
+          state.recruitmentModels[mKey] = { ...(state.recruitmentModels[mKey] || {}), ...mUnits };
+        }
+      });
       renderModelTabs();
       renderActiveModelUnits();
     }
 
-    // 2. Filas Ativas de Recrutamento em Andamento
+    // 2. Filas Ativas de Recrutamento em Andamento (Quartel, Estábulo, Oficina)
     const activeOrders = data.active_orders || [];
     const badge = document.getElementById("rec-active-queue-badge");
     const container = document.getElementById("rec-active-queue-container");
@@ -4394,7 +4382,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       } else {
         container.innerHTML = activeOrders.map(ord => {
           const uMeta = REC_UNITS_METADATA.find(m => m.id === ord.unit);
-          const uIcon = uMeta ? uMeta.icon : (UNIT_ICONS[ord.unit] || "🪖");
+          const uIcon = uMeta ? uMeta.icon : "🪖";
           const uName = uMeta ? uMeta.name : (ord.unit_name || ord.unit);
           const bldName = ord.building === "barracks" ? "Quartel" : (ord.building === "stable" ? "Estábulo" : "Oficina");
           return `
@@ -4421,18 +4409,61 @@ document.addEventListener("DOMContentLoaded", async () => {
         }).join("");
       }
     }
+
+    // 3. Comparativo de Tropas Presentes vs Meta do Modelo Selecionado para a Aldeia
+    const vId = (state.village && state.village.id) || null;
+    const vCat = (vId && state.villageCategories && state.villageCategories[vId]) || (state.village && state.village.category) || "attack";
+    const vModelKey = (typeof vCat === "string") ? vCat.toLowerCase().trim() : "attack";
+    const activeTargetModel = state.recruitmentModels[vModelKey] || state.recruitmentModels["attack"] || {};
+
+    const modelNameBadge = document.getElementById("rec-active-village-model-name");
+    if (modelNameBadge) {
+      const displayLabel = vModelKey === "attack" ? "Modelo: ⚔️ Ataque Full" : (vModelKey === "defense" ? "Modelo: 🛡️ Defesa Full" : (vModelKey === "balanced" ? "Modelo: ⚖️ Balanceado" : `Modelo: ✨ ${vModelKey.charAt(0).toUpperCase() + vModelKey.slice(1)}`));
+      modelNameBadge.textContent = displayLabel;
+    }
+
+    const progressGrid = document.getElementById("rec-village-troops-progress-grid");
+    if (progressGrid) {
+      progressGrid.innerHTML = REC_UNITS_METADATA.map(u => {
+        const cur = (state.army && state.army[u.id]) || 0;
+        const tgt = activeTargetModel[u.id] || 0;
+        const pct = tgt > 0 ? Math.min(100, Math.round((cur / tgt) * 100)) : (cur > 0 ? 100 : 0);
+        const isDone = tgt > 0 ? cur >= tgt : (tgt === 0);
+        const barColor = isDone ? "var(--neon-emerald)" : "var(--neon-cyan)";
+        return `
+          <div style="background: rgba(15,23,42,0.6); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 1.1rem;">${u.icon}</span>
+                <span style="font-size: 0.82rem; font-weight: 600; color: #fff;">${u.name}</span>
+              </div>
+              <span style="font-size: 0.75rem; font-family: var(--font-mono); font-weight: 700; color: ${isDone ? '#34d399' : '#fff'};">
+                ${cur.toLocaleString()} / ${tgt.toLocaleString()}
+              </span>
+            </div>
+            <div style="height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
+              <div style="width: ${pct}%; height: 100%; background: ${barColor}; transition: width 0.3s ease;"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.7rem; color: var(--text-muted);">
+              <span>${pct}% atingido</span>
+              <span>${isDone && tgt > 0 ? '✓ Completo' : (tgt > 0 ? `Falta ${Math.max(0, tgt - cur)}` : 'Sem meta')}</span>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
   }
 
   async function saveRecruitmentModelsHandler() {
-    const btnTop = document.getElementById("btn-save-recruitment");
-    const btnBottom = document.getElementById("btn-save-recruitment-bottom");
+    const btnTop = document.getElementById("btn-save-troop-models");
+    const btnBottom = document.getElementById("btn-save-troop-models-bottom");
     if (btnTop) { btnTop.disabled = true; btnTop.textContent = "A gravar no SQLite..."; }
     if (btnBottom) { btnBottom.disabled = true; btnBottom.textContent = "A gravar no SQLite..."; }
     state._isSavingRecruitment = true;
 
     try {
       // Coleta valores do modelo atualmente visível
-      const activeKey = state.activeRecModelTab;
+      const activeKey = state.activeRecModelTab || "attack";
       if (!state.recruitmentModels[activeKey]) state.recruitmentModels[activeKey] = {};
       if (!state.recruitmentBatchSizes) state.recruitmentBatchSizes = {};
       if (!state.recruitmentBatchSizes[activeKey]) state.recruitmentBatchSizes[activeKey] = {};
@@ -4456,10 +4487,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       // Grava diretamente no SQLite para cada modelo
       for (const [mId, uTargets] of Object.entries(state.recruitmentModels)) {
         const bSizes = state.recruitmentBatchSizes[mId] || {};
+        const isDef = mId === "attack" || mId === "defense";
+        const mName = mId === "attack" ? "Ataque Full" : (mId === "defense" ? "Defesa Full" : (mId.charAt(0).toUpperCase() + mId.slice(1)));
         await window.api.updateRecruitmentTemplate(mId, {
-          name: mId.charAt(0).toUpperCase() + mId.slice(1),
+          name: mName,
           units: uTargets,
           batch_sizes: bSizes,
+          is_default: isDef,
         });
       }
 
@@ -4468,38 +4502,99 @@ document.addEventListener("DOMContentLoaded", async () => {
       alert("Modelos de tropas guardados e persistidos no SQLite com sucesso!");
       
       // Atualiza lista de modelos na interface e nos dropdowns de multi-aldeia
-      renderModelTabs();
-      renderActiveModelUnits();
+      switchRecModelTab(state.activeRecModelTab);
       if (state.account?.villages) {
         renderVillagesOverview(state.account.villages, state.resource_balance);
       }
+      renderRecruitmentData({ active_orders: [] });
     } catch (err) {
       addLogEntry("ERROR", "recruitment", `Erro ao guardar modelos: ${err.message}`);
       alert(`Falha ao guardar modelos no SQLite: ${err.message}`);
     } finally {
       state._isSavingRecruitment = false;
-      if (btnTop) { btnTop.disabled = false; btnTop.innerHTML = "<span>💾</span> Guardar Modelos"; }
-      if (btnBottom) { btnBottom.disabled = false; btnBottom.innerHTML = "<span>💾</span> Guardar Modelos"; }
+      if (btnTop) { btnTop.disabled = false; btnTop.innerHTML = "<span>💾</span> Guardar Alterações na BD"; }
+      if (btnBottom) { btnBottom.disabled = false; btnBottom.innerHTML = "<span>💾</span> Guardar Alterações na BD"; }
     }
   }
 
-  document.getElementById("btn-save-recruitment")?.addEventListener("click", saveRecruitmentModelsHandler);
-  document.getElementById("btn-save-recruitment-bottom")?.addEventListener("click", saveRecruitmentModelsHandler);
+  // Listeners de Gravação de Modelos de Tropas
+  document.getElementById("btn-save-troop-models")?.addEventListener("click", saveRecruitmentModelsHandler);
+  document.getElementById("btn-save-troop-models-bottom")?.addEventListener("click", saveRecruitmentModelsHandler);
 
-  document.getElementById("btn-refresh-rec-tab")?.addEventListener("click", async () => {
-    const btn = document.getElementById("btn-refresh-rec-tab");
+  // Botão Atualizar Modelos de Tropas
+  document.getElementById("btn-refresh-troop-models-tab")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-refresh-troop-models-tab");
     try {
       if (btn) { btn.disabled = true; btn.innerHTML = "<span>⏳</span> A ler..."; }
-      addLogEntry("INFO", "recruitment", "A atualizar filas de produção e tropas...");
+      addLogEntry("INFO", "recruitment", "A recarregar modelos de tropas do SQLite...");
+      await loadRecruitmentData();
+      addLogEntry("SUCCESS", "recruitment", "Modelos de tropas sincronizados do SQLite com sucesso!");
+    } catch (err) {
+      addLogEntry("WARNING", "recruitment", `Falha ao sincronizar modelos: ${err.message}`);
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = "<span>🔄</span> Atualizar Modelos"; }
+    }
+  });
+
+  // Listeners da Aba de Recrutamento Ativo
+  document.getElementById("btn-refresh-recruitment-queue")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-refresh-recruitment-queue");
+    try {
+      if (btn) { btn.disabled = true; btn.innerHTML = "<span>⏳</span> A ler..."; }
+      addLogEntry("INFO", "recruitment", "A ler filas de produção militar da aldeia ativa...");
       await window.api.refreshVillage();
       await loadRecruitmentData();
-      addLogEntry("SUCCESS", "recruitment", "Dados militares e produção atualizados com sucesso!");
+      addLogEntry("SUCCESS", "recruitment", "Filas militares e tropas atualizadas!");
     } catch (err) {
-      addLogEntry("WARNING", "recruitment", `Falha ao atualizar recrutamento: ${err.message}`);
+      addLogEntry("WARNING", "recruitment", `Falha ao atualizar filas militares: ${err.message}`);
     } finally {
       if (btn) { btn.disabled = false; btn.innerHTML = "<span>🔄</span> Atualizar"; }
     }
   });
+
+  document.getElementById("btn-trigger-recruit-now")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-trigger-recruit-now");
+    try {
+      if (btn) { btn.disabled = true; btn.innerHTML = "<span>⏳</span> A recrutar..."; }
+      addLogEntry("INFO", "recruitment", "Disparo manual: A iniciar ciclo de recrutamento para a aldeia ativa...");
+      const res = await window.api.triggerRecruit();
+      addLogEntry("SUCCESS", "recruitment", res.message || "Ciclo de recrutamento despachado com sucesso!");
+      await loadRecruitmentData();
+    } catch (err) {
+      addLogEntry("ERROR", "recruitment", `Erro ao recrutar: ${err.message}`);
+      alert(`Falha ao disparar recrutamento: ${err.message}`);
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = "<span>⚔️</span> Recrutar Agora"; }
+    }
+  });
+
+  // Toggle e configurações de Auto-Recrutamento
+  const recAutoToggle = document.getElementById("rec-auto-toggle");
+  const recBadgeStatus = document.getElementById("rec-badge-status");
+  const recIntervalInput = document.getElementById("rec-interval-minutes");
+  const recMinPopInput = document.getElementById("rec-min-free-pop");
+
+  async function syncRecruitmentSettings() {
+    if (!recAutoToggle) return;
+    const isEn = recAutoToggle.checked;
+    if (recBadgeStatus) {
+      recBadgeStatus.textContent = isEn ? "ATIVO" : "PAUSADO";
+      recBadgeStatus.style.background = isEn ? "rgba(16,185,129,0.2)" : "rgba(245,158,11,0.2)";
+      recBadgeStatus.style.color = isEn ? "var(--neon-emerald)" : "var(--neon-amber)";
+    }
+    const intervalMin = recIntervalInput ? parseFloat(recIntervalInput.value) : 1.5;
+    const minPop = recMinPopInput ? parseInt(recMinPopInput.value, 10) : 5;
+    try {
+      await window.api.toggleRecruitment(isEn, intervalMin, minPop);
+      addLogEntry("INFO", "recruitment", `Configuração de auto-recrutamento atualizada: ${isEn ? 'Ativo' : 'Pausado'} (${intervalMin} min, pop min: ${minPop}).`);
+    } catch (err) {
+      console.warn("Falha ao sincronizar toggle de recrutamento:", err);
+    }
+  }
+
+  recAutoToggle?.addEventListener("change", syncRecruitmentSettings);
+  recIntervalInput?.addEventListener("change", syncRecruitmentSettings);
+  recMinPopInput?.addEventListener("change", syncRecruitmentSettings);
 
   // Listeners de WebSocket para templates em tempo real
   if (window.wsClient) {
@@ -4518,9 +4613,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Inicialização do painel de modelos de tropas
-  renderModelTabs();
-  renderActiveModelUnits();
+  // Inicialização imediata dos modelos de tropas para que nunca fiquem vazios
+  switchRecModelTab("attack");
   loadRecruitmentData();
 
   // --- 8. Gestão e Renderização de Estatísticas & Métricas ---

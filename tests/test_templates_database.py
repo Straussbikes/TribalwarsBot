@@ -26,18 +26,19 @@ def temp_db():
 
 
 def test_seed_default_building_templates(temp_db):
-    """Verifica se os templates padrão de construção são semeados automaticamente."""
+    """Verifica se o template padrão oficial de construção é semeado automaticamente."""
     templates = temp_db.list_building_templates()
-    assert len(templates) >= 3
+    assert len(templates) >= 1
     ids = [t["id"] for t in templates]
-    assert "rush_resources" in ids
-    assert "balanced" in ids
-    assert "military_rush" in ids
+    assert "default_plan" in ids
+    assert "rush_resources" not in ids
+    assert "balanced" not in ids
+    assert "military_rush" not in ids
 
-    rush = temp_db.get_building_template("rush_resources")
-    assert rush is not None
-    assert rush["is_default"] is True
-    assert len(rush["priority_list"]) > 0
+    def_plan = temp_db.get_building_template("default_plan")
+    assert def_plan is not None
+    assert def_plan["is_default"] is True
+    assert len(def_plan["priority_list"]) == 268
 
 
 def test_seed_default_recruitment_models(temp_db):
@@ -93,7 +94,7 @@ def test_building_template_crud_and_clone(temp_db):
     assert temp_db.get_building_template("custom_rush") is None
 
     # Templates padrão não podem ser deletados
-    del_default = temp_db.delete_building_template("rush_resources")
+    del_default = temp_db.delete_building_template("default_plan")
     assert del_default is False
 
 
@@ -178,7 +179,7 @@ def test_api_building_templates_endpoints(temp_db):
     assert resp.status_code == 200
     data = resp.json()
     assert "templates" in data
-    assert len(data["templates"]) >= 3
+    assert len(data["templates"]) >= 1
 
     # 2. Criar template
     create_payload = {

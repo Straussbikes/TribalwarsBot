@@ -3,7 +3,6 @@ Tribal Wars Mobile Automation Engine - Servidor FastAPI & Sidecar IPC
 Fábrica de aplicação FastAPI, configuração de CORS e ciclo de vida assíncrono.
 """
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import Optional
@@ -12,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-from engine.api.auth import TokenVerifier, generate_auth_token, remove_auth_file, write_auth_file
+from engine.api.auth import TokenVerifier, generate_auth_token, write_auth_file
 from engine.api.context import EngineContext
 from engine.api.routes import create_api_router
 from engine.api.websocket import WebSocketLogHandler, create_websocket_router

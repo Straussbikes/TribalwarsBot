@@ -225,6 +225,73 @@ class QueueOrder:
         return False
 
 
+# Tabela canónica de cadeias de pré-requisitos para desbloqueio militar prioritário
+MILITARY_PREREQUISITE_CHAINS: Dict[str, List[Tuple[str, int]]] = {
+    "axe": [
+        (BuildingType.MAIN, 3),
+        (BuildingType.BARRACKS, 1),
+        (BuildingType.MAIN, 5),
+        (BuildingType.SMITH, 1),
+        (BuildingType.BARRACKS, 2),
+        (BuildingType.SMITH, 2),
+    ],
+    "light": [
+        (BuildingType.MAIN, 3),
+        (BuildingType.BARRACKS, 1),
+        (BuildingType.MAIN, 5),
+        (BuildingType.SMITH, 1),
+        (BuildingType.BARRACKS, 5),
+        (BuildingType.SMITH, 5),
+        (BuildingType.MAIN, 10),
+        (BuildingType.STABLE, 1),
+        (BuildingType.STABLE, 2),
+        (BuildingType.STABLE, 3),
+    ],
+    "spy": [
+        (BuildingType.MAIN, 3),
+        (BuildingType.BARRACKS, 1),
+        (BuildingType.MAIN, 5),
+        (BuildingType.SMITH, 1),
+        (BuildingType.BARRACKS, 5),
+        (BuildingType.SMITH, 5),
+        (BuildingType.MAIN, 10),
+        (BuildingType.STABLE, 1),
+    ],
+    "ram": [
+        (BuildingType.MAIN, 3),
+        (BuildingType.BARRACKS, 1),
+        (BuildingType.MAIN, 5),
+        (BuildingType.SMITH, 1),
+        (BuildingType.MAIN, 10),
+        (BuildingType.SMITH, 10),
+        (BuildingType.GARAGE, 1),
+    ],
+    "catapult": [
+        (BuildingType.MAIN, 3),
+        (BuildingType.BARRACKS, 1),
+        (BuildingType.MAIN, 5),
+        (BuildingType.SMITH, 1),
+        (BuildingType.MAIN, 10),
+        (BuildingType.SMITH, 10),
+        (BuildingType.GARAGE, 1),
+        (BuildingType.GARAGE, 2),
+        (BuildingType.SMITH, 12),
+    ],
+    "heavy": [
+        (BuildingType.MAIN, 3),
+        (BuildingType.BARRACKS, 1),
+        (BuildingType.MAIN, 5),
+        (BuildingType.SMITH, 1),
+        (BuildingType.BARRACKS, 5),
+        (BuildingType.SMITH, 5),
+        (BuildingType.MAIN, 10),
+        (BuildingType.STABLE, 1),
+        (BuildingType.STABLE, 10),
+        (BuildingType.SMITH, 15),
+    ],
+}
+
+
 @dataclass
 class BuildingUpgrade:
     """Opção e requisitos de evolução para um determinado edifício."""
@@ -238,6 +305,7 @@ class BuildingUpgrade:
     can_build: bool = False
     error_reason: Optional[str] = None
     build_url: Optional[str] = None
+    is_rush: bool = False
 
 
 
@@ -280,118 +348,280 @@ class MainBuildingState:
         return virt
 
 
-# Modelos de Construção Pré-definidos (Build Templates)
-RUSH_RESOURCES_TEMPLATE: List[Tuple[str, int]] = [
+# Modelo Oficial Padrão de Construção (Baseado na estratégia otimizada do config.json - 268 passos)
+DEFAULT_BUILD_PLAN: List[Tuple[str, int]] = [
     (BuildingType.WOOD, 1),
     (BuildingType.STONE, 1),
+    (BuildingType.IRON, 1),
     (BuildingType.WOOD, 2),
     (BuildingType.STONE, 2),
-    (BuildingType.IRON, 1),
+    (BuildingType.WOOD, 3),
+    (BuildingType.STONE, 3),
     (BuildingType.MAIN, 2),
     (BuildingType.MAIN, 3),
     (BuildingType.BARRACKS, 1),
-    (BuildingType.WOOD, 3),
-    (BuildingType.STONE, 3),
-    (BuildingType.STORAGE, 2),
-    (BuildingType.FARM, 2),
     (BuildingType.WOOD, 4),
     (BuildingType.STONE, 4),
     (BuildingType.IRON, 2),
+    (BuildingType.FARM, 2),
     (BuildingType.WOOD, 5),
     (BuildingType.STONE, 5),
-    (BuildingType.STORAGE, 3),
     (BuildingType.IRON, 3),
+    (BuildingType.STORAGE, 2),
     (BuildingType.WOOD, 6),
     (BuildingType.STONE, 6),
     (BuildingType.IRON, 4),
-    (BuildingType.STORAGE, 4),
     (BuildingType.FARM, 3),
+    (BuildingType.MAIN, 4),
+    (BuildingType.MAIN, 5),
+    (BuildingType.STORAGE, 3),
+    (BuildingType.SMITH, 1),
     (BuildingType.WOOD, 7),
     (BuildingType.STONE, 7),
     (BuildingType.IRON, 5),
+    (BuildingType.STORAGE, 4),
+    (BuildingType.FARM, 4),
     (BuildingType.WOOD, 8),
     (BuildingType.STONE, 8),
-    (BuildingType.STORAGE, 5),
-    (BuildingType.IRON, 6),
     (BuildingType.WOOD, 9),
     (BuildingType.STONE, 9),
-    (BuildingType.IRON, 7),
-    (BuildingType.WOOD, 10),
-    (BuildingType.STONE, 10),
-    (BuildingType.IRON, 8),
-    (BuildingType.STORAGE, 6),
-    (BuildingType.FARM, 4),
-]
-
-BALANCED_TEMPLATE: List[Tuple[str, int]] = [
-    (BuildingType.WOOD, 1),
-    (BuildingType.STONE, 1),
-    (BuildingType.IRON, 1),
-    (BuildingType.MAIN, 2),
-    (BuildingType.MAIN, 3),
-    (BuildingType.BARRACKS, 1),
-    (BuildingType.WALL, 1),
-    (BuildingType.WOOD, 2),
-    (BuildingType.STONE, 2),
-    (BuildingType.STORAGE, 2),
-    (BuildingType.FARM, 2),
-    (BuildingType.WOOD, 3),
-    (BuildingType.STONE, 3),
-    (BuildingType.IRON, 2),
-    (BuildingType.MAIN, 4),
-    (BuildingType.MAIN, 5),
-    (BuildingType.BARRACKS, 2),
-    (BuildingType.SMITH, 1),
-    (BuildingType.WOOD, 4),
-    (BuildingType.STONE, 4),
-    (BuildingType.IRON, 3),
-    (BuildingType.STORAGE, 3),
-    (BuildingType.WALL, 2),
-    (BuildingType.FARM, 3),
-    (BuildingType.WOOD, 5),
-    (BuildingType.STONE, 5),
-    (BuildingType.IRON, 4),
+    (BuildingType.IRON, 6),
+    (BuildingType.STORAGE, 5),
     (BuildingType.MAIN, 6),
     (BuildingType.MAIN, 7),
-    (BuildingType.BARRACKS, 3),
-    (BuildingType.STORAGE, 4),
-    (BuildingType.WALL, 3),
-]
-
-MILITARY_RUSH_TEMPLATE: List[Tuple[str, int]] = [
-    (BuildingType.WOOD, 1),
-    (BuildingType.STONE, 1),
-    (BuildingType.IRON, 1),
-    (BuildingType.MAIN, 2),
-    (BuildingType.MAIN, 3),
-    (BuildingType.BARRACKS, 1),
-    (BuildingType.BARRACKS, 2),
-    (BuildingType.WOOD, 2),
-    (BuildingType.STONE, 2),
-    (BuildingType.IRON, 2),
-    (BuildingType.STORAGE, 2),
-    (BuildingType.MAIN, 4),
-    (BuildingType.MAIN, 5),
-    (BuildingType.BARRACKS, 3),
-    (BuildingType.SMITH, 1),
-    (BuildingType.WALL, 1),
-    (BuildingType.WOOD, 3),
-    (BuildingType.STONE, 3),
-    (BuildingType.IRON, 3),
-    (BuildingType.FARM, 2),
-    (BuildingType.MAIN, 6),
-    (BuildingType.MAIN, 7),
-    (BuildingType.BARRACKS, 4),
-    (BuildingType.BARRACKS, 5),
+    (BuildingType.MAIN, 8),
     (BuildingType.SMITH, 2),
     (BuildingType.SMITH, 3),
-    (BuildingType.SMITH, 4),
-    (BuildingType.SMITH, 5),
-    (BuildingType.MAIN, 8),
+    (BuildingType.FARM, 5),
+    (BuildingType.STORAGE, 6),
     (BuildingType.MAIN, 9),
     (BuildingType.MAIN, 10),
+    (BuildingType.SMITH, 4),
+    (BuildingType.SMITH, 5),
+    (BuildingType.STORAGE, 7),
     (BuildingType.STABLE, 1),
+    (BuildingType.STABLE, 2),
+    (BuildingType.STABLE, 3),
+    (BuildingType.FARM, 6),
+    (BuildingType.STORAGE, 8),
+    (BuildingType.BARRACKS, 2),
+    (BuildingType.BARRACKS, 3),
+    (BuildingType.BARRACKS, 4),
+    (BuildingType.BARRACKS, 5),
+    (BuildingType.FARM, 7),
+    (BuildingType.STORAGE, 9),
+    (BuildingType.STORAGE, 10),
+    (BuildingType.FARM, 8),
+    (BuildingType.STABLE, 4),
+    (BuildingType.STABLE, 5),
+    (BuildingType.FARM, 9),
+    (BuildingType.FARM, 10),
+    (BuildingType.STORAGE, 11),
+    (BuildingType.STORAGE, 12),
+    (BuildingType.WOOD, 10),
+    (BuildingType.STONE, 10),
+    (BuildingType.IRON, 7),
+    (BuildingType.IRON, 8),
+    (BuildingType.WALL, 1),
+    (BuildingType.WALL, 2),
+    (BuildingType.WALL, 3),
+    (BuildingType.WALL, 4),
+    (BuildingType.WALL, 5),
+    (BuildingType.MAIN, 11),
+    (BuildingType.MAIN, 12),
+    (BuildingType.MAIN, 13),
+    (BuildingType.MAIN, 14),
+    (BuildingType.MAIN, 15),
+    (BuildingType.MAIN, 16),
+    (BuildingType.MAIN, 17),
+    (BuildingType.MAIN, 18),
+    (BuildingType.MAIN, 19),
+    (BuildingType.MAIN, 20),
+    (BuildingType.GARAGE, 1),
+    (BuildingType.GARAGE, 2),
+    (BuildingType.GARAGE, 3),
+    (BuildingType.GARAGE, 4),
+    (BuildingType.GARAGE, 5),
+    (BuildingType.MARKET, 1),
+    (BuildingType.MARKET, 2),
+    (BuildingType.MARKET, 3),
+    (BuildingType.MARKET, 4),
+    (BuildingType.MARKET, 5),
+    (BuildingType.MARKET, 6),
+    (BuildingType.MARKET, 7),
+    (BuildingType.MARKET, 8),
+    (BuildingType.MARKET, 9),
+    (BuildingType.MARKET, 10),
+    (BuildingType.SMITH, 6),
+    (BuildingType.SMITH, 7),
+    (BuildingType.SMITH, 8),
+    (BuildingType.SMITH, 9),
+    (BuildingType.SMITH, 10),
+    (BuildingType.SMITH, 11),
+    (BuildingType.SMITH, 12),
+    (BuildingType.SMITH, 13),
+    (BuildingType.SMITH, 14),
+    (BuildingType.SMITH, 15),
+    (BuildingType.SMITH, 16),
+    (BuildingType.SMITH, 17),
+    (BuildingType.SMITH, 18),
+    (BuildingType.SMITH, 19),
+    (BuildingType.SMITH, 20),
+    (BuildingType.STORAGE, 13),
+    (BuildingType.STORAGE, 14),
+    (BuildingType.STORAGE, 15),
+    (BuildingType.STORAGE, 16),
+    (BuildingType.STORAGE, 17),
+    (BuildingType.STORAGE, 18),
+    (BuildingType.STORAGE, 19),
+    (BuildingType.STORAGE, 20),
+    (BuildingType.FARM, 11),
+    (BuildingType.FARM, 12),
+    (BuildingType.FARM, 13),
+    (BuildingType.FARM, 14),
+    (BuildingType.FARM, 15),
+    (BuildingType.SNOB, 1),
+    (BuildingType.BARRACKS, 6),
+    (BuildingType.BARRACKS, 7),
+    (BuildingType.BARRACKS, 8),
+    (BuildingType.BARRACKS, 9),
+    (BuildingType.BARRACKS, 10),
+    (BuildingType.STABLE, 6),
+    (BuildingType.STABLE, 7),
+    (BuildingType.STABLE, 8),
+    (BuildingType.STABLE, 9),
+    (BuildingType.STABLE, 10),
+    (BuildingType.FARM, 16),
+    (BuildingType.FARM, 17),
+    (BuildingType.FARM, 18),
+    (BuildingType.FARM, 19),
+    (BuildingType.FARM, 20),
+    (BuildingType.WALL, 6),
+    (BuildingType.WALL, 7),
+    (BuildingType.WALL, 8),
+    (BuildingType.WALL, 9),
+    (BuildingType.WALL, 10),
+    (BuildingType.WALL, 11),
+    (BuildingType.WALL, 12),
+    (BuildingType.WALL, 13),
+    (BuildingType.WALL, 14),
+    (BuildingType.WALL, 15),
+    (BuildingType.WOOD, 11),
+    (BuildingType.WOOD, 12),
+    (BuildingType.WOOD, 13),
+    (BuildingType.WOOD, 14),
+    (BuildingType.WOOD, 15),
+    (BuildingType.STONE, 11),
+    (BuildingType.STONE, 12),
+    (BuildingType.STONE, 13),
+    (BuildingType.STONE, 14),
+    (BuildingType.STONE, 15),
+    (BuildingType.IRON, 9),
+    (BuildingType.IRON, 10),
+    (BuildingType.IRON, 11),
+    (BuildingType.IRON, 12),
+    (BuildingType.IRON, 13),
+    (BuildingType.IRON, 14),
+    (BuildingType.IRON, 15),
+    (BuildingType.BARRACKS, 11),
+    (BuildingType.BARRACKS, 12),
+    (BuildingType.BARRACKS, 13),
+    (BuildingType.BARRACKS, 14),
+    (BuildingType.BARRACKS, 15),
+    (BuildingType.BARRACKS, 16),
+    (BuildingType.BARRACKS, 17),
+    (BuildingType.BARRACKS, 18),
+    (BuildingType.BARRACKS, 19),
+    (BuildingType.BARRACKS, 20),
+    (BuildingType.STABLE, 11),
+    (BuildingType.STABLE, 12),
+    (BuildingType.STABLE, 13),
+    (BuildingType.STABLE, 14),
+    (BuildingType.STABLE, 15),
+    (BuildingType.FARM, 21),
+    (BuildingType.FARM, 22),
+    (BuildingType.FARM, 23),
+    (BuildingType.FARM, 24),
+    (BuildingType.FARM, 25),
+    (BuildingType.STORAGE, 21),
+    (BuildingType.STORAGE, 22),
+    (BuildingType.STORAGE, 23),
+    (BuildingType.STORAGE, 24),
+    (BuildingType.STORAGE, 25),
+    (BuildingType.WOOD, 16),
+    (BuildingType.WOOD, 17),
+    (BuildingType.WOOD, 18),
+    (BuildingType.WOOD, 19),
+    (BuildingType.WOOD, 20),
+    (BuildingType.WOOD, 21),
+    (BuildingType.WOOD, 22),
+    (BuildingType.WOOD, 23),
+    (BuildingType.WOOD, 24),
+    (BuildingType.WOOD, 25),
+    (BuildingType.STONE, 16),
+    (BuildingType.STONE, 17),
+    (BuildingType.STONE, 18),
+    (BuildingType.STONE, 19),
+    (BuildingType.STONE, 20),
+    (BuildingType.STONE, 21),
+    (BuildingType.STONE, 22),
+    (BuildingType.STONE, 23),
+    (BuildingType.STONE, 24),
+    (BuildingType.STONE, 25),
+    (BuildingType.IRON, 16),
+    (BuildingType.IRON, 17),
+    (BuildingType.IRON, 18),
+    (BuildingType.IRON, 19),
+    (BuildingType.IRON, 20),
+    (BuildingType.IRON, 21),
+    (BuildingType.IRON, 22),
+    (BuildingType.IRON, 23),
+    (BuildingType.IRON, 24),
+    (BuildingType.IRON, 25),
+    (BuildingType.WALL, 16),
+    (BuildingType.WALL, 17),
+    (BuildingType.WALL, 18),
+    (BuildingType.WALL, 19),
+    (BuildingType.WALL, 20),
+    (BuildingType.BARRACKS, 21),
+    (BuildingType.BARRACKS, 22),
+    (BuildingType.BARRACKS, 23),
+    (BuildingType.BARRACKS, 24),
+    (BuildingType.BARRACKS, 25),
+    (BuildingType.STABLE, 16),
+    (BuildingType.STABLE, 17),
+    (BuildingType.STABLE, 18),
+    (BuildingType.STABLE, 19),
+    (BuildingType.STABLE, 20),
+    (BuildingType.WOOD, 26),
+    (BuildingType.WOOD, 27),
+    (BuildingType.WOOD, 28),
+    (BuildingType.WOOD, 29),
+    (BuildingType.WOOD, 30),
+    (BuildingType.STONE, 26),
+    (BuildingType.STONE, 27),
+    (BuildingType.STONE, 28),
+    (BuildingType.STONE, 29),
+    (BuildingType.STONE, 30),
+    (BuildingType.IRON, 26),
+    (BuildingType.IRON, 27),
+    (BuildingType.IRON, 28),
+    (BuildingType.IRON, 29),
+    (BuildingType.IRON, 30),
+    (BuildingType.STORAGE, 26),
+    (BuildingType.STORAGE, 27),
+    (BuildingType.STORAGE, 28),
+    (BuildingType.STORAGE, 29),
+    (BuildingType.STORAGE, 30),
+    (BuildingType.FARM, 26),
+    (BuildingType.FARM, 27),
+    (BuildingType.FARM, 28),
+    (BuildingType.FARM, 29),
+    (BuildingType.FARM, 30),
 ]
+
+# Alias canónico para o modelo padrão
+DEFAULT_BUILDING_TEMPLATE = DEFAULT_BUILD_PLAN
 
 
 class MainBuildingManager:
@@ -644,17 +874,61 @@ class MainBuildingManager:
                 return False
         return True
 
+    def get_prerequisite_rush_steps(
+        self,
+        recruitment_targets: Optional[Dict[str, int]],
+        virtual_levels: Dict[str, int],
+    ) -> List[Tuple[str, int]]:
+        """
+        Gera a lista de passos de construção prioritários necessários para desbloquear
+        as unidades ativas configuradas no recrutamento (ex: Vikings e Cavalaria Leve / CL).
+        Se o Quartel ou Estábulo estiverem parados por falta de requisitos, estes passos
+        assumem prioridade máxima sobre o plano normal de construção.
+        """
+        if not recruitment_targets:
+            return []
+
+        rush_steps: List[Tuple[str, int]] = []
+        seen = set()
+
+        # Priorização máxima: Vikings (axe) e Cavalaria Leve (light)
+        priority_units = []
+        if recruitment_targets.get("axe", 0) > 0 or recruitment_targets.get("viking", 0) > 0 or recruitment_targets.get("bárbaro", 0) > 0:
+            priority_units.append("axe")
+        if recruitment_targets.get("light", 0) > 0 or recruitment_targets.get("cavalaria leve", 0) > 0 or recruitment_targets.get("cav_leve", 0) > 0:
+            priority_units.append("light")
+
+        for u, count in recruitment_targets.items():
+            u_clean = u.lower().strip()
+            if count > 0 and u_clean in MILITARY_PREREQUISITE_CHAINS and u_clean not in priority_units:
+                priority_units.append(u_clean)
+
+        for u in priority_units:
+            chain = MILITARY_PREREQUISITE_CHAINS.get(u, [])
+            for b_name, req_lvl in chain:
+                b_canon = self.normalize_building_id(b_name)
+                curr_virt = virtual_levels.get(b_canon, 0)
+                if curr_virt < req_lvl:
+                    step_key = (b_canon, req_lvl)
+                    if step_key not in seen:
+                        seen.add(step_key)
+                        rush_steps.append(step_key)
+
+        return rush_steps
+
     def get_next_build_candidate(
         self,
         state: MainBuildingState,
         plan: List[Tuple[str, int]],
         resources: Resources,
         max_queue: Optional[int] = None,
+        recruitment_targets: Optional[Dict[str, int]] = None,
     ) -> Optional[BuildingUpgrade]:
         """
         Avalia o plano de construção e o estado atual da aldeia para encontrar
         o próximo edifício elegível para evolução.
-        Retorna o BuildingUpgrade elegível ou None caso não seja possível construir.
+        Prioriza com prioridade máxima o Rush de Pré-Requisitos Militares se houver
+        tropas configuradas (ex: Vikings e CL) com requisitos em falta.
         """
         limit = max_queue if max_queue is not None else state.max_queue_size
         if state.queue_count >= limit:
@@ -665,6 +939,78 @@ class MainBuildingManager:
             return None
 
         virt_levels = state.virtual_levels
+
+        # 1. RUSH DE PRÉ-REQUISITOS MILITARES (Prioridade Máxima)
+        rush_steps = self.get_prerequisite_rush_steps(recruitment_targets, virt_levels)
+        if rush_steps:
+            for b_raw, target_lvl in rush_steps:
+                b = self.normalize_building_id(b_raw)
+                current_virt = virt_levels.get(b, 0)
+
+                if current_virt < target_lvl:
+                    # Verifica se os pré-requisitos para este degrau estão satisfeitos
+                    if not self.are_requirements_met(b, virt_levels):
+                        continue
+
+                    max_lvl = MAX_BUILDING_LEVELS.get(b, 30)
+                    if current_virt >= max_lvl:
+                        continue
+
+                    curr_real = state.buildings.get(b, 0)
+                    if current_virt > curr_real or b not in state.upgrades:
+                        e_wood, e_stone, e_iron, e_pop = estimate_building_cost(b, current_virt + 1)
+                        upgrade_info = BuildingUpgrade(
+                            building=b,
+                            current_level=current_virt,
+                            target_level=current_virt + 1,
+                            wood=e_wood,
+                            stone=e_stone,
+                            iron=e_iron,
+                            pop=e_pop,
+                            can_build=True,
+                            is_rush=True,
+                        )
+                    else:
+                        upgrade_info = state.upgrades[b]
+                        upgrade_info.is_rush = True
+
+                    b_name = BUILDING_NAMES.get(b, b)
+                    # Verifica se armazém suporta o custo
+                    if (
+                        resources.storage_max > 0
+                        and (
+                            upgrade_info.wood > resources.storage_max
+                            or upgrade_info.stone > resources.storage_max
+                            or upgrade_info.iron > resources.storage_max
+                        )
+                    ):
+                        logger.warning(
+                            f"[{state.village_id}] ⚠️ Armazém ({resources.storage_max}) insuficiente para "
+                            f"RUSH de '{b_name}' Nível {current_virt + 1}."
+                        )
+                        continue
+
+                    if resources.can_afford(
+                        wood=upgrade_info.wood,
+                        stone=upgrade_info.stone,
+                        iron=upgrade_info.iron,
+                        pop=upgrade_info.pop,
+                    ):
+                        logger.info(
+                            f"[{state.village_id}] ⚡ [RUSH MILITAR ATIVADO] Prioridade máxima: "
+                            f"'{b_name}' ({b}) para Nível {current_virt + 1} para desbloquear tropas!"
+                        )
+                        return upgrade_info
+                    else:
+                        logger.info(
+                            f"[{state.village_id}] ⏳ [RUSH MILITAR EM ESPERA] A aguardar recursos para "
+                            f"'{b_name}' ({b}) Nível {current_virt + 1} (Requisitos de recrutamento prioritário). "
+                            f"Recursos: {resources.wood}/{upgrade_info.wood} M, "
+                            f"{resources.stone}/{upgrade_info.stone} A, {resources.iron}/{upgrade_info.iron} F."
+                        )
+                        return None
+
+        # 2. PLANO REGULAR DE CONSTRUÇÃO
         any_unreached = False
 
         for building_entry, target_lvl in plan:
@@ -685,8 +1031,6 @@ class MainBuildingManager:
                     continue
 
                 # 3. Verifica informações de upgrade
-                # Se o edifício já tem construções na fila (current_virt > nível real),
-                # calculamos o custo para o próximo nível virtual (current_virt + 1)
                 curr_real = state.buildings.get(b, 0)
                 if current_virt > curr_real or b not in state.upgrades:
                     e_wood, e_stone, e_iron, e_pop = estimate_building_cost(b, current_virt + 1)
@@ -877,16 +1221,25 @@ class MainBuildingManager:
         plan: List[Tuple[str, int]],
         max_queue: Optional[int] = None,
         village_id: Optional[int] = None,
+        recruitment_targets: Optional[Dict[str, int]] = None,
     ) -> Optional[str]:
         """
         Executa um ciclo completo de verificação e evolução automática:
         1. Executa conclusão gratuita (< 3 min) se houver ordens prontas.
         2. Obtém o estado do Edifício Principal.
-        3. Avalia o próximo candidato conforme o plano e recursos disponíveis.
+        3. Avalia o próximo candidato conforme o plano e recursos disponíveis,
+           priorizando com máxima urgência os pré-requisitos de tropas configuradas (Vikings, CL).
         4. Envia o comando de construção e avança na fila até ao limite configurado.
         Retorna o identificador do último edifício colocado na fila, ou None.
         """
         v_id = village_id or account.current_village_id or 0
+
+        # Se não foram fornecidas metas explícitas, tenta obter da configuração da aldeia
+        if recruitment_targets is None and hasattr(account, "config") and account.config:
+            try:
+                recruitment_targets = account.config.get_village_recruitment_targets(v_id)
+            except Exception as e:
+                logger.debug(f"Aviso ao obter metas de recrutamento para auto-build rush: {e}")
 
         # 1. Verifica e conclui ordens gratuitas (< 3 min)
         await self.check_and_complete_instant_builds(account, village_id=v_id)
@@ -907,6 +1260,7 @@ class MainBuildingManager:
                 plan=plan,
                 resources=resources,
                 max_queue=limit,
+                recruitment_targets=recruitment_targets,
             )
 
             if not candidate:
@@ -948,6 +1302,7 @@ class MainBuildingManager:
         village_id: Optional[int] = None,
         interval_seconds: float = 60.0,
         enabled_check: Optional[Callable[[], bool]] = None,
+        bot_config: Optional[Any] = None,
     ) -> None:
         logger.info(
             f"[{account.world}] Construção Automática agendada a cada ~{interval_seconds}s "
@@ -961,11 +1316,19 @@ class MainBuildingManager:
             try:
                 # Atualiza recursos antes de tentar construir
                 await account.refresh_state(village_id=village_id)
+                v_id = village_id or account.current_village_id or 0
+                rec_targets = None
+                if bot_config and hasattr(bot_config, "get_village_recruitment_targets"):
+                    rec_targets = bot_config.get_village_recruitment_targets(v_id)
+                elif hasattr(account, "config") and account.config:
+                    rec_targets = account.config.get_village_recruitment_targets(v_id)
+
                 await self.run_auto_build_cycle(
                     account=account,
                     plan=plan,
                     max_queue=max_queue,
                     village_id=village_id,
+                    recruitment_targets=rec_targets,
                 )
             except (BotProtectionError, SessionExpiredError):
                 raise

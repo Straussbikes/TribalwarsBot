@@ -4,20 +4,18 @@ Gestor centralizado de múltiplas instâncias de mundos em execução concorrent
 com isolamento atómico de sessões HTTP, cookies, agendadores e proxies.
 """
 
-import asyncio
 from dataclasses import dataclass, field
 import logging
 import time
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 
-from engine.actions.farm import FarmManager
 from engine.actions.main_building import MainBuildingManager
 from engine.actions.quest import QuestManager
 from engine.actions.recruitment import RecruitmentManager
 from engine.actions.village_coordinator import MultiVillageCoordinator
 from engine.config.settings import BotConfig, load_config
 from engine.core.account import TribalAccount
-from engine.core.exceptions import BotProtectionError, SessionExpiredError
+from engine.core.exceptions import BotProtectionError
 from engine.core.models import TaskPriority
 from engine.core.scheduler import TaskScheduler
 
@@ -85,8 +83,8 @@ def setup_world_routines(instance: WorldInstance) -> None:
             try:
                 place_mgr = PlaceManager()
                 await place_mgr.get_state(account, village_id=village.id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[{world}] Falha suave ao obter estado da Praça: {e}")
 
             troops_summary = ", ".join(f"{k}:{v}" for k, v in (village.troops or {}).items() if v > 0)
             logger.info(
@@ -125,18 +123,10 @@ def setup_world_routines(instance: WorldInstance) -> None:
         plan=build_plan,
         max_queue=config.building.max_queue,
         interval_seconds=config.building.interval_seconds,
+        bot_config=config,
     )
 
-    # 3. Micro-Farming (se ativado)
-    if config.farm.enabled:
-        farm_manager = FarmManager()
-        farm_manager.schedule_auto_farm(
-            scheduler=scheduler,
-            account=account,
-            farm_config=config.farm,
-        )
-
-    # 4. Recrutamento Militar (se ativado)
+    # 3. Recrutamento Militar (se ativado)
     if config.recruitment.enabled:
         recruit_manager = RecruitmentManager()
         recruit_manager.schedule_auto_recruit(
@@ -185,8 +175,8 @@ def setup_world_routines(instance: WorldInstance) -> None:
             try:
                 if account and account.sid:
                     await account.refresh_state()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[{world}] Falha no keep-alive da sessão: {e}")
             finally:
                 if scheduler.is_running and not scheduler.is_paused:
                     scheduler.schedule_human_like(
@@ -312,14 +302,14 @@ class MultiWorldManager:
         inst = self.instances.pop(world_key)
         try:
             await inst.scheduler.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[{world_key}] Aviso ao parar scheduler: {e}")
 
         if getattr(inst.account, "_session", None):
             try:
                 await inst.account._session.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[{world_key}] Aviso ao fechar sessão HTTP: {e}")
 
         if self.active_world == world_key:
             self.active_world = next(iter(self.instances.keys())) if self.instances else None

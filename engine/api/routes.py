@@ -127,7 +127,7 @@ class AccountCreateRequest(BaseModel):
     village_id: Optional[int] = None
     session_cookie: Optional[str] = ""
     sid: Optional[str] = None
-    build_order_strategy: Optional[str] = "rush_resources"
+    build_order_strategy: Optional[str] = "default_plan"
     building_template: Optional[str] = None
     farm_presets: Optional[Dict[str, Any]] = None
     recruitment_models: Optional[Dict[str, Any]] = None

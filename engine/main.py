@@ -15,13 +15,13 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 if sys.platform == "win32":
     try:
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"Aviso ao definir WindowsSelectorEventLoopPolicy: {e}")
 
 import argparse
 from pathlib import Path
 
-from engine.actions import FarmManager, MainBuildingManager, QuestManager, RecruitmentManager
+from engine.actions import MainBuildingManager, QuestManager, RecruitmentManager
 from engine.api import EngineContext, remove_auth_file, start_sidecar_server
 from engine.config import load_config
 from engine.core.account import TribalAccount
@@ -134,22 +134,7 @@ async def main():
             f"{len(build_plan)} metas, máx fila: {config.building.max_queue})."
         )
 
-        # 3.2. Módulo de Micro-Farming (se ativado no config.json)
-        if config.farm.enabled:
-            farm_manager = FarmManager()
-            farm_manager.schedule_auto_farm(
-                scheduler=scheduler,
-                account=account,
-                farm_config=config.farm,
-            )
-            logger.info(
-                f"Módulo de Micro-Farming ativado (Modo: {config.farm.mode.upper()}, "
-                f"Template: {config.farm.template}, a cada ~{config.farm.interval_minutes:.1f}min)."
-            )
-        else:
-            logger.info("Módulo de Micro-Farming desativado no config.json (enabled=false).")
-
-        # 3.3. Módulo de Recrutamento Militar (se ativado no config.json)
+        # 3.2. Módulo de Recrutamento Militar (se ativado no config.json)
         if config.recruitment.enabled:
             recruit_manager = RecruitmentManager()
             recruit_manager.schedule_auto_recruit(

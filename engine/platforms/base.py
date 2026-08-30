@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import abc
 import logging
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,6 @@ para evitar deteções heurísticas por regularidade temporal.
 
 import random
 import time
-from typing import Tuple
 
 
 def get_human_delay(

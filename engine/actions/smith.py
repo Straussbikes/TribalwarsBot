@@ -5,17 +5,13 @@ Inicia automaticamente a pesquisa de tropas necessárias para o modelo da aldeia
 assim que os pré-requisitos de edifícios e recursos forem alcançados.
 """
 
-import asyncio
 from dataclasses import dataclass, field
-import json
 import logging
 import re
 from typing import Any, Dict, List, Optional
-import urllib.parse
 
 from engine.core.account import TribalAccount
 from engine.utils.parsers import ALL_UNITS, parse_timer_to_seconds
-from engine.utils.timing import get_click_jitter
 
 logger = logging.getLogger(__name__)
 
@@ -369,8 +365,15 @@ class SmithManager:
             logger.debug(f"[{account.world}] Ferreiro ocupado com pesquisa em andamento ({state.queue[0].unit}).")
             return researched_list
 
-        # Unidades a verificar
-        check_list = needed_units or ["spear", "sword", "axe", "spy", "light", "ram"]
+        # Unidades a verificar ordenadas por prioridade máxima (Vikings e CL primeiro)
+        priority_needed = []
+        needed_clean = [SMITH_UNIT_ALIASES.get(str(x).lower().strip(), str(x).lower().strip()) for x in (needed_units or [])]
+        for top_u in ("axe", "light"):
+            if top_u in needed_clean:
+                priority_needed.append(top_u)
+
+        remaining = [u for u in (needed_clean or ["spear", "sword", "axe", "spy", "light", "ram"]) if u not in priority_needed]
+        check_list = priority_needed + remaining
 
         for u in check_list:
             u_info = state.units.get(u)
@@ -378,6 +381,11 @@ class SmithManager:
                 continue
 
             if u_info.can_research:
+                if u == "axe":
+                    logger.info(f"[{account.world}] ⚡ [RUSH VIKINGS] Pesquisa de Vikings ('axe') iniciada com prioridade máxima no Ferreiro!")
+                elif u == "light":
+                    logger.info(f"[{account.world}] ⚡ [RUSH CL] Pesquisa de Cavalaria Leve ('light') iniciada com prioridade máxima no Ferreiro!")
+
                 # Dispara a pesquisa
                 success = await self.research_unit(account, u, village_id=v_id)
                 if success:

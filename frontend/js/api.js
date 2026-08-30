@@ -98,10 +98,6 @@ class SidecarApi {
     return await this.request("/api/actions/build/trigger", { method: "POST" });
   }
 
-  async triggerFarm() {
-    return await this.request("/api/actions/farm/trigger", { method: "POST" });
-  }
-
   async triggerRecruit() {
     return await this.request("/api/actions/recruit/trigger", { method: "POST" });
   }
@@ -151,28 +147,6 @@ class SidecarApi {
     return await this.request(`/api/map/data${query}`);
   }
 
-  async addFarmTarget(x, y) {
-    return await this.request("/api/map/farm-target", {
-      method: "POST",
-      body: JSON.stringify({ x: parseInt(x, 10), y: parseInt(y, 10) }),
-    });
-  }
-
-  async sendQuickAttack(targetX, targetY, troops = {}) {
-    return await this.request("/api/map/quick-attack", {
-      method: "POST",
-      body: JSON.stringify({
-        target_x: parseInt(targetX, 10),
-        target_y: parseInt(targetY, 10),
-        spear: troops.spear || 0,
-        sword: troops.sword || 0,
-        axe: troops.axe || 0,
-        spy: troops.spy || 0,
-        light: troops.light || 0,
-      }),
-    });
-  }
-
   async refreshVillage() {
     return await this.request("/api/account/refresh", { method: "POST" });
   }
@@ -200,10 +174,6 @@ class SidecarApi {
 
   async scanMap(radius = 15) {
     return await this.request(`/api/map/scan?radius=${radius}`, { method: "POST" });
-  }
-
-  async triggerMapFarm() {
-    return await this.request("/api/map/farm", { method: "POST" });
   }
 
   // --- Gestão de Perfis de Conta & Bloqueio Monousuário (Account Manager) ---

@@ -19,10 +19,10 @@ from engine.actions.main_building import (
     BUILDING_REQUIREMENTS,
     BuildingType,
     BuildingUpgrade,
+    DEFAULT_BUILD_PLAN,
     MainBuildingManager,
     MainBuildingState,
     QueueOrder,
-    RUSH_RESOURCES_TEMPLATE,
 )
 from engine.core.models import Resources
 from engine.utils.parsers import (
@@ -450,16 +450,16 @@ class TestMainBuildingAsyncActions(unittest.IsolatedAsyncioTestCase):
     def test_get_village_template_config(self):
         from engine.config.settings import BotConfig, BuildingConfig, VillageConfig
         cfg = BotConfig(
-            building=BuildingConfig(template="rush_resources"),
+            building=BuildingConfig(template="default_plan"),
             villages={
                 "101": VillageConfig(category="attack"),
                 "102": VillageConfig(category="defense"),
                 "103": VillageConfig(building_template="custom"),
             }
         )
-        self.assertEqual(cfg.get_village_template(), "RUSH_RESOURCES")
-        self.assertEqual(cfg.get_village_template("101"), "MILITARY_RUSH")
-        self.assertEqual(cfg.get_village_template("102"), "BALANCED")
+        self.assertEqual(cfg.get_village_template(), "DEFAULT_PLAN")
+        self.assertEqual(cfg.get_village_template("101"), "DEFAULT_PLAN")
+        self.assertEqual(cfg.get_village_template("102"), "DEFAULT_PLAN")
         self.assertEqual(cfg.get_village_template("103"), "CUSTOM")
 
 

@@ -7,11 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import time
-import urllib.parse
 from pathlib import Path
+import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from urllib.parse import unquote
 
 import webview
 
@@ -61,9 +60,9 @@ def clean_sid_value(raw: str) -> str:
     # Trata caso esteja codificado em percentual (ex: 0%3A...)
     if "%3A" in cleaned or "%20" in cleaned:
         try:
-            cleaned = urllib.parse.unquote(cleaned)
-        except Exception:
-            pass
+            cleaned = unquote(cleaned)
+        except Exception as e:
+            logger.debug(f"Falha ao decodificar SID percentual: {e}")
     return cleaned
 
 
@@ -152,8 +151,8 @@ class TribalAuthManager:
                 logger.warning(f"Tempo limite excedido na autenticação via {platform.gui_backend} sem captura de 'sid'.")
                 try:
                     window.destroy()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Aviso ao fechar janela de autenticação: {e}")
 
         try:
             window = webview.create_window(

@@ -593,28 +593,6 @@ class TestMapManagerAsync(unittest.IsolatedAsyncioTestCase):
         loaded, _ = self.manager.load_cache("pt117")
         self.assertEqual(len(loaded), 4)
 
-    async def test_run_map_farm_wave(self):
-        self.mock_account.get.return_value = SAMPLE_MAP_AJAX_JSON
-        mock_farm_manager = AsyncMock()
-        mock_farm_manager.run_place_farm_wave.return_value = 2
-
-        sent = await self.manager.run_map_farm_wave(
-            account=self.mock_account,
-            farm_manager=mock_farm_manager,
-            troops=UnitsCount(spear=5, spy=1),
-            max_attacks=10,
-            radius=10.0,
-            use_cache=False,
-        )
-
-        self.assertEqual(sent, 2)
-        mock_farm_manager.run_place_farm_wave.assert_called_once()
-        call_kwargs = mock_farm_manager.run_place_farm_wave.call_args.kwargs
-        # Confirma que os alvos passados foram as duas bárbaras mais próximas
-        self.assertEqual(call_kwargs["targets"], [(500, 501), (503, 504)])
-
-
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,18 +10,15 @@ import asyncio
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
-import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from engine.actions.main_building import (
-    BUILDING_NAMES,
     BuildingType,
     BuildingUpgrade,
     MainBuildingManager,
     MainBuildingState,
-    estimate_building_cost,
 )
-from engine.actions.place import PlaceManager, PlaceState, UnitsCount
+from engine.actions.place import PlaceManager, PlaceState
 from engine.actions.recruitment import (
     BUILDING_UNITS,
     UNIT_TO_BUILDING,
@@ -318,8 +315,8 @@ class EconomicArbitrageManager:
         if cfg and hasattr(cfg, "get_active_build_plan"):
             build_plan = cfg.get_active_build_plan(v_id)
         else:
-            from engine.actions.main_building import RUSH_RESOURCES_TEMPLATE
-            build_plan = RUSH_RESOURCES_TEMPLATE
+            from engine.actions.main_building import DEFAULT_BUILD_PLAN
+            build_plan = DEFAULT_BUILD_PLAN
 
         next_upgrade = self.main_building_manager.get_next_build_candidate(
             state=main_state,

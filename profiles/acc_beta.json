@@ -7,13 +7,13 @@
   "village_id": null,
   "session_cookie": "sid_beta",
   "sid": "sid_beta",
-  "build_order_strategy": "rush_resources",
-  "building_template": "rush_resources",
+  "build_order_strategy": "default_plan",
+  "building_template": "default_plan",
   "farm_presets": [],
   "recruitment_models": {},
   "config_data": {
     "building": {
-      "template": "military_rush",
+      "template": "custom",
       "max_queue": 5
     },
     "farm": {
@@ -25,7 +25,7 @@
   "password_enc": "",
   "auto_login": true,
   "keep_alive": true,
-  "last_used": "2026-08-29T12:31:05.132329",
-  "created_at": 1788003064.5785701,
+  "last_used": "2026-08-30T03:12:40.274064",
+  "created_at": 1788055959.7161644,
   "is_active": true
 }

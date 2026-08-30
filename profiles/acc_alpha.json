@@ -7,14 +7,14 @@
   "village_id": null,
   "session_cookie": "sid_alpha",
   "sid": "sid_alpha",
-  "build_order_strategy": "rush_resources",
-  "building_template": "rush_resources",
+  "build_order_strategy": "default_plan",
+  "building_template": "default_plan",
   "farm_presets": [],
   "recruitment_models": {},
   "config_data": {
     "building": {
       "enabled": true,
-      "template": "rush_resources",
+      "template": "default_plan",
       "max_queue": 4,
       "interval_seconds": 75.0,
       "custom_plan": []
@@ -89,7 +89,7 @@
   "password_enc": "",
   "auto_login": true,
   "keep_alive": true,
-  "last_used": "2026-08-29T12:31:04.612003",
-  "created_at": 1788003064.5679781,
+  "last_used": "2026-08-30T03:12:39.747715",
+  "created_at": 1788055959.706366,
   "is_active": false
 }

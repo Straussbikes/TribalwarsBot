@@ -119,7 +119,7 @@ class TestAccountConfigPersistence(unittest.IsolatedAsyncioTestCase):
             "world": "pt117",
             "session_cookie": "sid_alpha",
             "config_data": {
-                "building": {"template": "rush_resources", "max_queue": 3},
+                "building": {"template": "default_plan", "max_queue": 3},
                 "farm": {"enabled": True},
             }
         })
@@ -130,7 +130,7 @@ class TestAccountConfigPersistence(unittest.IsolatedAsyncioTestCase):
             "world": "pt118",
             "session_cookie": "sid_beta",
             "config_data": {
-                "building": {"template": "military_rush", "max_queue": 5},
+                "building": {"template": "custom", "max_queue": 5},
                 "farm": {"enabled": False},
             }
         })
@@ -142,7 +142,7 @@ class TestAccountConfigPersistence(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res_a["status"], "success")
         self.assertEqual(ctx.active_profile_id, "acc_alpha")
         self.assertEqual(ctx.config.world, "pt117")
-        self.assertEqual(ctx.config.building.template, "rush_resources")
+        self.assertEqual(ctx.config.building.template, "default_plan")
         self.assertEqual(ctx.config.building.max_queue, 3)
         self.assertTrue(ctx.config.farm.enabled)
 
@@ -160,7 +160,7 @@ class TestAccountConfigPersistence(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res_b["status"], "success")
         self.assertEqual(ctx.active_profile_id, "acc_beta")
         self.assertEqual(ctx.config.world, "pt118")
-        self.assertEqual(ctx.config.building.template, "military_rush")
+        self.assertEqual(ctx.config.building.template, "custom")
         self.assertEqual(ctx.config.building.max_queue, 5)
         self.assertFalse(ctx.config.farm.enabled)
 

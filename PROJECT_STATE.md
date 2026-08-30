@@ -2,8 +2,8 @@
 
 > **Propósito deste ficheiro:** Manter o histórico de progresso, decisões arquiteturais, mapa de ficheiros e diretrizes de desenvolvimento para que qualquer sessão de IA recupere o contexto instantaneamente com consumo mínimo de tokens e sem perda de continuidade.
 
-**Última Atualização:** 2026-08-29 (Sessão Noturna)  
-**Estado Geral:** Fases 1, 3 e 4 Concluídas | Base de Dados Local SQLite (`data/accounts.db`), Arranque Estrito Offline (Sem Auto-Login), Hub de Gestão de Contas no Frontend com Badges Online/Offline, Ativação Monousuário Manual (Single-Active Session), Login Direto no Tribos via WebView, Eliminação Atómica de Contas, Sincronização de Multi-Aldeias e Recursos Agregados | 204 Testes Unitários Automatizados (100% OK)  
+**Última Atualização:** 2026-08-30 (Sessão Noturna)  
+**Estado Geral:** Fases 1, 3 e 4 Concluídas | Base de Dados Local SQLite (`data/accounts.db`), Modelos de Tropas (`attack`, `defense`) e Modelo Padrão Único Oficial de Construção (`default_plan` com 268 passos) Persistidos no SQLite, Remoção Total de Modelos Legados, Divisão de Abas Militares ("Modelos de Tropas" & "Recrutamento"), Atribuição de Modelos no Multi-Aldeias, Rush de Prioridade Máxima para Vikings e CL, Desativação de Farm/Ataques | 218 Testes Unitários e de Integração Automatizados (100% OK)  
 **Ambiente Validado:** macOS 12+ / Windows 11 / Python 3.11-3.14 / `curl_cffi` 0.16.2 / `fastapi` 0.141.1 / `uvicorn` 0.52.4 / `pywebview` 6.2 (Edge WebView2 & Cocoa WebKit) / Git Branch: `main`
 
 ---
@@ -13,7 +13,9 @@
 * **Conceito:** Cliente desktop autónomo (*estilo PS Evolution*) para automação do jogo Tribal Wars (Tribos).
 * **Camada de Persistência (SQLite Local):**
   * Base de dados local `data/accounts.db` gerida pela classe `AccountsDatabase` (`engine/storage/database.py`).
-  * Tabela `accounts` com schema relacional: `id`, `name`, `world_domain`, `world`, `domain`, `session_cookie`, `username`, `password_enc`, `village_id`, `proxy`, `build_order_strategy`, `farm_presets`, `keep_alive`, `is_active`, `last_used`, `created_at`.
+  * Tabela `accounts`: contas, credenciais, proxies, estratégias de construção e estado de sessão.
+  * Tabela `building_templates`: persistência de planos de construção com `default_plan` (268 passos) como padrão global do sistema (`account_id IS NULL`, `is_default = 1`) e suporte a modelos customizados por conta.
+  * Tabela `recruitment_models`: persistência de metas e lotes de 12 unidades militares com `attack` ("Ataque Full") e `defense` ("Defesa Full") como padrões globais do sistema (`account_id IS NULL`, `is_default = 1`) e modelos customizados.
   * Gestão de conexões via `contextmanager` atómico (auto-close) para libertação de locks no Windows.
 * **Ciclo de Vida Offline & Single-Active Session:**
   * O motor arranca **sempre em modo Standby/Offline** (`active_profile_id = None`), sem instanciar conexões de rede nem agendador.
@@ -36,10 +38,10 @@
 
 | Fase | Descrição | Status | Detalhes |
 |---|---|---|---|
-| **Fase 1** | **Fundação do Core & Rede** | ✅ Concluída | Estrutura modular, `TribalAccount`, `TaskScheduler`, parsers, anti-bot e 10 testes unitários. |
-| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (auto-build + filas), `place`, `farm` (Radar de Bárbaras e Assistente de Farm), `recruitment` (auto-recruit em lotes de 5 por custo + filas ativas), `quest`, `map`, `market` (balanceamento) e `economic_arbitrage` (Fila Sempre Ativa) concluídos. Scavenging, Snob e Defesa/Dodge planeados. |
-| **Fase 3** | **Camada Sidecar IPC, SQLite & Multi-Conta** | ✅ Concluída | Base de dados SQLite (`data/accounts.db`), arranque estrito Offline, Single-Active Session, FastAPI REST, WebSockets, autenticação efêmera, proxies, `MultiWorldManager` e `MultiVillageCoordinator`. |
-| **Fase 4** | **Shell Desktop & Frontend Nativo** | 🔄 Em Expansão | Cockpit Dark Glassmorphism, Hub de Contas com badges Online/Offline, login direto no Tribos pelo navegador integrado, HUD timer, réplica interativa do mapa 2D, seletor de mundos na barra superior, monitor de tropas e filas ativas e controlos modulares nas abas de domínio. |
+| **Fase 1** | **Fundação do Core & Rede** | ✅ Concluída | Estrutura modular, `TribalAccount`, `TaskScheduler`, parsers, anti-bot e testes unitários. |
+| **Fase 2** | **Módulos de Ações (`game.php`)** | 🔄 Em Curso | `main` (auto-build + filas + rush militar de Vikings/CL), `recruitment` (lotes graduais, filas ativas, comparador de exército), `quest`, `map`, `market` (balanceamento) e `economic_arbitrage` (Fila Sempre Ativa) concluídos. Scavenging, Snob e Defesa/Dodge planeados. |
+| **Fase 3** | **Camada Sidecar IPC, SQLite & Multi-Conta** | ✅ Concluída | Base de dados SQLite (`data/accounts.db`), modelos de construção e recrutamento persistidos, arranque estrito Offline, Single-Active Session, FastAPI REST, WebSockets, autenticação efêmera, proxies, `MultiWorldManager` e `MultiVillageCoordinator`. |
+| **Fase 4** | **Shell Desktop & Frontend Nativo** | 🔄 Em Expansão | Cockpit Dark Glassmorphism, Hub de Contas com badges Online/Offline, login direto no Tribos pelo navegador integrado, HUD timer, abas independentes de "Modelos de Tropas" e "Recrutamento", seleção de modelos no Multi-Aldeias, réplica do mapa 2D e monitor de filas. |
 | **Fase 5** | **Empacotamento & Release** | 📋 Pendente | Empacotamento executável com PyInstaller e instalador desktop. |
 
 ---
@@ -98,7 +100,7 @@ TribalwarsBot/
 │   │   └── settings.py              # BotConfig, BuildingConfig, FarmConfig, RecruitmentConfig, ArbitrageConfig, load_config
 │   ├── desktop_launcher.py          # Desktop Launcher: janela nativa, interceção adaptada ao SO e monitor de login
 │   └── main.py                      # Ponto de entrada CLI, Sidecar e Desktop (--gui, --api, --port)
-│   │
+│
 ├── frontend/                        # Frontend Cockpit Web & Desktop (HTML5 / Vanilla CSS / Vanilla JS)
 │   ├── index.html                   # Estrutura do dashboard, cards, HUD timer, modal de captcha e seletor multi-aldeia
 │   ├── css/
@@ -108,11 +110,11 @@ TribalwarsBot/
 │       ├── websocket.js             # Conexão WebSocket em tempo real e sintetizador sonoro de alertas
 │       └── app.js                   # Controlador da interface, cronómetro de alta resolução e streaming de logs
 │
-├── tests/                           # Suíte de testes unitários automatizados (199 testes, 100% OK)
+├── tests/                           # Suíte de testes unitários e de integração automatizados (218 testes, 100% OK)
 │   ├── __init__.py
 │   ├── test_core.py                 # 10 testes cobrindo models, timing, parsers, account e scheduler
-│   ├── test_main_building.py        # 12 testes cobrindo níveis, fila mobile/desktop, templates, auto-build e cancelamento
-│   ├── test_config.py               # 2 testes cobrindo parsing de config.json e seleção de templates
+│   ├── test_main_building.py        # 12 testes cobrindo níveis, fila mobile/desktop, auto-build e cancelamento
+│   ├── test_config.py               # 2 testes cobrindo parsing de config.json e seleção de DEFAULT_BUILD_PLAN
 │   ├── test_place.py                # 10 testes cobrindo tropas, capacidade de carga, comandos e envio em 2 etapas
 │   ├── test_farm.py                 # 11 testes cobrindo Assistente de Farm, modelos A/B, filtros, alocação de esquadrões e radar contínuo
 │   ├── test_recruitment.py          # 11 testes cobrindo filas de treino, metas, modelos, lotes dinâmicos e ordenação por custo
@@ -129,7 +131,10 @@ TribalwarsBot/
 │   ├── test_proxy.py                # 2 testes cobrindo diagnóstico ativo de proxies
 │   ├── test_quest.py                # 13 testes cobrindo missões, segurança de armazém/pop, baú diário e inventário manual
 │   ├── test_smith.py                # 4 testes cobrindo auto-pesquisa de tropas no Ferreiro
-│   └── test_map.py                  # 8 testes cobrindo parsing de mapa, distância euclidiana, bárbaras/bónus, cache e farm
+│   ├── test_map.py                  # 7 testes cobrindo parsing de mapa, distância euclidiana, bárbaras/bónus e cache
+│   ├── test_templates_database.py   # 6 testes cobrindo persistência de templates de construção e modelos de recrutamento no SQLite
+│   ├── test_account_config_persistence.py # 4 testes cobrindo persistência atómica de configurações por conta no SQLite
+│   └── test_military_prerequisite_rush.py # 2 testes cobrindo rush de prioridade máxima para Vikings e Cavalaria Leve
 ```
 
 ---
@@ -155,11 +160,11 @@ TribalwarsBot/
 
 ## 5. Como Validar o Estado Atual
 
-Para rodar a suíte completa de 204 testes automatizados:
+Para rodar a suíte completa de 218 testes automatizados:
 ```powershell
 python -m pytest
 ```
-*Status esperado:* `204 passed, 19 warnings in ~7s - OK`.
+*Status esperado:* `218 passed, 19 warnings in ~11s - OK`.
 
 Para iniciar a aplicação desktop completa com interface gráfica nativa:
 ```powershell
@@ -168,10 +173,9 @@ python -m engine.main --gui
 
 ---
 
-## 6. Próxima Sessão (Roadmap Imediato)
+## 6. Próximos Passos (Roadmap Imediato)
 
-* **Migração dos Modelos de Construção e Recrutamento para a Base de Dados SQLite (`data/accounts.db`):**
-  1. Adicionar tabelas `building_templates` e `recruitment_models` no SQLite com suporte a templates globais e personalizados por conta.
-  2. Implementar endpoints REST `/api/templates/building` e `/api/templates/recruitment`.
-  3. Criar modal / gestor visual na UI para criação, edição, duplicação e associação direta de modelos a contas/aldeias sem editar ficheiros JSON.
+1. **Módulos Militares Avançados:** Scavenging (Coleta de Recursos) com cálculo ótimo de unidades por tempo e escalão.
+2. **Defesa e Auto-Dodge:** Deteção de ataques a chegar com notificação sonoro-visual e esquiva automática de tropas com cancelamento a tempo.
+3. **Empacotamento Executável (Fase 5):** Criação de pacote standalone (.exe) com PyInstaller.
 

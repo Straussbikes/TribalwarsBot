@@ -88,12 +88,10 @@ class MapViewer {
 
     // Ações do Popover
     const popoverClose = document.getElementById("btn-popover-close");
-    const popoverAttack = document.getElementById("btn-popover-quick-attack");
-    const popoverAddFarm = document.getElementById("btn-popover-add-farm");
+    const popoverCopy = document.getElementById("btn-popover-copy-coords");
 
     if (popoverClose) popoverClose.onclick = () => this.closePopover();
-    if (popoverAttack) popoverAttack.onclick = () => this.onPopoverAttack();
-    if (popoverAddFarm) popoverAddFarm.onclick = () => this.onPopoverAddFarm();
+    if (popoverCopy) popoverCopy.onclick = () => this.onPopoverCopyCoords();
   }
 
   resizeCanvas() {
@@ -356,34 +354,15 @@ class MapViewer {
     if (popover) popover.style.display = "none";
   }
 
-  async onPopoverAttack() {
+  async onPopoverCopyCoords() {
     if (!this.selectedVillage) return;
     const v = this.selectedVillage;
     try {
-      const res = await window.api.sendQuickAttack(v.x, v.y, { spear: 5, spy: 1 });
-      if (res && res.status === "success") {
-        window.app?.addLog(`⚔️ Ataque disparado para ${v.name} (${v.x}|${v.y})!`, "success");
-      } else {
-        window.app?.addLog(`Erro ao enviar ataque: ${res.message || 'Falha'}`, "error");
-      }
+      await navigator.clipboard.writeText(`${v.x}|${v.y}`);
+      window.app?.addLog(`📋 Coordenadas (${v.x}|${v.y}) copiadas para a área de transferência.`, "info");
+      this.closePopover();
     } catch (e) {
-      window.app?.addLog(`Falha na rota de ataque: ${e.message}`, "error");
-    }
-  }
-
-  async onPopoverAddFarm() {
-    if (!this.selectedVillage) return;
-    const v = this.selectedVillage;
-    try {
-      const res = await window.api.addFarmTarget(v.x, v.y);
-      if (res && res.status === "success") {
-        this.customTargets.add(`${v.x}|${v.y}`);
-        window.app?.addLog(`📌 Alvo fixado de farm: (${v.x}|${v.y})`, "info");
-        this.closePopover();
-        this.render();
-      }
-    } catch (e) {
-      window.app?.addLog(`Falha ao adicionar alvo: ${e.message}`, "error");
+      window.app?.addLog(`Falha ao copiar coordenadas: ${e.message}`, "error");
     }
   }
 

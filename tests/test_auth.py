@@ -56,7 +56,7 @@ class TestAuthManager(unittest.IsolatedAsyncioTestCase):
             initial_data = {
                 "world": "pt117",
                 "sid": "old_sid",
-                "building": {"template": "rush_resources"},
+                "building": {"template": "default_plan"},
             }
             cfg_file.write_text(json.dumps(initial_data), encoding="utf-8")
 

@@ -9,7 +9,7 @@ from collections import deque
 import logging
 import time
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 
 from curl_cffi.requests import AsyncSession, Response
 
@@ -126,8 +126,8 @@ class TribalAccount:
         if self._session is not None:
             try:
                 await self._session.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Aviso ao encerrar sessão curl_cffi: {e}")
             self._session = None
         await self.init_session()
 
@@ -145,16 +145,17 @@ class TribalAccount:
         )
 
         # Normaliza o valor do SID (remove aspas, espaços e prefixo 'sid=')
-        clean_sid = self.sid.strip().strip('"').strip("'")
+        clean_sid = self.sid.strip().strip('"').strip("'") if self.sid else ""
         if clean_sid.lower().startswith("sid="):
             clean_sid = clean_sid[4:].strip()
         self.sid = clean_sid
 
         # Injeta o cookie de sessão 'sid' no jar de cookies para o subdomínio e para o domínio raiz
-        self._session.cookies.set("sid", self.sid, domain=self.host)
-        if self.domain:
-            self._session.cookies.set("sid", self.sid, domain=f".{self.domain}")
-            self._session.cookies.set("sid", self.sid, domain=self.domain)
+        if self.sid:
+            self._session.cookies.set("sid", self.sid, domain=self.host)
+            if self.domain:
+                self._session.cookies.set("sid", self.sid, domain=f".{self.domain}")
+                self._session.cookies.set("sid", self.sid, domain=self.domain)
 
         logger.info(
             f"[{self.world}] Sessão de rede inicializada via curl_cffi (impersonate={self.impersonate})"
@@ -305,8 +306,8 @@ class TribalAccount:
                 units = parse_available_units(html)
                 if any(units.values()):
                     self.villages[rendered_village_id].troops = units
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Falha ao extrair tropas disponíveis na aldeia {rendered_village_id}: {e}")
 
         # 5. Atualização dos Níveis de Edifícios da aldeia renderizada
         if rendered_village_id and rendered_village_id in self.villages:
@@ -314,8 +315,8 @@ class TribalAccount:
                 blds = parse_building_levels(html, game_data)
                 if blds:
                     self.villages[rendered_village_id].buildings.update(blds)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Falha ao extrair níveis de edifícios na aldeia {rendered_village_id}: {e}")
 
 
     def _record_request(
@@ -363,6 +364,9 @@ class TribalAccount:
             await asyncio.sleep(get_click_jitter())
 
         async with self._lock:
+            if self._session is None:
+                await self.init_session()
+
             self._req_counter += 1
             req_id = self._req_counter
 
@@ -452,6 +456,9 @@ class TribalAccount:
             await asyncio.sleep(get_click_jitter())
 
         async with self._lock:
+            if self._session is None:
+                await self.init_session()
+
             self._req_counter += 1
             req_id = self._req_counter
 
@@ -537,6 +544,9 @@ class TribalAccount:
 
     async def _refresh_state_internal(self) -> None:
         """Atualização interna sem bloqueio extra de lock."""
+        if self._session is None:
+            await self.init_session()
+
         params = {"screen": "main", "page": "mobile"}
         if self.current_village_id:
             params["village"] = self.current_village_id
@@ -625,6 +635,8 @@ class TribalAccount:
         discovered = [self.world]
         try:
             async with self._lock:
+                if self._session is None:
+                    await self.init_session()
                 resp = await self.session.get(portal_url)
                 if resp.status_code == 200:
                     found = extract_player_worlds(resp.text, domain=self.domain)

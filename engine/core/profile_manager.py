@@ -69,8 +69,8 @@ class AccountProfile:
     village_id: Optional[int] = None
     session_cookie: str = ""                         # Valor do cookie 'sid'
     sid: str = ""                                    # Alias para compatibilidade
-    build_order_strategy: str = "rush_resources"     # Template de construção associado
-    building_template: str = "rush_resources"        # Alias para compatibilidade
+    build_order_strategy: str = "default_plan"     # Template de construção associado
+    building_template: str = "default_plan"        # Alias para compatibilidade
     farm_presets: Dict[str, Any] = field(default_factory=dict)
     recruitment_models: Dict[str, Any] = field(default_factory=dict)
     config_data: Dict[str, Any] = field(default_factory=dict)
@@ -338,8 +338,8 @@ class ProfileManager:
                 try:
                     with open(file_path, "w", encoding="utf-8") as f:
                         json.dump(p.to_dict(include_plain_password=False), f, indent=2, ensure_ascii=False)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Aviso ao atualizar espelho JSON de {p.id}: {e}")
         logger.info("Todas as contas foram desativadas (Modo Offline).")
 
     def add_or_update_profile(self, profile: AccountProfile) -> None:
@@ -384,7 +384,6 @@ async def test_proxy_connection(proxy_url: str, timeout: float = 6.0) -> Dict[st
     Testa a conectividade de um proxy residencial ou dedicado via curl_cffi.
     Retorna o status, latência e IP público de saída.
     """
-    import asyncio
     from curl_cffi.requests import AsyncSession
 
     start_t = time.time()

@@ -11,9 +11,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from engine.actions.main_building import (
-    BALANCED_TEMPLATE,
-    MILITARY_RUSH_TEMPLATE,
-    RUSH_RESOURCES_TEMPLATE,
+    DEFAULT_BUILD_PLAN,
+    DEFAULT_BUILDING_TEMPLATE,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,7 +22,7 @@ logger = logging.getLogger(__name__)
 class BuildingConfig:
     """Configurações da rotina do Edifício Principal."""
     enabled: bool = True
-    template: str = "rush_resources"  # 'rush_resources', 'balanced', 'military_rush', 'custom'
+    template: str = "default_plan"     # Modelo padrão único ou 'custom'
     max_queue: int = 2                 # Máximo de construções sem custos adicionais
     interval_seconds: float = 75.0     # Intervalo médio entre verificações
     custom_plan: List[Tuple[str, int]] = field(default_factory=list)
@@ -189,7 +188,7 @@ class BotConfig:
         Resolve modelos customizados a partir do SQLite (data/accounts.db) ou constantes.
         """
         if isinstance(self.building, dict):
-            tmpl = str(self.building.get("template", "rush_resources")).lower().strip()
+            tmpl = str(self.building.get("template", "default_plan")).lower().strip()
             custom_plan = self.building.get("custom_plan")
         else:
             tmpl = self.building.template.lower().strip()
@@ -199,25 +198,14 @@ class BotConfig:
             v_cfg = self.villages[str(village_id)]
             if v_cfg.building_template:
                 tmpl = v_cfg.building_template.lower().strip()
-            elif tmpl not in ("custom", "custom_plan"):
-                if v_cfg.category == "attack":
-                    tmpl = "military_rush"
-                elif v_cfg.category == "defense":
-                    tmpl = "balanced"
-                elif v_cfg.category == "balanced":
-                    tmpl = "rush_resources"
         elif isinstance(village_id, str) and not village_id.isdigit():
             # Permitir passar diretamente o nome do template no primeiro argumento
             tmpl = village_id.lower().strip()
 
-        if tmpl == "balanced":
-            return BALANCED_TEMPLATE
-        elif tmpl in ("military", "military_rush"):
-            return MILITARY_RUSH_TEMPLATE
-        elif tmpl in ("rush_resources", "rush", "resources"):
-            return RUSH_RESOURCES_TEMPLATE
-        elif tmpl in ("custom", "custom_plan") and custom_plan:
+        if tmpl in ("custom", "custom_plan") and custom_plan:
             return custom_plan
+        elif tmpl in ("default", "default_plan", "standard"):
+            return DEFAULT_BUILD_PLAN
 
         # Tenta resolver template customizado a partir do SQLite
         try:
@@ -235,7 +223,7 @@ class BotConfig:
         except Exception as e:
             logger.debug(f"Aviso ao consultar template '{tmpl}' no SQLite: {e}")
 
-        return custom_plan if custom_plan else RUSH_RESOURCES_TEMPLATE
+        return custom_plan if custom_plan else DEFAULT_BUILD_PLAN
 
     def get_village_recruitment_targets(
         self,
@@ -273,15 +261,15 @@ class BotConfig:
             db_model = db.get_recruitment_model(cat)
             if db_model and db_model.get("units"):
                 return {str(k): int(v) for k, v in db_model["units"].items()}
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Aviso ao consultar modelo de recrutamento no SQLite para categoria '{cat}': {e}")
 
         # 3. Fallback para enum/constantes de categoria
         try:
             v_cat = VillageCategory(cat)
             return CATEGORY_RECRUITMENT_TARGETS.get(v_cat, self.recruitment.targets)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Aviso ao converter categoria '{cat}' para VillageCategory: {e}")
 
         if hasattr(self.recruitment, "models") and "defense" in self.recruitment.models:
             return self.recruitment.models["defense"]
@@ -290,20 +278,13 @@ class BotConfig:
     def get_village_template(self, village_id: Optional[Any] = None) -> str:
         """
         Retorna o identificador do template de construção ativo para a aldeia
-        (ex: 'RUSH_RESOURCES', 'BALANCED', 'MILITARY_RUSH', 'CUSTOM').
+        (ex: 'DEFAULT_PLAN', 'CUSTOM').
         """
         tmpl = self.building.template.lower().strip()
         if village_id and str(village_id) in self.villages:
             v_cfg = self.villages[str(village_id)]
             if v_cfg.building_template:
                 tmpl = v_cfg.building_template.lower().strip()
-            elif tmpl not in ("custom", "custom_plan"):
-                if v_cfg.category == "attack":
-                    tmpl = "military_rush"
-                elif v_cfg.category == "defense":
-                    tmpl = "balanced"
-                elif v_cfg.category == "balanced":
-                    tmpl = "rush_resources"
         return tmpl.upper()
 
     @property
@@ -348,7 +329,7 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
     # 2. Carrega configurações do Edifício Principal
     b_data = data.get("building", {})
     enabled = bool(b_data.get("enabled", True))
-    template = b_data.get("template", "rush_resources")
+    template = b_data.get("template", "default_plan")
     max_queue = int(b_data.get("max_queue", 2))
     interval_seconds = float(b_data.get("interval_seconds", 75.0))
 
@@ -573,8 +554,8 @@ def load_config(
             with open(default_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return parse_config_dict(data)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Aviso ao ler fallback config.json: {e}")
 
     return parse_config_dict({})
 
@@ -626,8 +607,8 @@ def _create_default_config_file(target_path: Path) -> None:
         "world": "pt117",
         "sid": "",
         "building": {
-            "_info": "Opções de template: 'rush_resources', 'balanced', 'military_rush' ou 'custom'",
-            "template": "rush_resources",
+            "_info": "Opções de template: 'default_plan' (padrão oficial) ou 'custom'",
+            "template": "default_plan",
             "max_queue": 2,
             "interval_seconds": 75.0,
             "custom_plan": [

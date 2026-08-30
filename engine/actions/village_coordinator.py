@@ -206,8 +206,8 @@ class MultiVillageCoordinator:
         if orig_village_id and account.current_village_id != orig_village_id:
             try:
                 await account.switch_village(orig_village_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[{account.world}] Falha ao restaurar aldeia ativa original ({orig_village_id}): {e}")
 
         return results
 

@@ -49,7 +49,10 @@
 - [x] Árvore tecnológica de requisitos de edifícios (`BUILDING_REQUIREMENTS`).
 - [x] Cálculo de **níveis virtuais** (`nível atual + construções pendentes na fila`).
 - [x] Restrição de segurança de capacidade de fila (padrão de 2 construções sem custos extras).
-- [x] Modelos de evolução pré-definidos (`RUSH_RESOURCES_TEMPLATE`, `BALANCED_TEMPLATE`, `MILITARY_RUSH_TEMPLATE`).
+- [x] **Modelo Padrão Único Oficial de Construção (`default_plan` com 268 passos):** Integrado e persistido na base de dados SQLite (`building_templates`) com remoção total de modelos legados.
+- [x] **Rush de Prioridade Máxima para Requisitos Militares:**
+  - [x] Rush automático para desbloquear Vikings (`axe`) se o Quartel estiver parado por falta de requisitos.
+  - [x] Rush automático para desbloquear Cavalaria Leve (`light`) se o Estábulo estiver parado por falta de requisitos.
 - [x] Controlador `MainBuildingManager` com disparo de `build` e `cancel` com token CSRF (`h`).
 - [x] Rotina periódica contínua de auto-build com feedback imediato e ciclos humanos.
 - [x] **Controlo Modular de Auto-Construção:** Switch LIGADO/DESLIGADO, ajuste dinâmico de intervalo em segundos e fila máxima via REST e UI.
@@ -66,19 +69,7 @@
 - [x] Suíte de testes unitários para a Praça de Reunião (10 testes dedicados).
 
 ### 2.3. Micro-Farming Automatizado & Radar de Bárbaras
-- [x] Suporte a Assistente de Farm (`screen=am_farm`):
-  - [x] Leitura da tabela de aldeias bárbaras vizinhas (`#plunder_list`).
-  - [x] Leitura do estado dos relatórios (verde, amarelo, vermelho) e nível de muralha.
-  - [x] Disparo automatizado dos modelos A e B com atrasos humanos entre toques (200ms - 550ms).
-- [x] Fallback para Farming via Praça de Reunião (`screen=place`):
-  - [x] Lista configurável de aldeias bárbaras por coordenadas ou raio de distância.
-  - [x] Envio automático de micro-grupos de saque (ex.: 5 lanceiros ou 2 cavalarias leves).
-- [x] Critérios de segurança: paragem imediata do farm caso as tropas sofram baixas (`skip_losses`) ou a muralha inimiga suba (`skip_wall`).
-- [x] **Radar de Bárbaras & Saque Recorrente Contínuo:**
-  - [x] Auto-descoberta de aldeias bárbaras num determinado raio através da leitura do mapa (`screen=map` ou dados de mapa `village.txt`).
-  - [x] Cálculo e ordenação automática por distância euclidiana/manhattan.
-  - [x] Agendamento em loop contínuo para manter as micro-tropas sempre a saquear com alocação dinâmica de unidades disponíveis (`allocate_dynamic_squads`, `run_radar_farm_cycle`, `schedule_continuous_radar_farm`).
-- [x] Suíte de testes unitários dedicada (11 testes cobrindo Assistente de Farm, modelos A/B, filtros, fallback da Praça, alocação de esquadrões e radar contínuo).
+- [x] Desativação e remoção de rotinas de ataque e farm automático conforme diretivas do utilizador.
 
 ### 2.4. Coleta de Recursos / Scavenging (`screen=place&mode=scavenge`)
 - [ ] Leitura do estado de desbloqueio das 4 categorias de coleta (Lazy, Humble, Clever, Great).
@@ -89,15 +80,16 @@
 ### 2.5. Recrutamento Militar (Quartel, Estábulo, Oficina)
 - [x] Parsing do ecrã do Quartel (`screen=barracks`), Estábulo (`screen=stable`) e Oficina (`screen=garage`).
 - [x] Leitura das filas de recrutamento ativas e tempo de conclusão.
-- [x] Configuração de metas de exército (modelos dinâmicos de Ataque, Defesa e Customizados).
-- [x] Recrutamento inteligente em lotes dinâmicos de 5 tropas com verificação prévia de recursos disponíveis.
+- [x] **Divisão de Abas no Cockpit:** Separação entre a gestão de **Modelos de Tropas** (`tab-troop-models`) e o monitor de **Recrutamento Ativo** (`tab-recruitment`).
+- [x] **Modelos Padrão Globais no SQLite (`recruitment_models`):** `attack` ("Ataque Full") e `defense` ("Defesa Full") semeados globalmente (`account_id IS NULL`, `is_default = 1`) com suporte a criação, clonagem e gravação de modelos customizados.
+- [x] **Atribuição Multi-Aldeias:** Seletor reativo de modelo militar por aldeia na tabela de aldeias com persistência imediata.
+- [x] Recrutamento inteligente em lotes dinâmicos com verificação prévia de recursos disponíveis.
 - [x] Priorização de treino por menor custo total de recursos (`Lanceiro` -> `Espião` -> `Espadachim/Bárbaro` -> `Arqueiro` -> `Cavalaria Leve` -> `Aríete` -> `Catapulta` -> `Cavalaria Pesada`).
 - [x] Validação de limite de população livre da Fazenda antes de recrutar (`min_free_pop`).
 - [x] Auto-pesquisa no Ferreiro (`SmithManager`) para tropas requeridas com pré-requisitos cumpridos.
 - [x] **Controlo Modular de Auto-Recrutamento:** Switch LIGADO/DESLIGADO, ajuste dinâmico de intervalo em minutos e limites de população via REST e UI.
 - [x] Monitorização em tempo real das **Filas Ativas de Treino** (Quartel, Estábulo, Oficina) com quantidade de tropas, hora de conclusão e cronómetro decrescente.
-- [x] Sincronização em tempo real das tropas da aldeia no Painel Principal (`screen=place`).
-- [x] Templates táticos de recrutamento 1-clique (Ataque Nuke, Defesa Bunker, Rush Farm, Equilibrado, Limpar).
+- [x] Comparador visual em tempo real de exército presente vs meta do modelo atribuído.
 - [x] Suíte de testes unitários para Recrutamento Militar (11 testes dedicados).
 
 ### 2.6. Academia & Cunha de Moedas (`screen=snob`)
