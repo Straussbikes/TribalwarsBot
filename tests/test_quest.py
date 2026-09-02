@@ -290,10 +290,12 @@ class TestQuestManagerActions(unittest.IsolatedAsyncioTestCase):
             </div>
         </body></html>
         """
-        self.mock_account.get_screen.side_effect = [
-            empty_quest_html,
-            main_screen_rewards_html,
-        ]
+        async def mock_get_screen(screen, village_id=None, extra_params=None, apply_jitter=True):
+            if screen == "main":
+                return main_screen_rewards_html
+            return empty_quest_html
+
+        self.mock_account.get_screen.side_effect = mock_get_screen
 
         state = await self.manager.get_quest_state(self.mock_account)
         self.assertEqual(len(state.quests), 2)
@@ -331,11 +333,16 @@ class TestQuestManagerActions(unittest.IsolatedAsyncioTestCase):
         self.mock_account.get_screen.assert_called_once()
 
     async def test_run_cycle_orchestration(self):
-        # Mock get_quest_state
-        self.mock_account.get_screen.side_effect = [
-            SAMPLE_QUEST_HTML,                  # fetch_quest_state
-            SAMPLE_DAILY_BONUS_HTML_AVAILABLE, # get_daily_bonus_state
-        ]
+        async def mock_get_screen(screen, village_id=None, extra_params=None, apply_jitter=True):
+            if screen == "quest":
+                if extra_params and extra_params.get("action") == "reward":
+                    return "<html>OK</html>"
+                return SAMPLE_QUEST_HTML
+            elif screen == "daily_bonus":
+                return SAMPLE_DAILY_BONUS_HTML_AVAILABLE
+            return "<html></html>"
+
+        self.mock_account.get_screen.side_effect = mock_get_screen
         self.mock_account.get.return_value = "<html>Recompensa/Baú</html>"
 
         config = QuestConfig(

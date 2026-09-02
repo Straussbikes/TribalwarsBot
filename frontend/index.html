@@ -132,6 +132,9 @@
         <button class="nav-tab" data-tab="tab-recruitment" id="tab-btn-recruitment">
           <span class="tab-icon">⚔️</span> Recrutamento
         </button>
+        <button class="nav-tab" data-tab="tab-farm-assistant" id="tab-btn-farm-assistant">
+          <span class="tab-icon">🌾</span> Assistente de Saque & Farm
+        </button>
         <button class="nav-tab" data-tab="tab-map" id="tab-btn-map">
           <span class="tab-icon">🗺</span> Mapa Tático
         </button>
@@ -657,6 +660,409 @@
             <div id="rec-village-troops-progress-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px;">
               <!-- Injetado dinamicamente via JS -->
             </div>
+          </div>
+
+        </div>
+      </main>
+
+      <!-- Panel: Assistente de Saque & Farm (Fase 4 Cockpit UI) -->
+      <main class="tab-content" id="tab-farm-assistant">
+        <div class="glass-card" style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px;">
+          
+          <!-- Cabeçalho Principal e Seletor de Sub-Abas -->
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; border-bottom: 1px solid var(--border-glass); padding-bottom: 14px;">
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <div class="card-title" style="display: flex; align-items: center; gap: 8px;">
+                <span class="icon">🌾</span> Assistente de Saque & Farm
+              </div>
+              <div style="display: flex; gap: 8px;" class="filter-chip-group">
+                <button type="button" class="farm-subtab-btn active" id="btn-subtab-am-farm" onclick="switchFarmSubtab('am-farm')">
+                  <span>⚔️</span> Farm Bárbaras (AM Farm)
+                </button>
+                <button type="button" class="farm-subtab-btn" id="btn-subtab-radar-inactives" onclick="switchFarmSubtab('radar-inactives')">
+                  <span>📡</span> Radar de Inativos & Inno-Farming
+                </button>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <!-- Toggle Master de Auto-Farm -->
+              <div style="display: flex; align-items: center; gap: 8px; background: rgba(15, 23, 42, 0.7); padding: 6px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-glass);">
+                <span style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);">Auto-Farm:</span>
+                <label class="switch" style="margin: 0;">
+                  <input type="checkbox" id="toggle-farm-master" checked>
+                  <span class="slider round"></span>
+                </label>
+              </div>
+              <button class="btn btn-primary" id="btn-trigger-farm-wave" style="padding: 6px 16px; font-size: 0.85rem; font-weight: 700; background: var(--gradient-primary);">
+                <span>⚡</span> Disparar Ronda Agora
+              </button>
+            </div>
+          </div>
+
+          <!-- ================= SUB-ABA 1: AM FARM & BÁRBARAS ================= -->
+          <div id="subtab-view-am-farm" style="display: flex; flex-direction: column; gap: 18px;">
+            
+            <!-- Cards de Métricas e Tropas da Aldeia -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px;">
+              <!-- Tropas Prontas para Farm -->
+              <div class="card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 14px 16px;">
+                <div style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; display: flex; justify-content: space-between;">
+                  <span>🛡️ Tropas na Aldeia</span>
+                  <span id="farm-village-coords-badge" style="color: var(--neon-cyan); font-family: var(--font-mono); font-size: 0.75rem;">(450|550)</span>
+                </div>
+                <div id="farm-available-troops-grid" style="display: flex; gap: 12px; flex-wrap: wrap; font-size: 0.82rem;">
+                  <!-- Injetado dinamicamente via JS -->
+                </div>
+              </div>
+
+              <!-- Modelos A e B Configurados no Jogo -->
+              <div class="card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 14px 16px;">
+                <div style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                  <span>📋 Modelos de Saque (AM Farm)</span>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-open-farm-templates-modal" onclick="openFarmTemplatesModal()" style="padding: 2px 8px; font-size: 0.72rem; border-color: rgba(168,85,247,0.4); color: #c084fc;">
+                    <span>✏️</span> Editar
+                  </button>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.8rem;">
+                  <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(30, 41, 59, 0.5); padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                    <strong style="color: var(--neon-cyan); min-width: 75px;">Modelo A:</strong> <span id="farm-template-a-summary" style="font-family: var(--font-mono); font-size: 0.78rem; text-align: right;">A carregar...</span>
+                  </div>
+                  <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(30, 41, 59, 0.5); padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+                    <strong style="color: var(--neon-amber); min-width: 75px;">Modelo B:</strong> <span id="farm-template-b-summary" style="font-family: var(--font-mono); font-size: 0.78rem; text-align: right;">A carregar...</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Resumo do Raio e Status -->
+              <div class="card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 14px 16px;">
+                <div style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); margin-bottom: 8px;">
+                  <span>📊 Cobertura no Raio</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 0.82rem;">
+                  <div>Bárbaras: <strong id="farm-stats-total-targets" style="color: var(--neon-cyan);">0</strong></div>
+                  <div>Ataques em Trânsito: <strong id="farm-stats-in-transit" style="color: var(--neon-amber);">0</strong></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Painel de Configurações Operacionais de Farm -->
+            <div class="card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 16px 18px;">
+              <div style="font-size: 0.88rem; font-weight: 700; color: var(--text-main); margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+                <span style="display: flex; align-items: center; gap: 8px;">⚙️ Parâmetros de Automação do Farm</span>
+                <button class="btn btn-secondary btn-sm" id="btn-save-farm-settings" style="padding: 4px 12px; font-size: 0.78rem;">
+                  <span>💾</span> Guardar Parâmetros
+                </button>
+              </div>
+
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; font-size: 0.82rem;">
+                <div>
+                  <label style="color: var(--text-muted); display: block; margin-bottom: 4px;">Modelo Padrão:</label>
+                  <select id="farm-cfg-default-template" class="form-control" style="width: 100%; padding: 5px 8px; font-size: 0.82rem;">
+                    <option value="A">Modelo A (Micro-saque / Leves)</option>
+                    <option value="B">Modelo B (Saque Reforçado / Volume)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style="color: var(--text-muted); display: block; margin-bottom: 4px;">Raio Máximo (Campos):</label>
+                  <input type="number" id="farm-cfg-max-distance" class="form-control" style="width: 100%; padding: 5px 8px; font-size: 0.82rem;" value="25" min="1" max="100">
+                </div>
+
+                <div>
+                  <label style="color: var(--text-muted); display: block; margin-bottom: 4px;">Intervalo Ciclos (Segundos):</label>
+                  <div style="display: flex; gap: 6px; align-items: center;">
+                    <input type="number" id="farm-cfg-min-interval" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="45" min="10">
+                    <span style="color: var(--text-muted);">-</span>
+                    <input type="number" id="farm-cfg-max-interval" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="90" min="20">
+                  </div>
+                </div>
+
+                <div>
+                  <label style="color: var(--text-muted); display: block; margin-bottom: 4px;">Atraso Entre Ataques (ms):</label>
+                  <div style="display: flex; gap: 6px; align-items: center;">
+                    <input type="number" id="farm-cfg-min-delay" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="250" min="100">
+                    <span style="color: var(--text-muted);">-</span>
+                    <input type="number" id="farm-cfg-max-delay" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="650" min="200">
+                  </div>
+                </div>
+              </div>
+
+              <!-- Checkboxes de Proteção e Bootstrap -->
+              <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-top: 14px; font-size: 0.82rem;">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="checkbox" id="farm-cfg-avoid-concurrent" checked>
+                  <span>Evitar ataques sobrepostos à mesma aldeia</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="checkbox" id="farm-cfg-bootstrap-unlisted" checked>
+                  <span>Auto-Bootstrap de novas bárbaras via Praça</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="checkbox" id="farm-cfg-stop-on-losses" checked>
+                  <span>Pausar envio para alvos com histórico de perdas</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Tabela de Aldeias Bárbaras Mapeadas -->
+            <div class="card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 14px 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div style="font-size: 0.85rem; font-weight: 700; color: var(--text-main);">
+                  🌾 Aldeias Bárbaras no Assistente de Saque
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-refresh-farm-targets-list" style="padding: 4px 10px; font-size: 0.78rem;">
+                  <span>🔄</span> Atualizar Lista
+                </button>
+              </div>
+
+              <div style="overflow-x: auto;">
+                <table class="table-custom" style="width: 100%; font-size: 0.82rem;">
+                  <thead>
+                    <tr>
+                      <th>Aldeia</th>
+                      <th>Coordenadas</th>
+                      <th>Distância</th>
+                      <th>Tempo CL</th>
+                      <th>Último Saque</th>
+                      <th>Muralha</th>
+                      <th>Status</th>
+                      <th style="text-align: right;">Ações Rápidas</th>
+                    </tr>
+                  </thead>
+                  <tbody id="farm-targets-table-body">
+                    <tr>
+                      <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 20px;">
+                        A carregar aldeias bárbaras do Assistente de Saque...
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ================= SUB-ABA 2: RADAR DE INATIVOS & INNO-FARMING ================= -->
+          <div id="subtab-view-radar-inactives" style="display: none; flex-direction: column; gap: 18px;">
+            
+            <!-- Alternador de Visão no Radar: Alvos Inativos vs Evolução de Jogadores -->
+            <div style="display: flex; gap: 8px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-radar-view-inactives" onclick="switchRadarMode('inactives')" style="padding: 5px 14px; font-size: 0.8rem; font-weight: 700;">
+                <span>🎯</span> Alvos Inativos (Farming)
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btn-radar-view-evolution" onclick="switchRadarMode('evolution')" style="padding: 5px 14px; font-size: 0.8rem; font-weight: 700; background: rgba(30,41,59,0.5); color: var(--text-muted);">
+                <span>📈</span> Evolução de Jogadores no Raio X
+              </button>
+            </div>
+
+            <!-- ================= MODO 1: ALVOS INATIVOS (FARMING) ================= -->
+            <div id="radar-mode-inactives" style="display: flex; flex-direction: column; gap: 18px;">
+              <!-- Barra de Controlo e Atualização dos Dumps do Mundo -->
+              <div class="card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                  <button class="btn btn-primary" id="btn-radar-sync-world" style="padding: 6px 14px; font-size: 0.82rem; font-weight: 700;">
+                    <span>🔄</span> Atualizar Dados do Mundo
+                  </button>
+                  <span id="radar-sync-status-badge" class="badge" style="background: rgba(6, 182, 212, 0.15); color: var(--neon-cyan); border: 1px solid rgba(6, 182, 212, 0.3); font-size: 0.75rem;">
+                    A verificar sincronização...
+                  </span>
+                </div>
+
+                <!-- Caixa de Pesquisa Rápida -->
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <input type="text" id="radar-search-query" class="form-control" style="width: 220px; padding: 5px 10px; font-size: 0.82rem;" placeholder="Filtrar por jogador ou coords...">
+                </div>
+              </div>
+
+              <!-- Painel de Filtros Táticos Reativos -->
+              <div class="card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 16px 18px;">
+                <div style="font-size: 0.85rem; font-weight: 700; color: var(--text-main); margin-bottom: 12px;">
+                  🎯 Filtros Táticos de Varredura
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; font-size: 0.82rem;">
+                  <div>
+                    <label style="color: var(--text-muted); display: block; margin-bottom: 4px;">Raio Máximo (Campos):</label>
+                    <input type="number" id="radar-filter-max-distance" class="form-control" style="width: 100%; padding: 5px 8px; font-size: 0.82rem;" value="25" min="1" max="100">
+                  </div>
+
+                  <div>
+                    <label style="color: var(--text-muted); display: block; margin-bottom: 4px;">Janela Temporal (Δt):</label>
+                    <select id="radar-filter-days-window" class="form-control" style="width: 100%; padding: 5px 8px; font-size: 0.82rem;">
+                      <option value="3">3 dias</option>
+                      <option value="7" selected>7 dias</option>
+                      <option value="14">14 dias</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style="color: var(--text-muted); display: block; margin-bottom: 4px;">Faixa de Pontuação:</label>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                      <input type="number" id="radar-filter-min-points" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="200" min="50">
+                      <span style="color: var(--text-muted);">-</span>
+                      <input type="number" id="radar-filter-max-points" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="5000" min="200">
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style="color: var(--text-muted); display: block; margin-bottom: 4px;">Crescimento Máx. (ΔP):</label>
+                    <input type="number" id="radar-filter-max-growth" class="form-control" style="width: 100%; padding: 5px 8px; font-size: 0.82rem;" value="30" min="0">
+                  </div>
+                </div>
+
+                <!-- Filtros de Segurança e Tribo -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; flex-wrap: wrap; gap: 12px; font-size: 0.82rem;">
+                  <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                      <input type="checkbox" id="radar-filter-only-tribeless">
+                      <span>Apenas jogadores sem tribo</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                      <input type="checkbox" id="radar-filter-single-tribe" checked>
+                      <span>Incluir tribos de 1 membro</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                      <input type="checkbox" id="radar-filter-barbarians">
+                      <span>Incluir bárbaras</span>
+                    </label>
+                  </div>
+
+                  <button class="btn btn-secondary" id="btn-apply-radar-filters" style="padding: 6px 16px; font-size: 0.82rem; font-weight: 700; border-color: rgba(6, 182, 212, 0.4); color: var(--neon-cyan);">
+                    <span>🔍</span> Aplicar Filtros
+                  </button>
+                </div>
+              </div>
+
+              <!-- Resumo Quantitativo de Inatividade -->
+              <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <div class="card" style="flex: 1; min-width: 140px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-sm); padding: 10px 14px;">
+                  <div style="font-size: 0.75rem; color: #fbbf24; font-weight: 600;">🛑 Estagnação Total (ΔP = 0)</div>
+                  <div id="radar-count-stagnant" style="font-size: 1.2rem; font-weight: 700; color: #fff; margin-top: 2px;">0</div>
+                </div>
+                <div class="card" style="flex: 1; min-width: 140px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(244, 63, 94, 0.3); border-radius: var(--radius-sm); padding: 10px 14px;">
+                  <div style="font-size: 0.75rem; color: #fb7185; font-weight: 600;">📉 Regressão / Limpeza (ΔP < 0)</div>
+                  <div id="radar-count-regressive" style="font-size: 1.2rem; font-weight: 700; color: #fff; margin-top: 2px;">0</div>
+                </div>
+                <div class="card" style="flex: 1; min-width: 140px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(6, 182, 212, 0.3); border-radius: var(--radius-sm); padding: 10px 14px;">
+                  <div style="font-size: 0.75rem; color: #38bdf8; font-weight: 600;">⚠️ Crescimento Residual</div>
+                  <div id="radar-count-residual" style="font-size: 1.2rem; font-weight: 700; color: #fff; margin-top: 2px;">0</div>
+                </div>
+                <div class="card" style="flex: 1; min-width: 140px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-glass); border-radius: var(--radius-sm); padding: 10px 14px;">
+                  <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">🎯 Total de Alvos</div>
+                  <div id="radar-count-total" style="font-size: 1.2rem; font-weight: 700; color: #fff; margin-top: 2px;">0</div>
+                </div>
+              </div>
+
+              <!-- Tabela Comparativa de Alvos Inativos -->
+              <div class="card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 14px 16px;">
+                <div style="overflow-x: auto;">
+                  <table class="table-custom" style="width: 100%; font-size: 0.82rem;">
+                    <thead>
+                      <tr>
+                        <th>Jogador</th>
+                        <th>Tribo</th>
+                        <th>Aldeia</th>
+                        <th>Coordenadas</th>
+                        <th>Pontos Atuais</th>
+                        <th>Variação (ΔP)</th>
+                        <th>Distância</th>
+                        <th>Marcha CL (ETA)</th>
+                        <th>Marcha Espião</th>
+                        <th style="text-align: right;">Ações Rápidas</th>
+                      </tr>
+                    </thead>
+                    <tbody id="radar-inactives-table-body">
+                      <tr>
+                        <td colspan="10" style="text-align: center; color: var(--text-muted); padding: 20px;">
+                          A varrer alvos inativos na base de dados...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- ================= MODO 2: EVOLUÇÃO DE JOGADORES NO RAIO X ================= -->
+            <div id="radar-mode-evolution" style="display: none; flex-direction: column; gap: 18px;">
+              
+              <!-- Barra de Controlo e Atualização -->
+              <div class="card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <label style="font-size: 0.82rem; color: var(--text-muted); font-weight: 600;">Raio:</label>
+                    <input type="number" id="radar-evo-radius" class="form-control" style="width: 70px; padding: 4px 8px; font-size: 0.82rem;" value="25" min="1" max="100">
+                    <span style="font-size: 0.82rem; color: var(--text-muted);">campos</span>
+                  </div>
+                  <button class="btn btn-primary btn-sm" id="btn-radar-refresh-evolution" onclick="loadRadarPlayersEvolutionView()" style="padding: 5px 14px; font-size: 0.8rem; font-weight: 700;">
+                    <span>🔍</span> Varrer Jogadores
+                  </button>
+                  <button class="btn btn-secondary btn-sm" id="btn-radar-sync-world-evo" onclick="triggerRadarSyncEvo()" style="padding: 5px 14px; font-size: 0.8rem;">
+                    <span>⚡</span> Coletar Novo Snapshot
+                  </button>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <input type="text" id="radar-evo-search-query" class="form-control" style="width: 220px; padding: 5px 10px; font-size: 0.82rem;" placeholder="Filtrar jogador ou tribo...">
+                </div>
+              </div>
+
+              <!-- Resumo Quantitativo de Tendências dos Jogadores -->
+              <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <div class="card" style="flex: 1; min-width: 130px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: var(--radius-sm); padding: 8px 12px;">
+                  <div style="font-size: 0.72rem; color: var(--neon-emerald); font-weight: 600;">🚀 Acelerado</div>
+                  <div id="radar-evo-count-accelerating" style="font-size: 1.15rem; font-weight: 700; color: #fff; margin-top: 2px;">0</div>
+                </div>
+                <div class="card" style="flex: 1; min-width: 130px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(6, 182, 212, 0.3); border-radius: var(--radius-sm); padding: 8px 12px;">
+                  <div style="font-size: 0.72rem; color: var(--neon-cyan); font-weight: 600;">📈 Ativo Normal</div>
+                  <div id="radar-evo-count-growing" style="font-size: 1.15rem; font-weight: 700; color: #fff; margin-top: 2px;">0</div>
+                </div>
+                <div class="card" style="flex: 1; min-width: 130px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-sm); padding: 8px 12px;">
+                  <div style="font-size: 0.72rem; color: #fbbf24; font-weight: 600;">⏸️ Estagnado</div>
+                  <div id="radar-evo-count-stagnant" style="font-size: 1.15rem; font-weight: 700; color: #fff; margin-top: 2px;">0</div>
+                </div>
+                <div class="card" style="flex: 1; min-width: 130px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(244, 63, 94, 0.3); border-radius: var(--radius-sm); padding: 8px 12px;">
+                  <div style="font-size: 0.72rem; color: #fb7185; font-weight: 600;">📉 Em Queda</div>
+                  <div id="radar-evo-count-regressive" style="font-size: 1.15rem; font-weight: 700; color: #fff; margin-top: 2px;">0</div>
+                </div>
+                <div class="card" style="flex: 1; min-width: 130px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-glass); border-radius: var(--radius-sm); padding: 8px 12px;">
+                  <div style="font-size: 0.72rem; color: var(--text-muted); font-weight: 600;">👥 Total no Raio</div>
+                  <div id="radar-evo-count-total" style="font-size: 1.15rem; font-weight: 700; color: #fff; margin-top: 2px;">0</div>
+                </div>
+              </div>
+
+              <!-- Tabela de Séries Temporais e Evolução dos Jogadores -->
+              <div class="card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 14px 16px;">
+                <div style="overflow-x: auto;">
+                  <table class="table-custom" style="width: 100%; font-size: 0.82rem;">
+                    <thead>
+                      <tr>
+                        <th>Jogador</th>
+                        <th>Tribo</th>
+                        <th>Aldeia Próxima</th>
+                        <th>Distância</th>
+                        <th>Pontos Atuais</th>
+                        <th>Aldeias</th>
+                        <th>Variação 24h</th>
+                        <th>Variação 7d</th>
+                        <th>Tendência</th>
+                        <th style="text-align: right;">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody id="radar-evolution-table-body">
+                      <tr>
+                        <td colspan="10" style="text-align: center; color: var(--text-muted); padding: 20px;">
+                          A carregar evolução dos jogadores no raio...
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+
           </div>
 
         </div>
@@ -1858,6 +2264,119 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Modal: Configuração de Modelos de Saque (AM Farm - Modelos A & B) -->
+    <div id="farm-templates-modal" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); backdrop-filter: blur(12px); z-index: 2500; align-items: center; justify-content: center;">
+      <div class="modal-box" style="max-width: 650px; width: 92%; max-height: 90vh; overflow-y: auto; padding: 22px; border-radius: var(--radius-lg); border: 1px solid var(--border-glass-highlight); box-shadow: 0 10px 40px rgba(0,0,0,0.7); display: flex; flex-direction: column;">
+        
+        <!-- Cabeçalho do Modal -->
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-glass); padding-bottom: 12px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 1.3rem;">⚙️</span>
+            <h3 style="margin: 0; font-family: var(--font-display); font-size: 1.1rem; color: #fff;">Configurar Modelos de Saque (AM Farm)</h3>
+          </div>
+          <button type="button" id="btn-close-farm-templates-modal" onclick="closeFarmTemplatesModal()" style="background: transparent; border: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer;">✕</button>
+        </div>
+
+        <!-- Seletor de Modelo (Abas A vs B) -->
+        <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+          <button type="button" class="btn btn-primary" id="btn-tab-farm-tmpl-a" onclick="selectFarmModalTemplate('A')" style="flex: 1; padding: 8px; font-weight: 700; background: var(--gradient-primary); border-color: var(--neon-cyan);">
+            ⚔️ Modelo A (Micro-Saque)
+          </button>
+          <button type="button" class="btn btn-secondary" id="btn-tab-farm-tmpl-b" onclick="selectFarmModalTemplate('B')" style="flex: 1; padding: 8px; font-weight: 700; color: var(--text-muted);">
+            ⚔️ Modelo B (Volume / Pesado)
+          </button>
+        </div>
+
+        <!-- Presets Rápidos de 1-Clique -->
+        <div style="background: rgba(15, 23, 42, 0.6); padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-subtle); margin-bottom: 16px;">
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 600;">⚡ Presets Rápidos de Saque:</div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="applyFarmPreset('micro_2lc')" style="padding: 2px 8px; font-size: 0.72rem;">2 Leves (160 cap)</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="applyFarmPreset('std_4lc_1spy')" style="padding: 2px 8px; font-size: 0.72rem;">4 Leves + 1 Espião (320 cap)</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="applyFarmPreset('infantry_early')" style="padding: 2px 8px; font-size: 0.72rem;">10 Lanças + 10 Espadas (500 cap)</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="applyFarmPreset('heavy_10lc')" style="padding: 2px 8px; font-size: 0.72rem;">10 Leves + 2 Espiões (800 cap)</button>
+            <button type="button" class="btn btn-outline btn-sm" onclick="applyFarmPreset('clear')" style="padding: 2px 8px; font-size: 0.72rem; color: #f87171; border-color: rgba(239,68,68,0.4);">🗑️ Zerar</button>
+          </div>
+        </div>
+
+        <!-- Grelha de Unidades do Modelo -->
+        <div id="farm-tmpl-units-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap: 10px; margin-bottom: 16px;">
+          <!-- Injetado dinamicamente via JS -->
+        </div>
+
+        <!-- Indicador de Capacidade de Transporte -->
+        <div style="background: rgba(30, 41, 59, 0.5); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-glass); display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px;">
+          <div style="font-size: 0.82rem; color: var(--text-muted);">
+            🎒 Capacidade de Carga Total:
+          </div>
+          <div style="font-size: 0.95rem; font-weight: 700; color: var(--neon-emerald);">
+            <span id="farm-tmpl-haul-capacity">0</span> recursos
+          </div>
+        </div>
+
+        <!-- Rodapé de Ações -->
+        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-glass); padding-top: 14px;">
+          <span id="farm-tmpl-save-status-msg" style="font-size: 0.75rem; color: var(--neon-emerald);"></span>
+          <div style="display: flex; gap: 10px;">
+            <button type="button" class="btn btn-secondary" id="btn-cancel-farm-templates-modal" onclick="closeFarmTemplatesModal()">Cancelar</button>
+            <button type="button" class="btn btn-primary" id="btn-save-farm-template-to-game" style="background: var(--gradient-primary); font-weight: 700; padding: 8px 18px;">
+              <span>💾</span> Gravar no Jogo
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Modal de Histórico e Linha do Tempo do Jogador -->
+    <div id="player-history-modal" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(6px); z-index: 2600; align-items: center; justify-content: center;">
+      <div class="modal-container glass-card" style="width: 90%; max-width: 720px; max-height: 85vh; display: flex; flex-direction: column; background: rgba(15, 23, 42, 0.95); border: 1px solid var(--border-glass); border-radius: 12px; padding: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.8); overflow: hidden;">
+        
+        <!-- Cabeçalho -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 10px;">
+          <div>
+            <h3 id="player-history-modal-title" style="margin: 0; font-size: 1.1rem; color: #fff; display: flex; align-items: center; gap: 8px;">
+              <span>📈</span> Evolução Temporal do Jogador
+            </h3>
+            <small id="player-history-modal-subtitle" style="color: var(--text-muted); font-size: 0.75rem;">Série temporal de medições oficiais gravadas no SQLite</small>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="closePlayerHistoryModal()" style="padding: 2px 8px;">✕</button>
+        </div>
+
+        <!-- Resumo do Jogador -->
+        <div id="player-history-meta-bar" style="display: flex; gap: 12px; flex-wrap: wrap; background: rgba(30, 41, 59, 0.5); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-subtle); margin-bottom: 14px; font-size: 0.8rem;">
+          <!-- Injetado dinamicamente via JS -->
+        </div>
+
+        <!-- Tabela com a Série Temporal -->
+        <div style="overflow-y: auto; flex: 1; margin-bottom: 14px;">
+          <table class="table-custom" style="width: 100%; font-size: 0.8rem;">
+            <thead>
+              <tr>
+                <th>Data / Hora</th>
+                <th>Pontos</th>
+                <th>Variação (Δ)</th>
+                <th>Aldeias</th>
+                <th>Ranking</th>
+                <th>Tribo</th>
+              </tr>
+            </thead>
+            <tbody id="player-history-table-body">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 16px;">A carregar dados temporais...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Rodapé -->
+        <div style="display: flex; justify-content: flex-end; border-top: 1px solid var(--border-subtle); padding-top: 10px;">
+          <button type="button" class="btn btn-secondary" onclick="closePlayerHistoryModal()">Fechar</button>
+        </div>
+
       </div>
     </div>
 

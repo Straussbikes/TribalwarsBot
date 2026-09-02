@@ -10,10 +10,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from engine.actions.main_building import (
-    DEFAULT_BUILD_PLAN,
-    DEFAULT_BUILDING_TEMPLATE,
-)
+from engine.actions.main_building import DEFAULT_BUILD_PLAN
 
 logger = logging.getLogger(__name__)
 
@@ -30,24 +27,45 @@ class BuildingConfig:
 
 @dataclass
 class FarmConfig:
-    """Configurações da rotina de Micro-Farming."""
+    """Configurações da rotina de Micro-Farming e Assistente de Saque."""
     enabled: bool = False
     mode: str = "am_farm"              # 'am_farm' (Assistente de Farm), 'place' (Praça de Reunião) ou 'radar' (Radar de Bárbaras)
     template: str = "A"                # 'A' ou 'B'
-    max_distance: float = 15.0         # Raio máximo de ataque em campos
-    skip_losses: bool = True           # Ignorar aldeias com relatórios amarelos/vermelhos
+    default_template: str = "A"        # 'A' ou 'B' (alias)
+    max_distance: float = 25.0         # Raio máximo de ataque em campos (X campos)
+    scan_all_radius_barbarians: bool = True  # Varre ativamente e ataca TODAS as bárbaras no raio
+    bootstrap_unlisted_barbarians: bool = True  # Dispara ataque inicial via Praça para incluir bárbaras novas no AM Farm
+    avoid_concurrent_attacks: bool = True  # Evita enviar múltiplos ataques para a mesma bárbara em trânsito
+    stop_on_losses: bool = True        # Ignorar aldeias bárbaras com perdas (amarelas/vermelhas)
+    skip_losses: bool = True           # Alias compatível
     skip_wall: bool = True             # Ignorar aldeias com muralha > 0
-    skip_active_targets: bool = True   # Não enviar ataques repetidos a bárbaras que já tenham ataques a caminho
-    interval_minutes: float = 10.0     # Frequência de envio de ondas em minutos
-    custom_targets: List[Tuple[int, int]] = field(default_factory=list)
+    skip_active_targets: bool = True   # Alias compatível
+    min_interval_seconds: int = 180    # Intervalo mínimo entre ciclos de varredura
+    max_interval_seconds: int = 420    # Intervalo máximo entre ciclos de varredura
+    min_delay_per_attack_ms: int = 350 # Atraso mínimo entre ataques individuais
+    max_delay_per_attack_ms: int = 950 # Atraso máximo entre ataques individuais
+    interval_minutes: float = 10.0     # Frequência de envio de ondas em minutos (compatibilidade)
+    custom_targets: List[Any] = field(default_factory=list)
     custom_troops: Dict[str, int] = field(default_factory=lambda: {"spear": 5, "spy": 1})
+    template_a_troops: Dict[str, int] = field(default_factory=lambda: {"spear": 0, "sword": 0, "axe": 0, "archer": 0, "spy": 0, "light": 5, "marcher": 0, "heavy": 0, "ram": 0, "catapult": 0, "knight": 0, "snob": 0})
+    template_b_troops: Dict[str, int] = field(default_factory=lambda: {"spear": 0, "sword": 0, "axe": 0, "archer": 0, "spy": 0, "light": 10, "marcher": 0, "heavy": 0, "ram": 0, "catapult": 0, "knight": 0, "snob": 0})
     use_map_scanner: bool = True       # Descoberta automática de bárbaras pelo mapa
-    map_scan_radius: float = 15.0      # Raio de varredura em campos
+    map_scan_radius: float = 25.0      # Raio de varredura em campos
     map_cache_ttl_hours: float = 12.0  # Validade da cache de aldeias bárbaras mapeadas
+
+    def __post_init__(self):
+        if self.template != "A" and self.default_template == "A":
+            self.default_template = self.template
+        elif self.default_template != "A" and self.template == "A":
+            self.template = self.default_template
+        if not self.skip_losses:
+            self.stop_on_losses = False
+        if not self.skip_active_targets:
+            self.avoid_concurrent_attacks = False
 
 
 DEFAULT_ATTACK_MODEL: Dict[str, int] = {
-    "spear": 0,
+    "spear": 30,
     "sword": 0,
     "axe": 6000,
     "archer": 0,
@@ -107,7 +125,7 @@ class ArbitrageConfig:
     """Configurações da rotina de Arbitragem Económica & Fila Sempre Ativa (Item 2.12)."""
     enabled: bool = False
     emergency_queue_seconds: float = 900.0  # 15 minutos (limiar de ativação de micro-lotes de emergência)
-    min_military_batch: int = 2             # Quantidade mínima de tropas para micro-lotes
+    min_military_batch: int = 5             # Quantidade mínima de tropas para micro-lotes
     interval_seconds: float = 60.0          # Intervalo de avaliação da concorrência
 
 
@@ -134,7 +152,7 @@ class QuestConfig:
 @dataclass
 class VillageConfig:
     """Configurações de categorização e templates de uma aldeia específica."""
-    category: str = "balanced"  # 'attack', 'defense', 'balanced'
+    category: str = "attack"  # Estritamente 'attack' (Ataque) ou 'defense' (Defesa)
     building_template: Optional[str] = None
     recruitment_targets: Optional[Dict[str, int]] = None
 
@@ -163,7 +181,7 @@ class MarketConfig:
 
 @dataclass
 class BotConfig:
-    """Configuração global consolidada do bot."""
+    """Configurações globais consolidadas do Bot."""
     world: str = "pt117"
     sid: str = ""
     domain: str = "tribalwars.com.pt"
@@ -179,43 +197,43 @@ class BotConfig:
 
     def get_active_build_plan(
         self,
+        template_name: Optional[str] = None,
         village_id: Optional[Any] = None,
         db: Optional[Any] = None,
     ) -> List[Tuple[str, int]]:
         """
-        Retorna a lista de metas de construção com base no template configurado
-        ou na categoria e template atribuídos à aldeia específica.
-        Resolve modelos customizados a partir do SQLite (data/accounts.db) ou constantes.
+        Retorna o plano de construção correspondente ao template ativo ou customizado.
+        Prioridade 1: Modelo Padrão Oficial 'default_plan' (268 passos).
+        Prioridade 2: Tabela SQLite 'building_templates'.
         """
-        if isinstance(self.building, dict):
-            tmpl = str(self.building.get("template", "default_plan")).lower().strip()
-            custom_plan = self.building.get("custom_plan")
-        else:
-            tmpl = self.building.template.lower().strip()
-            custom_plan = self.building.custom_plan
-
-        if village_id and str(village_id) in self.villages:
+        tmpl = template_name or self.building.template
+        if not template_name and village_id and str(village_id) in self.villages:
             v_cfg = self.villages[str(village_id)]
             if v_cfg.building_template:
-                tmpl = v_cfg.building_template.lower().strip()
-        elif isinstance(village_id, str) and not village_id.isdigit():
-            # Permitir passar diretamente o nome do template no primeiro argumento
-            tmpl = village_id.lower().strip()
+                tmpl = v_cfg.building_template
+            elif v_cfg.category:
+                from engine.core.models import VillageCategory, CATEGORY_BUILDING_TEMPLATES
+                v_cat = VillageCategory.DEFENSE if "def" in str(v_cfg.category).lower() else VillageCategory.ATTACK
+                tmpl = CATEGORY_BUILDING_TEMPLATES.get(v_cat, "default_plan")
+
+        tmpl = tmpl.lower().strip()
+        custom_plan = getattr(self.building, "custom_plan", None)
 
         if tmpl in ("custom", "custom_plan") and custom_plan:
             return custom_plan
-        elif tmpl in ("default", "default_plan", "standard"):
+
+        if tmpl in ("default_plan", "rush_resources", "balanced", "military_rush"):
             return DEFAULT_BUILD_PLAN
 
-        # Tenta resolver template customizado a partir do SQLite
         try:
             if db is None:
                 from engine.storage.database import AccountsDatabase
                 db = AccountsDatabase()
-            db_tmpl = db.get_building_template(tmpl)
-            if db_tmpl and db_tmpl.get("priority_list"):
+            db_template = db.get_building_template(tmpl)
+            if db_template:
+                steps_data = db_template.get("steps") or db_template.get("priority_list") or []
                 plan = []
-                for item in db_tmpl["priority_list"]:
+                for item in steps_data:
                     if isinstance(item, (list, tuple)) and len(item) == 2:
                         plan.append((str(item[0]).strip().lower(), int(item[1])))
                 if plan:
@@ -232,26 +250,23 @@ class BotConfig:
         db: Optional[Any] = None,
     ) -> Dict[str, int]:
         """
-        Retorna as metas de recrutamento da aldeia conforme o seu modelo (Ataque/Defesa/Customizado).
-        O bot segue o modelo definido para a categoria da aldeia na gestão de multi-aldeias.
+        Retorna as metas de recrutamento da aldeia conforme o seu modelo (Ataque ou Defesa).
+        - Aldeia de Ataque -> Modelo de recrutamento de Ataque ('attack')
+        - Aldeia de Defesa -> Modelo de recrutamento de Defesa ('defense')
         """
         from engine.core.models import VillageCategory, CATEGORY_RECRUITMENT_TARGETS
-        cat = model_name or "defense"
+        cat = model_name or "attack"
         if not model_name and village_id and str(village_id) in self.villages:
             v_cfg = self.villages[str(village_id)]
             if v_cfg.recruitment_targets:
                 return v_cfg.recruitment_targets
-            cat = str(v_cfg.category).lower().strip() if v_cfg.category else "defense"
+            cat = str(v_cfg.category).lower().strip() if v_cfg.category else "attack"
         elif not model_name and isinstance(village_id, str) and not village_id.isdigit():
             cat = village_id.lower().strip()
 
-        # 1. Verifica no dicionário local em memória
+        # 1. Verifica se existe o modelo no dicionário de modelos em memória
         if hasattr(self.recruitment, "models") and cat in self.recruitment.models:
             return self.recruitment.models[cat]
-        if cat == "attack" and hasattr(self.recruitment, "models") and "attack" in self.recruitment.models:
-            return self.recruitment.models["attack"]
-        if cat == "defense" and hasattr(self.recruitment, "models") and "defense" in self.recruitment.models:
-            return self.recruitment.models["defense"]
 
         # 2. Tenta consultar modelo correspondente no SQLite
         try:
@@ -264,16 +279,14 @@ class BotConfig:
         except Exception as e:
             logger.debug(f"Aviso ao consultar modelo de recrutamento no SQLite para categoria '{cat}': {e}")
 
-        # 3. Fallback para enum/constantes de categoria
-        try:
-            v_cat = VillageCategory(cat)
-            return CATEGORY_RECRUITMENT_TARGETS.get(v_cat, self.recruitment.targets)
-        except Exception as e:
-            logger.debug(f"Aviso ao converter categoria '{cat}' para VillageCategory: {e}")
+        # 3. Normalização estrita para 'defense' ou 'attack'
+        norm_cat = "defense" if "def" in cat else "attack"
+        if hasattr(self.recruitment, "models") and norm_cat in self.recruitment.models:
+            return self.recruitment.models[norm_cat]
 
-        if hasattr(self.recruitment, "models") and "defense" in self.recruitment.models:
-            return self.recruitment.models["defense"]
-        return self.recruitment.targets
+        # 4. Fallback para arquétipos padrão de categoria
+        v_cat = VillageCategory.DEFENSE if norm_cat == "defense" else VillageCategory.ATTACK
+        return CATEGORY_RECRUITMENT_TARGETS.get(v_cat, self.recruitment.targets)
 
     def get_village_template(self, village_id: Optional[Any] = None) -> str:
         """
@@ -474,14 +487,16 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
         max_merchant_ratio=float(max_merch),
     )
 
-    # 9. Carrega configurações e categorização de Aldeias
+    # 9. Carrega configurações e categorização de Aldeias (estritamente 'attack' ou 'defense')
     v_data = data.get("villages", {})
     villages_config = {}
     if isinstance(v_data, dict):
         for vid, vinfo in v_data.items():
             if isinstance(vinfo, dict):
+                raw_cat = str(vinfo.get("category", "attack")).lower().strip()
+                cat = "defense" if "def" in raw_cat else "attack"
                 villages_config[str(vid)] = VillageConfig(
-                    category=str(vinfo.get("category", "balanced")).lower().strip(),
+                    category=cat,
                     building_template=vinfo.get("building_template"),
                     recruitment_targets=vinfo.get("recruitment_targets"),
                 )

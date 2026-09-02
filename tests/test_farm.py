@@ -36,9 +36,10 @@ SAMPLE_AM_FARM_HTML = """
     </form>
 
     <table id="plunder_list" class="vis">
-        <!-- Alvo 1: Verde, sem muralha, dist 2.4, ambos disponíveis -->
+        <!-- Alvo 1: Verde, saque cheio (max_loot/1), sem muralha, dist 2.4, ambos disponíveis -->
         <tr id="village_101" class="row_a">
             <td><img src="/graphic/dots/green.png" class="dot green" /></td>
+            <td><img src="/graphic/max_loot/1.png" class="loot_full" /></td>
             <td><a href="/game.php?screen=info_village&amp;id=101">Aldeia Bárbara 1 (451|551)</a></td>
             <td>2.4</td>
             <td class="wall">0</td>
@@ -50,9 +51,11 @@ SAMPLE_AM_FARM_HTML = """
             </td>
         </tr>
 
-        <!-- Alvo 2: Amarelo (perdas), muralha 1, dist 4.8, A disponível, B disabled -->
+        <!-- Alvo 2: Amarelo (perdas), saque parcial (max_loot/0), ataque em trânsito, muralha 1, dist 4.8, A disponível, B disabled -->
         <tr id="village_102" class="row_b">
             <td><img src="/graphic/dots/yellow.png" class="dot yellow" /></td>
+            <td><img src="/graphic/max_loot/0.png" class="loot_partial" /></td>
+            <td><img src="/graphic/command/attack.png" alt="Ataque" class="command_attack" /></td>
             <td><a href="/game.php?screen=info_village&amp;id=102">Aldeia Bárbara 2 (452|552)</a></td>
             <td>4.8</td>
             <td class="wall">1</td>
@@ -78,9 +81,9 @@ SAMPLE_AM_FARM_HTML = """
             </td>
         </tr>
 
-        <!-- Alvo 4: Verde, sem muralha, dist 5.5, apenas A disponível -->
+        <!-- Alvo 4: Azul (exploração), sem muralha, dist 5.5, apenas A disponível -->
         <tr id="village_104" class="row_b">
-            <td><img src="/graphic/dots/green.png" class="dot green" /></td>
+            <td><img src="/graphic/dots/blue.png" class="dot blue" /></td>
             <td><a href="/game.php?screen=info_village&amp;id=104">Aldeia Bárbara 4 (455|553)</a></td>
             <td>5.5</td>
             <td class="wall">0</td>
@@ -103,10 +106,14 @@ class TestFarmParsers(unittest.TestCase):
         self.assertEqual(templates["a"]["spear"], 6)
         self.assertEqual(templates["a"]["spy"], 1)
         self.assertEqual(templates["a"]["light"], 0)
+        # Capacidade Template A: 6 spears * 25 = 150
+        self.assertEqual(templates["haul_capacity"]["a"], 150)
 
         self.assertEqual(templates["b"]["light"], 3)
         self.assertEqual(templates["b"]["spy"], 1)
         self.assertEqual(templates["b"]["spear"], 0)
+        # Capacidade Template B: 3 light * 80 = 240
+        self.assertEqual(templates["haul_capacity"]["b"], 240)
 
     def test_parse_am_farm_targets(self):
         targets = parse_am_farm_targets(SAMPLE_AM_FARM_HTML)
@@ -117,15 +124,21 @@ class TestFarmParsers(unittest.TestCase):
         self.assertEqual(t1["target_coords"], "451|551")
         self.assertEqual(t1["distance"], 2.4)
         self.assertEqual(t1["report_color"], "green")
+        self.assertEqual(t1["loot_status"], "full")
+        self.assertFalse(t1["has_attack_in_transit"])
         self.assertEqual(t1["wall_level"], 0)
         self.assertEqual(t1["template_a_id"], "11")
         self.assertEqual(t1["template_b_id"], "22")
         self.assertTrue(t1["template_a_available"])
         self.assertTrue(t1["template_b_available"])
+        self.assertIn("target=101", t1["action_url_a"])
+        self.assertIn("target=101", t1["action_url_b"])
 
         t2 = targets[1]
         self.assertEqual(t2["target_id"], "102")
         self.assertEqual(t2["report_color"], "yellow")
+        self.assertEqual(t2["loot_status"], "partial")
+        self.assertTrue(t2["has_attack_in_transit"])
         self.assertEqual(t2["wall_level"], 1)
         self.assertTrue(t2["template_a_available"])
         self.assertFalse(t2["template_b_available"])
@@ -133,6 +146,11 @@ class TestFarmParsers(unittest.TestCase):
         t3 = targets[2]
         self.assertEqual(t3["report_color"], "red")
         self.assertEqual(t3["distance"], 18.0)
+        self.assertFalse(t3["has_attack_in_transit"])
+
+        t4 = targets[3]
+        self.assertEqual(t4["report_color"], "blue")
+        self.assertIsNone(t4["action_url_b"])
 
 
 class TestFarmActions(unittest.IsolatedAsyncioTestCase):
@@ -367,6 +385,222 @@ class TestRadarFarming(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["sent_attacks"], 2)
             self.assertEqual(result["total_targets"], 2)
             self.assertEqual(farm_manager.place_manager.send_command.call_count, 2)
+
+    async def test_discover_all_radius_barbarians_merging(self):
+        from engine.actions.map import MapData, MapVillage
+        from engine.core.account import TribalAccount
+        from engine.core.models import VillageData
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.current_village_id = 12345
+        account.villages[12345] = VillageData(id=12345, name="Minha Aldeia", x=450, y=550)
+        account.get_screen = AsyncMock(return_value=SAMPLE_AM_FARM_HTML)
+
+        # Mock do MapManager com 2 bárbaras adicionais fora do AM farm
+        map_mock = AsyncMock()
+        map_mock.get_tactical_map = AsyncMock(
+            return_value=MapData(
+                center_x=450,
+                center_y=550,
+                radius=25.0,
+                villages=[
+                    MapVillage(id=991, x=453, y=553, name="Bárbara Nova 1", player_id=0),
+                    MapVillage(id=992, x=480, y=580, name="Bárbara Muito Longe", player_id=0), # Dist > 25
+                ],
+            )
+        )
+
+        farm_manager = FarmManager(map_manager=map_mock)
+        all_targets = await farm_manager.discover_all_radius_barbarians(
+            account=account,
+            max_distance=20.0,
+            village_id=12345,
+            custom_targets=["454|554"],
+        )
+
+        # Verifica ordenação por distância
+        distances = [t.distance for t in all_targets]
+        self.assertEqual(distances, sorted(distances))
+
+        # Verifica presença de alvos do AM Farm e alvos novos
+        am_farm_targets = [t for t in all_targets if t.is_in_am_farm]
+        new_targets = [t for t in all_targets if not t.is_in_am_farm]
+
+        self.assertTrue(len(am_farm_targets) > 0)
+        # Bárbara 991 (453|553) e Custom (454|554) devem ser incluídas; 992 (dist ~42) deve ser descartada
+        self.assertTrue(any(t.target_coords == "453|553" for t in new_targets))
+        self.assertTrue(any(t.target_coords == "454|554" for t in new_targets))
+        self.assertFalse(any(t.target_coords == "480|580" for t in all_targets))
+
+    async def test_bootstrap_unlisted_barbarian(self):
+        from engine.core.account import TribalAccount
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.current_village_id = 12345
+
+        farm_manager = FarmManager()
+        farm_manager.place_manager.send_command = AsyncMock(return_value=True)
+
+        target = FarmTarget(
+            target_id="999",
+            target_name="Aldeia Bárbara",
+            target_coords="455|555",
+            x=455,
+            y=555,
+            distance=7.0,
+            is_in_am_farm=False,
+        )
+
+        success = await farm_manager.bootstrap_unlisted_barbarian(
+            account=account,
+            target=target,
+            template_troops=UnitsCount(spear=5, spy=1),
+            village_id=12345,
+        )
+
+        self.assertTrue(success)
+        self.assertTrue(target.has_attack_in_transit)
+        self.assertEqual(farm_manager.place_manager.send_command.call_count, 1)
+
+    async def test_run_comprehensive_radius_farm_cycle(self):
+        from engine.actions.map import MapData, MapVillage
+        from engine.core.account import TribalAccount
+        from engine.core.models import VillageData
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.current_village_id = 12345
+        account.villages[12345] = VillageData(id=12345, name="Minha Aldeia", x=450, y=550)
+        account.get_screen = AsyncMock(return_value=SAMPLE_AM_FARM_HTML)
+
+        map_mock = AsyncMock()
+        map_mock.get_tactical_map = AsyncMock(
+            return_value=MapData(
+                center_x=450,
+                center_y=550,
+                radius=25.0,
+                villages=[
+                    MapVillage(id=991, x=453, y=553, name="Bárbara Nova", player_id=0),
+                ],
+            )
+        )
+
+        farm_manager = FarmManager(map_manager=map_mock)
+        farm_manager.send_am_farm_attack = AsyncMock(return_value=True)
+        farm_manager.place_manager.send_command = AsyncMock(return_value=True)
+
+        cfg = FarmConfig(
+            max_distance=20.0,
+            scan_all_radius_barbarians=True,
+            bootstrap_unlisted_barbarians=True,
+            avoid_concurrent_attacks=True,
+            stop_on_losses=True,
+        )
+
+        with patch("asyncio.sleep", AsyncMock()):
+            results = await farm_manager.run_comprehensive_radius_farm_cycle(
+                account=account,
+                config=cfg,
+                village_id=12345,
+            )
+
+            self.assertTrue(results["am_farm_attacks_sent"] >= 2)
+            self.assertTrue(results["bootstrap_attacks_sent"] >= 1)
+            self.assertTrue(results["total_barbarians_in_radius"] >= 3)
+
+    def test_select_optimal_farm_template(self):
+        from engine.actions.farm import select_optimal_farm_template
+
+        haul_capacities = {"a": 150, "b": 240}
+
+        # 1. Alvo com saque cheio -> Deve promover para Modelo B (maior capacidade)
+        t_full = FarmTarget(
+            target_id="101",
+            target_name="Bárbara Cheia",
+            target_coords="451|551",
+            loot_status="full",
+            template_a_id="11",
+            template_b_id="22",
+            template_a_available=True,
+            template_b_available=True,
+        )
+        chosen, t_id = select_optimal_farm_template(t_full, preferred_template="A", haul_capacities=haul_capacities)
+        self.assertEqual(chosen, "B")
+        self.assertEqual(t_id, "22")
+
+        # 2. Alvo com saque parcial -> Deve manter Modelo A (económico)
+        t_partial = FarmTarget(
+            target_id="102",
+            target_name="Bárbara Parcial",
+            target_coords="452|552",
+            loot_status="partial",
+            template_a_id="11",
+            template_b_id="22",
+            template_a_available=True,
+            template_b_available=True,
+        )
+        chosen_p, t_id_p = select_optimal_farm_template(t_partial, preferred_template="B", haul_capacities=haul_capacities)
+        self.assertEqual(chosen_p, "A")
+        self.assertEqual(t_id_p, "11")
+
+        # 3. Fallback: Modelo preferido A indisponível -> Deve usar Modelo B
+        t_fallback = FarmTarget(
+            target_id="103",
+            target_name="Bárbara Fallback",
+            target_coords="453|553",
+            loot_status="partial",
+            template_a_id="11",
+            template_b_id="22",
+            template_a_available=False,
+            template_b_available=True,
+        )
+        chosen_f, t_id_f = select_optimal_farm_template(t_fallback, preferred_template="A", haul_capacities=haul_capacities)
+        self.assertEqual(chosen_f, "B")
+        self.assertEqual(t_id_f, "22")
+
+    def test_get_gaussian_delay(self):
+        from engine.actions.farm import get_gaussian_delay
+
+        for _ in range(50):
+            delay = get_gaussian_delay(min_ms=300, max_ms=800)
+            self.assertTrue(0.30 <= delay <= 0.80)
+
+    async def test_schedule_auto_farm_priority_and_pause(self):
+        from engine.core.account import TribalAccount
+        from engine.core.models import TaskPriority
+        from engine.core.scheduler import TaskScheduler
+
+        scheduler = TaskScheduler()
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.current_village_id = 12345
+
+        farm_manager = FarmManager()
+        cfg = FarmConfig(
+            enabled=True,
+            mode="am_farm",
+            min_interval_seconds=120,
+            max_interval_seconds=300,
+        )
+
+        farm_manager.schedule_auto_farm(
+            scheduler=scheduler,
+            account=account,
+            farm_config=cfg,
+            village_id=12345,
+        )
+
+        # Verifica agendamento inicial com TaskPriority.FARM = 20
+        self.assertEqual(scheduler.pending_count, 1)
+        next_task = scheduler.queue.get_nowait()
+        self.assertIsNotNone(next_task)
+        self.assertEqual(next_task.priority, TaskPriority.FARM)
+        self.assertEqual(int(next_task.priority), 20)
+
+        # Testa auto-pausa quando a conta está pausada
+        account.is_paused = True
+        farm_manager.run_comprehensive_radius_farm_cycle = AsyncMock()
+        await next_task.action()
+        # Não deve executar o ciclo se a conta estiver pausada
+        farm_manager.run_comprehensive_radius_farm_cycle.assert_not_called()
 
 
 if __name__ == "__main__":

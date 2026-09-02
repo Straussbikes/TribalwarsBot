@@ -849,24 +849,26 @@ body {
   box-shadow: 0 0 10px var(--neon-cyan-glow);
 }
 
-/* Captcha Alert Modal Overlay */
+/* Captcha & Global Modal Overlay */
 .modal-overlay {
   position: fixed;
   inset: 0;
   background: rgba(5, 7, 13, 0.85);
   backdrop-filter: blur(8px);
-  display: flex;
+  display: none;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 2000;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.25s ease;
 }
 
-.modal-overlay.active {
-  opacity: 1;
-  pointer-events: all;
+.modal-overlay.active,
+.modal-overlay[style*="display: flex"] {
+  display: flex !important;
+  opacity: 1 !important;
+  pointer-events: all !important;
 }
 
 .modal-box {
@@ -1649,5 +1651,91 @@ body {
   font-size: 0.72rem;
   font-weight: 700;
 }
+
+/* --- Assistente de Saque & Farm (Fase 4 Cockpit UI) --- */
+.farm-subtab-btn {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-glass);
+  color: var(--text-muted);
+  padding: 8px 18px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.farm-subtab-btn:hover {
+  background: rgba(30, 41, 59, 0.8);
+  color: var(--text-main);
+  border-color: rgba(6, 182, 212, 0.4);
+}
+
+.farm-subtab-btn.active {
+  background: var(--gradient-primary);
+  color: #fff;
+  border-color: var(--neon-purple);
+  box-shadow: 0 4px 16px rgba(168, 85, 247, 0.35);
+}
+
+.farm-report-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.farm-report-green { background: #10b981; box-shadow: 0 0 8px #10b981; }
+.farm-report-blue { background: #06b6d4; box-shadow: 0 0 8px #06b6d4; }
+.farm-report-yellow { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
+.farm-report-red { background: #f43f5e; box-shadow: 0 0 8px #f43f5e; }
+.farm-report-none { background: #64748b; }
+
+.delta-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.delta-stagnant {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.delta-regressive {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.delta-residual {
+  background: rgba(6, 182, 212, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(6, 182, 212, 0.3);
+}
+
+.delta-growing {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.filter-chip-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 
 

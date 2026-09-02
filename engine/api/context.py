@@ -13,6 +13,7 @@ from fastapi import WebSocket
 
 from engine.actions.economic_arbitrage import EconomicArbitrageManager
 from engine.actions.farm import FarmManager
+from engine.actions.inactivity_tracker import InactivityFilterConfig, InactivityTracker
 from engine.actions.main_building import MainBuildingManager
 from engine.actions.map import MapData, MapManager
 from engine.actions.market import MarketManager
@@ -20,6 +21,7 @@ from engine.actions.place import PlaceManager, UnitsCount
 from engine.actions.quest import QuestManager
 from engine.actions.recruitment import RecruitmentManager
 from engine.actions.village_coordinator import MultiVillageCoordinator
+from engine.actions.world_data import WorldDataWorker
 from engine.config.settings import BotConfig
 from engine.core.account import TribalAccount
 from engine.core.models import TaskPriority
@@ -27,6 +29,7 @@ from engine.core.multi_world import MultiWorldManager, WorldInstance
 from engine.core.profile_manager import AccountProfile, ProfileManager
 from engine.core.scheduler import TaskScheduler
 from engine.core.stats import StatsTracker
+from engine.storage.world_database import WorldDatabase
 
 
 logger = logging.getLogger(__name__)
@@ -99,6 +102,25 @@ class EngineContext:
         self.stats_trackers: Dict[str, StatsTracker] = {}
         self.stats_tracker = StatsTracker(world=self.config.world)
         self.stats_trackers[self.config.world] = self.stats_tracker
+        if self.account:
+            self.account.stats_tracker = self.stats_tracker
+
+        # Gestor de Dados do Mundo e Radar de Inativos
+        self.world_database = WorldDatabase()
+        self.world_data_worker = WorldDataWorker(db=self.world_database)
+        self.inactivity_tracker = InactivityTracker(db=self.world_database)
+
+        # Agendamento periódico contínuo de recolha de dados de mundo (background timeline)
+        if self.scheduler and self.config.world:
+            try:
+                self.world_data_worker.schedule_periodic_sync(
+                    scheduler=self.scheduler,
+                    world=self.config.world,
+                    domain=self.config.domain,
+                    interval_hours=3.0,
+                )
+            except Exception as e:
+                logger.debug(f"Aviso ao agendar sync periódico de mundo: {e}")
 
         # Estado e estatísticas
         self.start_time = time.time()
@@ -290,13 +312,22 @@ class EngineContext:
 
         async def _run():
             targets = self.config.get_village_recruitment_targets(village_id=str(v_id))
-            await self.recruitment_manager.run_recruitment_cycle(
+            res = await self.recruitment_manager.run_recruitment_cycle(
                 account=self.account,
                 targets=targets,
                 batch_sizes=self.config.recruitment.batch_sizes,
                 min_free_pop=self.config.recruitment.min_free_pop,
                 village_id=v_id,
             )
+            # Atualiza estado da aldeia e emite eventos WebSocket para a interface
+            await self.account.refresh_state()
+            if v_id:
+                await self.account.refresh_village_details(v_id)
+            self.broadcast_sync("VILLAGE_UPDATED", self.get_status_dict())
+            rec_state = await self.get_recruitment_state(v_id)
+            self.broadcast_sync("RECRUITMENT_CYCLE_EXECUTED", rec_state)
+            self.broadcast_sync("RECRUITMENT_UPDATED", rec_state)
+            return res
 
         self.scheduler.schedule(
             name=f"ManualRecruit-Village-{target_village}",
@@ -444,7 +475,8 @@ class EngineContext:
                     "pop_max": curr_v.resources.pop_max,
                     "free_pop": curr_v.resources.free_pop,
                 }
-                troops_dict = getattr(curr_v, "troops", {}) or {}
+                troops_raw = getattr(curr_v, "troops", None)
+                troops_dict = troops_raw.to_dict() if hasattr(troops_raw, "to_dict") else (troops_raw or {})
                 village_data = {
                     "id": curr_v.id,
                     "name": curr_v.name,
@@ -472,8 +504,11 @@ class EngineContext:
         total_troops_dict = {}
 
         if self.account:
-            vill_objs = list(self.account.villages.values())
-            if not vill_objs and self.account.current_village:
+            vill_objs = [
+                v for v in self.account.villages.values()
+                if v.id > 0 and not (v.x == 0 and v.y == 0 and v.name.lower() in ("farm", "fazenda"))
+            ]
+            if not vill_objs and self.account.current_village and self.account.current_village.id > 0:
                 vill_objs = [self.account.current_village]
             for v in vill_objs:
                 v_dict = v.to_dict()
@@ -490,9 +525,11 @@ class EngineContext:
                     total_resources_dict["pop"] += v.resources.pop
                     total_resources_dict["pop_max"] += v.resources.pop_max
                     total_resources_dict["free_pop"] += v.resources.free_pop
-                v_troops = getattr(v, "troops", {}) or {}
-                for u_name, u_qty in v_troops.items():
-                    total_troops_dict[u_name] = total_troops_dict.get(u_name, 0) + (u_qty or 0)
+                raw_v_troops = getattr(v, "troops", None)
+                v_troops = raw_v_troops.to_dict() if hasattr(raw_v_troops, "to_dict") else (raw_v_troops or {})
+                if isinstance(v_troops, dict):
+                    for u_name, u_qty in v_troops.items():
+                        total_troops_dict[u_name] = total_troops_dict.get(u_name, 0) + (u_qty or 0)
 
         # Se só temos 1 aldeia ou os totais forem 0, usa os recursos da aldeia atual
         if total_resources_dict["storage_max"] == 0 and resources_dict:
@@ -668,6 +705,14 @@ class EngineContext:
                 "max_merchants_percent": getattr(self.config.market, "max_merchant_ratio", 0.80),
                 "max_merchant_ratio": getattr(self.config.market, "max_merchant_ratio", 0.80),
             },
+            "villages": {
+                str(vid): {
+                    "category": str(vcfg.category).lower().strip() if getattr(vcfg, "category", None) else "attack",
+                    "building_template": getattr(vcfg, "building_template", None),
+                    "recruitment_targets": getattr(vcfg, "recruitment_targets", None),
+                }
+                for vid, vcfg in self.config.villages.items()
+            },
         }
 
     async def switch_village(self, village_id: int) -> Dict[str, Any]:
@@ -690,187 +735,10 @@ class EngineContext:
             logger.error(f"Erro ao alternar para aldeia {village_id}: {e}")
             return {"status": "error", "message": str(e)}
 
-    # --- Gestor de Perfis de Conta & Bloqueio Monousuário (Single-Active Profile Lock) ---
+    # --- Aliases e Utilitários de Perfis ---
 
-    def list_accounts(self) -> List[Dict[str, Any]]:
-        """Lista todas as contas registadas no sistema."""
-        return self.profile_manager.list_profiles()
-
-    def get_account(self, account_id: str) -> Optional[Dict[str, Any]]:
-        """Obtém detalhes de uma conta específica."""
-        prof = self.profile_manager.get_profile(account_id)
-        return prof.to_dict(include_plain_password=False) if prof else None
-
-    def create_account(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Cria um novo perfil de conta e guarda isoladamente em profiles/{id}.json."""
-        prof = AccountProfile.from_dict(data)
-        self.profile_manager.save_profile(prof)
-        self.broadcast_sync("ACCOUNTS_UPDATED", {"accounts": self.profile_manager.list_profiles()})
-        return {"status": "success", "message": f"Conta '{prof.name}' criada com sucesso.", "account": prof.to_dict()}
-
-    def update_account(self, account_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Atualiza configurações de uma conta existente."""
-        prof = self.profile_manager.get_profile(account_id)
-        if not prof:
-            return {"status": "error", "message": f"Conta com ID '{account_id}' não encontrada."}
-
-        for k, v in data.items():
-            if hasattr(prof, k) and v is not None:
-                setattr(prof, k, v)
-        
-        prof.__post_init__()
-        self.profile_manager.save_profile(prof)
-
-        # Se for a conta ativa no momento, reflete na configuração e na sessão
-        if self.active_profile_id == account_id:
-            self.config.world = prof.world
-            self.config.domain = prof.domain
-            self.config.sid = prof.sid
-            self.config.proxy = prof.proxy
-            self.config.building.template = prof.build_order_strategy
-            if self.account:
-                self.account.world = prof.world
-                self.account.domain = prof.domain
-                self.account.sid = prof.sid
-                self.account.proxy = prof.proxy
-
-        self.broadcast_sync("ACCOUNTS_UPDATED", {"accounts": self.profile_manager.list_profiles()})
-        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
-        return {"status": "success", "message": f"Conta '{prof.name}' atualizada com sucesso.", "account": prof.to_dict()}
-
-    async def delete_account(self, account_id: str) -> Dict[str, Any]:
-        """Remove o perfil da conta."""
-        if self.active_profile_id == account_id:
-            await self.disconnect_account()
-
-        success = self.profile_manager.delete_profile(account_id)
-        if success:
-            self.broadcast_sync("ACCOUNTS_UPDATED", {"accounts": self.profile_manager.list_profiles()})
-            return {"status": "success", "message": f"Conta '{account_id}' eliminada com sucesso."}
-        return {"status": "error", "message": f"Conta '{account_id}' não encontrada."}
-
-    async def activate_account(self, account_id: str) -> Dict[str, Any]:
-        """
-        Bloqueio Monousuário Estrito (Single-Active Session):
-        Para o agendador e limpa a sessão da conta anterior, instancia o novo cliente isolado
-        com as credenciais da conta selecionada e inicializa o motor.
-        """
-        async with self._account_lock:
-            target = self.profile_manager.get_profile(account_id)
-            if not target:
-                return {"status": "error", "message": f"Conta '{account_id}' não encontrada."}
-
-            logger.info(f"🔄 A ativar perfil de conta: '{target.name}' ({target.world.upper()})...")
-
-            # 1. Para e limpa o agendador da conta anterior
-            if self.scheduler:
-                try:
-                    await self.scheduler.stop()
-                    logger.info("Agendador anterior parado com sucesso.")
-                except Exception as e:
-                    logger.debug(f"Aviso ao parar agendador anterior: {e}")
-
-            # 2. Fecha e limpa a sessão HTTP anterior
-            if self.account:
-                try:
-                    await self.account.close()
-                    logger.info("Sessão HTTP da conta anterior encerrada.")
-                except Exception as e:
-                    logger.debug(f"Aviso ao fechar sessão HTTP anterior: {e}")
-
-            # 3. Marca este perfil como o único ativo
-            self.profile_manager.set_active_profile(account_id)
-            self.active_profile_id = account_id
-
-            # 4. Atualiza BotConfig com as definições agregadas do perfil no SQLite
-            self.config = target.to_bot_config()
-
-            # 5. Instancia um novo agendador limpo para esta conta
-            self.scheduler = TaskScheduler(f"Scheduler-{target.world}")
-
-            async def on_bot_detected(err: Any):
-                logger.critical(f"⚠️ CAPTCHA detetado na conta {target.name}: {err}")
-                await self.notify_captcha_detected(err if isinstance(err, dict) else {"message": str(err)})
-
-            async def on_session_expired(err: Any):
-                logger.critical(f"⚠️ Sessão expirada na conta {target.name}: {err}")
-
-            self.scheduler.on_bot_protection(on_bot_detected)
-            self.scheduler.on_session_expired(on_session_expired)
-
-            # 6. Instancia uma nova conta TribalAccount
-            self.account = TribalAccount(
-                world=target.world,
-                sid=target.sid or target.session_cookie,
-                domain=target.domain,
-                proxy=target.proxy,
-            )
-
-            # 7. Atualiza orquestradores e instâncias de mundo
-            self.world_manager.instances.clear()
-            self.world_manager.instances[target.world] = WorldInstance(
-                world=target.world,
-                account=self.account,
-                scheduler=self.scheduler,
-                config=self.config,
-                coordinator=self.village_coordinator,
-                is_active=True,
-            )
-            self.world_manager.active_world = target.world
-
-            # 8. Inicializa a sessão HTTP e lê o estado da aldeia
-            try:
-                if self.account.sid:
-                    await self.account.init_session()
-                    await self.account.refresh_state()
-                    logger.info(f"Conta '{target.name}' conectada com sucesso ao mundo {target.world.upper()}.")
-            except Exception as e:
-                logger.warning(f"Aviso ao inicializar sessão de {target.name}: {e}")
-
-            status = self.get_status_dict()
-            self.broadcast_sync("ACCOUNT_ACTIVATED", {"account_id": account_id, "account": target.to_dict()})
-            self.broadcast_sync("STATUS_UPDATE", status)
-
-            return {
-                "status": "success",
-                "message": f"Conta '{target.name}' ({target.world.upper()}) ativada com sucesso.",
-                "account": target.to_dict(),
-                "status_data": status,
-            }
-
-    async def disconnect_account(self) -> Dict[str, Any]:
-        """Para a execução da conta ativa e liberta a sessão, regressando ao Hub inicial."""
-        async with self._account_lock:
-            if self.scheduler:
-                try:
-                    await self.scheduler.stop()
-                except Exception as e:
-                    logger.debug(f"Erro ao parar agendador: {e}")
-
-            if self.account:
-                try:
-                    await self.account.close()
-                except Exception as e:
-                    logger.debug(f"Erro ao fechar sessão: {e}")
-
-            # Desmarca qualquer perfil ativo
-            for p in self.profile_manager.profiles.values():
-                if p.is_active:
-                    p.is_active = False
-                    self.profile_manager.save_profile(p)
-
-            self.active_profile_id = None
-            self.account = None
-            self.world_manager.instances.clear()
-
-            status = self.get_status_dict()
-            self.broadcast_sync("ACCOUNT_DISCONNECTED", {})
-            self.broadcast_sync("STATUS_UPDATE", status)
-            logger.info("Conta desconectada com sucesso. Retornando ao Hub de Contas.")
-            return {"status": "success", "message": "Conta desconectada com sucesso."}
-
-    # Aliases de compatibilidade
     def list_profiles(self) -> List[Dict[str, Any]]:
+        """Alias para list_accounts."""
         return self.list_accounts()
 
     async def switch_profile(self, profile_id: str) -> Dict[str, Any]:
@@ -981,28 +849,34 @@ class EngineContext:
     # --- Rotas Multi-Aldeia & Categorização ---
 
     def set_village_category(self, village_id: int, category: str, world: Optional[str] = None) -> Dict[str, Any]:
-        """Atribui categoria (attack, defense, balanced) a uma aldeia e persiste no config.json."""
+        """Atribui tipo de aldeia (estritamente 'attack' ou 'defense') a uma aldeia e persiste no SQLite."""
         inst = self.world_manager.get_instance(world)
         acc = inst.account if inst else self.account
         cfg = inst.config if inst else self.config
         if not acc:
             return {"status": "error", "message": "Conta não inicializada."}
 
-        success = self.village_coordinator.set_village_category(acc, cfg, village_id, category)
+        raw = str(category).lower().strip()
+        norm_cat = "defense" if "def" in raw else "attack"
+
+        success = self.village_coordinator.set_village_category(acc, cfg, village_id, norm_cat)
         if success:
             new_v_data = {
                 "villages": {
                     str(village_id): {
-                        "category": category.lower().strip(),
+                        "category": norm_cat,
                     }
                 }
             }
             self.update_config_and_save(new_v_data)
             self.broadcast_sync("VILLAGE_CATEGORY_UPDATED", {
                 "village_id": village_id,
-                "category": category,
+                "category": norm_cat,
             })
-            return {"status": "success", "message": f"Aldeia {village_id} categorizada como '{category}'."}
+            status = self.get_status_dict()
+            self.broadcast_sync("STATUS_UPDATE", status)
+            self.broadcast_sync("VILLAGE_UPDATED", status)
+            return {"status": "success", "message": f"Aldeia {village_id} categorizada como '{norm_cat}'."}
         return {"status": "error", "message": "Falha ao definir categoria."}
 
     async def sync_and_get_all_villages(self, world: Optional[str] = None, force_sync: bool = True) -> Dict[str, Any]:
@@ -1020,8 +894,11 @@ class EngineContext:
                 logger.debug(f"[{acc.world}] Erro suave ao sincronizar aldeias: {e}")
 
         villages_data = []
-        vill_list = list(acc.villages.values())
-        if not vill_list and acc.current_village:
+        vill_list = [
+            v for v in acc.villages.values()
+            if v.id > 0 and not (v.x == 0 and v.y == 0 and v.name.lower() in ("farm", "fazenda"))
+        ]
+        if not vill_list and acc.current_village and acc.current_village.id > 0:
             vill_list = [acc.current_village]
         for v in vill_list:
             cat = self.village_coordinator.get_village_category(acc, cfg, v.id)
@@ -1093,23 +970,6 @@ class EngineContext:
             logger.error(f"Erro ao carregar mapa: {e}")
             return {"status": "error", "message": str(e), "villages": []}
 
-    def add_custom_farm_target(self, x: int, y: int) -> Dict[str, Any]:
-        """Adiciona uma coordenada [x, y] à lista de alvos de farm e persiste no config.json."""
-        target_pair = (int(x), int(y))
-        if target_pair not in self.config.farm.custom_targets:
-            self.config.farm.custom_targets.append(target_pair)
-            targets_list = [list(t) for t in self.config.farm.custom_targets]
-            self.update_config_and_save({"farm": {"custom_targets": targets_list}})
-            return {
-                "status": "success",
-                "message": f"Alvo ({x}|{y}) adicionado com sucesso aos alvos de farm.",
-                "custom_targets": targets_list,
-            }
-        return {
-            "status": "info",
-            "message": f"Alvo ({x}|{y}) já constava nos alvos de farm.",
-            "custom_targets": [list(t) for t in self.config.farm.custom_targets],
-        }
 
     async def send_quick_attack(
         self,
@@ -1258,12 +1118,14 @@ class EngineContext:
 
     # --- Métricas & Estatísticas de Eficiência ---
 
-    def get_stats_tracker(self, world: Optional[str] = None) -> StatsTracker:
-        """Obtém ou instancia o rastreador de estatísticas do mundo ativo/solicitado."""
+    def get_stats_tracker(self, world: Optional[str] = None, account_id: Optional[str] = None) -> StatsTracker:
+        """Obtém ou instancia o rastreador de estatísticas da conta e mundo ativos/solicitados."""
         target_world = world or (self.world_manager.active_world if hasattr(self, "world_manager") else None) or self.config.world
-        if target_world not in self.stats_trackers:
-            self.stats_trackers[target_world] = StatsTracker(world=target_world)
-        return self.stats_trackers[target_world]
+        target_acc = account_id or self.active_profile_id or getattr(self.account, "username", None) or (self.account.player.name if self.account and self.account.player else "default")
+        tracker_key = f"{target_acc}_{target_world}"
+        if tracker_key not in self.stats_trackers:
+            self.stats_trackers[tracker_key] = StatsTracker(world=target_world, account_id=target_acc)
+        return self.stats_trackers[tracker_key]
 
     def get_stats_summary(self, world: Optional[str] = None) -> Dict[str, Any]:
         """Retorna resumo consolidado de estatísticas e KPIs de rendimento."""
@@ -1422,6 +1284,41 @@ class EngineContext:
         }
 
     # --- Recrutamento Militar & Tropas em Treino ---
+
+    def toggle_recruitment_module(
+        self,
+        enabled: Optional[bool] = None,
+        interval_minutes: Optional[float] = None,
+        min_free_pop: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Ativa/desativa ou ajusta a rotina de auto-recrutamento contínuo."""
+        update_data = {}
+        if enabled is not None:
+            update_data["enabled"] = bool(enabled)
+            self.config.recruitment.enabled = bool(enabled)
+        if interval_minutes is not None:
+            update_data["interval_minutes"] = float(interval_minutes)
+            self.config.recruitment.interval_minutes = float(interval_minutes)
+        if min_free_pop is not None:
+            update_data["min_free_pop"] = int(min_free_pop)
+            self.config.recruitment.min_free_pop = int(min_free_pop)
+
+        self.update_config_and_save({"recruitment": update_data})
+        if self.config.recruitment.enabled and self.account and self.scheduler:
+            self.recruitment_manager.schedule_auto_recruit(
+                scheduler=self.scheduler,
+                account=self.account,
+                recruit_config=self.config.recruitment,
+                enabled_check=lambda: self.config.recruitment.enabled,
+                bot_config=self.config,
+            )
+        self.broadcast_sync("MODULE_TOGGLED", {"module": "recruitment", "enabled": self.config.recruitment.enabled})
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success",
+            "message": f"Recrutamento Automático {'ATIVADO' if self.config.recruitment.enabled else 'DESATIVADO'}.",
+            "enabled": self.config.recruitment.enabled,
+        }
 
     async def get_recruitment_state(self, village_id: Optional[int] = None) -> Dict[str, Any]:
         """Consulta o estado das filas de treino e unidades disponíveis nos edifícios militares."""
@@ -1710,77 +1607,7 @@ class EngineContext:
         """Remove um modelo de tropas customizado do SQLite e da configuração."""
         return self.delete_recruitment_model_db(model_name.lower().strip())
 
-    def toggle_recruitment_module(
-        self,
-        enabled: Optional[bool] = None,
-        interval_minutes: Optional[float] = None,
-        min_free_pop: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """Ativa/desativa ou ajusta a rotina de recrutamento militar contínuo."""
-        update_data = {}
-        if enabled is not None:
-            update_data["enabled"] = bool(enabled)
-            self.config.recruitment.enabled = bool(enabled)
-        if interval_minutes is not None:
-            update_data["interval_minutes"] = float(interval_minutes)
-            self.config.recruitment.interval_minutes = float(interval_minutes)
-        if min_free_pop is not None:
-            update_data["min_free_pop"] = int(min_free_pop)
-            self.config.recruitment.min_free_pop = int(min_free_pop)
 
-        self.update_config_and_save({"recruitment": update_data})
-        if self.config.recruitment.enabled and self.account and self.scheduler:
-            self.recruitment_manager.schedule_auto_recruit(
-                scheduler=self.scheduler,
-                account=self.account,
-                recruit_config=self.config.recruitment,
-                enabled_check=lambda: self.config.recruitment.enabled,
-                bot_config=self.config,
-            )
-        self.broadcast_sync("MODULE_TOGGLED", {"module": "recruitment", "enabled": self.config.recruitment.enabled})
-        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
-        return {
-            "status": "success",
-            "message": f"Recrutamento Automático {'ATIVADO' if self.config.recruitment.enabled else 'DESATIVADO'}.",
-            "enabled": self.config.recruitment.enabled,
-        }
-
-    def toggle_farm_module(
-        self,
-        enabled: Optional[bool] = None,
-        mode: Optional[str] = None,
-        template: Optional[str] = None,
-        max_distance: Optional[float] = None,
-    ) -> Dict[str, Any]:
-        """Ativa/desativa ou ajusta a rotina de micro-farming contínuo."""
-        update_data = {}
-        if enabled is not None:
-            update_data["enabled"] = bool(enabled)
-            self.config.farm.enabled = bool(enabled)
-        if mode is not None:
-            update_data["mode"] = str(mode)
-            self.config.farm.mode = str(mode)
-        if template is not None:
-            update_data["template"] = str(template)
-            self.config.farm.template = str(template)
-        if max_distance is not None:
-            update_data["max_distance"] = float(max_distance)
-            self.config.farm.max_distance = float(max_distance)
-
-        self.update_config_and_save({"farm": update_data})
-        if self.config.farm.enabled and self.account and self.scheduler:
-            self.farm_manager.schedule_auto_farm(
-                scheduler=self.scheduler,
-                account=self.account,
-                farm_config=self.config.farm,
-            )
-        self.broadcast_sync("MODULE_TOGGLED", {"module": "farm", "enabled": self.config.farm.enabled})
-        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
-        return {
-            "status": "success",
-            "message": f"Micro-Farming {'ATIVADO' if self.config.farm.enabled else 'DESATIVADO'}.",
-            "enabled": self.config.farm.enabled,
-        }
 
     def toggle_quest_module(
         self,
@@ -1969,6 +1796,11 @@ class EngineContext:
         """Lista todas as contas guardadas a partir da base de dados SQLite."""
         return self.profile_manager.list_profiles()
 
+    def get_account(self, account_id: str) -> Optional[Dict[str, Any]]:
+        """Obtém detalhes de uma conta específica."""
+        prof = self.profile_manager.get_profile(account_id)
+        return prof.to_dict(include_plain_password=False) if prof else None
+
     def create_account(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Cria um novo perfil de conta isolado na base de dados SQLite."""
         prof = AccountProfile.from_dict(data)
@@ -2054,6 +1886,7 @@ class EngineContext:
                 domain=prof.domain,
                 proxy=prof.proxy,
             )
+            account.stats_tracker = self.get_stats_tracker(prof.world)
             self.account = account
 
             if self.config.sid:
@@ -2086,6 +1919,14 @@ class EngineContext:
                         scheduler=self.scheduler,
                         account=self.account,
                         recruit_config=self.config.recruitment,
+                        bot_config=self.config,
+                    )
+                # Auto-Farm
+                if self.config.farm.enabled:
+                    self.farm_manager.schedule_auto_farm(
+                        scheduler=self.scheduler,
+                        account=self.account,
+                        farm_config=self.config.farm,
                         bot_config=self.config,
                     )
                 if not self.scheduler.is_running:
@@ -2135,6 +1976,517 @@ class EngineContext:
 
             logger.info("Conta desconectada. Motor em modo Standby / Offline.")
             return {"status": "success", "message": "Conta desconectada com sucesso."}
+
+    # --- Métodos de Controlo do Assistente de Saque & Farm (/api/farm/*) ---
+
+    def get_farm_status(self, world: Optional[str] = None) -> Dict[str, Any]:
+        """Retorna o estado detalhado do módulo de farm e tropas disponíveis."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        cfg = inst.config if inst else self.config
+        sch = inst.scheduler if inst else self.scheduler
+
+        v_id = acc.current_village_id if acc else 0
+        curr_v = acc.villages.get(v_id) if acc and v_id else None
+        coords = f"{curr_v.x}|{curr_v.y}" if curr_v else "0|0"
+        troops_raw = getattr(curr_v, "troops", None) if curr_v else None
+        troops = troops_raw.to_dict() if hasattr(troops_raw, "to_dict") else (troops_raw or {})
+
+        return {
+            "status": "success",
+            "world": acc.world if acc else cfg.world,
+            "village_id": v_id,
+            "village_coords": coords,
+            "enabled": bool(getattr(cfg.farm, "enabled", True)),
+            "default_template": getattr(cfg.farm, "default_template", "A"),
+            "max_distance": getattr(cfg.farm, "max_distance", 25.0),
+            "scan_all_radius_barbarians": getattr(cfg.farm, "scan_all_radius_barbarians", True),
+            "bootstrap_unlisted_barbarians": getattr(cfg.farm, "bootstrap_unlisted_barbarians", True),
+            "min_interval_seconds": getattr(cfg.farm, "min_interval_seconds", 45.0),
+            "max_interval_seconds": getattr(cfg.farm, "max_interval_seconds", 90.0),
+            "avoid_concurrent_attacks": getattr(cfg.farm, "avoid_concurrent_attacks", True),
+            "stop_on_losses": getattr(cfg.farm, "stop_on_losses", True),
+            "custom_targets": getattr(cfg.farm, "custom_targets", []),
+            "available_troops": troops,
+            "is_scheduler_running": sch.is_running and not sch.is_paused if sch else False,
+        }
+
+    def toggle_farm_module(
+        self,
+        enabled: Optional[bool] = None,
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Liga ou desliga o envio contínuo de saques."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        cfg = inst.config if inst else self.config
+        sch = inst.scheduler if inst else self.scheduler
+
+        if enabled is not None:
+            cfg.farm.enabled = bool(enabled)
+            self.update_config_and_save({"farm": {"enabled": bool(enabled)}})
+
+        if cfg.farm.enabled and acc and sch:
+            self.farm_manager.schedule_auto_farm(
+                scheduler=sch,
+                account=acc,
+                farm_config=cfg.farm,
+                bot_config=cfg,
+            )
+
+        self.broadcast_sync("MODULE_TOGGLED", {"module": "farm", "enabled": cfg.farm.enabled, "world": cfg.world})
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success",
+            "message": f"Módulo de farm {'ativado' if cfg.farm.enabled else 'desativado'}.",
+            "enabled": cfg.farm.enabled,
+        }
+
+    async def trigger_farm_cycle(
+        self,
+        force: bool = True,
+        village_id: Optional[int] = None,
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Dispara uma ronda imediata e assíncrona de saques."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        cfg = inst.config if inst else self.config
+        if not acc:
+            return {"status": "error", "message": "Conta não inicializada."}
+
+        target_v_id = village_id or acc.current_village_id
+        if target_v_id and target_v_id != acc.current_village_id:
+            await acc.switch_village(target_v_id)
+
+        res = await self.farm_manager.run_comprehensive_radius_farm_cycle(
+            account=acc,
+            config=cfg.farm,
+            village_id=target_v_id,
+        )
+        total_attacks = res.get("am_farm_attacks_sent", 0) + res.get("bootstrap_attacks_sent", 0)
+        self.broadcast_sync("FARM_CYCLE_DONE", res)
+        return {
+            "status": "success",
+            "message": f"Ciclo de farm concluído: {total_attacks} ataques enviados ({res.get('am_farm_attacks_sent', 0)} AM Farm, {res.get('bootstrap_attacks_sent', 0)} Praça).",
+            "results": res,
+        }
+
+    def update_farm_configuration(
+        self,
+        payload: Dict[str, Any],
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Atualiza e persiste os parâmetros operacionais do Assistente de Saque."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        cfg = inst.config if inst else self.config
+        sch = inst.scheduler if inst else self.scheduler
+
+        farm_dict = cfg.farm.to_dict() if hasattr(cfg.farm, "to_dict") else {}
+        for k, v in payload.items():
+            if hasattr(cfg.farm, k) and v is not None:
+                setattr(cfg.farm, k, v)
+                farm_dict[k] = v
+
+        self.update_config_and_save({"farm": farm_dict})
+        if cfg.farm.enabled and acc and sch:
+            self.farm_manager.schedule_auto_farm(
+                scheduler=sch,
+                account=acc,
+                farm_config=cfg.farm,
+                bot_config=cfg,
+            )
+        self.broadcast_sync("FARM_CONFIG_UPDATED", {"farm": farm_dict})
+        return {
+            "status": "success",
+            "message": "Configurações de Farm atualizadas com sucesso.",
+            "farm": farm_dict,
+        }
+
+    async def update_farm_template(
+        self,
+        template: str,
+        units: Dict[str, int],
+        village_id: Optional[int] = None,
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Atualiza a configuração de tropas do Modelo A ou B no jogo e persiste na base local."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        cfg = inst.config if inst else self.config
+        if not acc:
+            return {"status": "error", "message": "Conta não inicializada."}
+
+        target_v_id = village_id or acc.current_village_id
+        tmpl_key = template.lower().strip()
+
+        # 1. Atualiza e persiste na configuração do bot
+        clean_units = {u: max(0, int(qty)) for u, qty in units.items()}
+        if tmpl_key == "a":
+            cfg.farm.template_a_troops = clean_units.copy()
+        elif tmpl_key == "b":
+            cfg.farm.template_b_troops = clean_units.copy()
+
+        self.update_config_and_save({
+            "farm": {
+                f"template_{tmpl_key}_troops": clean_units
+            }
+        })
+
+        # 2. Grava nos servidores do jogo (screen=am_farm&action=edit_all)
+        res = await self.farm_manager.save_am_farm_template(
+            account=acc,
+            template=template,
+            units=clean_units,
+            village_id=target_v_id,
+        )
+        self.broadcast_sync("FARM_TEMPLATES_UPDATED", res)
+        return res
+
+    async def get_farm_targets(
+        self,
+        radius: Optional[float] = None,
+        limit: int = 100,
+        village_id: Optional[int] = None,
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Lista as aldeias bárbaras mapeadas no Assistente de Saque e no raio."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        cfg = inst.config if inst else self.config
+        if not acc:
+            return {"status": "error", "message": "Conta não inicializada.", "targets": []}
+
+        target_v_id = village_id or acc.current_village_id
+        if target_v_id and target_v_id != acc.current_village_id:
+            await acc.switch_village(target_v_id)
+
+        try:
+            # 1. Carrega o estado do AM Farm (modelos A/B)
+            am_state = await self.farm_manager.get_am_farm_state(acc, village_id=target_v_id)
+            max_dist = radius or cfg.farm.max_distance
+
+            # 2. Descobre TODAS as bárbaras no raio configurado (AM Farm + Mapa + Cache local)
+            all_barbarians = await self.farm_manager.discover_all_radius_barbarians(
+                account=acc,
+                max_distance=max_dist,
+                village_id=target_v_id,
+                custom_targets=cfg.farm.custom_targets,
+            )
+
+            targets_data = []
+            for t in all_barbarians:
+                travel_sec = int(round(t.distance * 600))
+                is_in_am = getattr(t, "is_in_am_farm", True)
+                in_transit = t.has_attack_in_transit or (t.target_coords in self.farm_manager._recent_farm_targets)
+                targets_data.append({
+                    "village_id": t.target_id,
+                    "name": t.target_name,
+                    "coordinates": t.target_coords,
+                    "distance": t.distance,
+                    "last_report_color": t.report_color,
+                    "loot_status": t.loot_status,
+                    "wall_level": t.wall_level,
+                    "has_attack_in_transit": in_transit,
+                    "is_in_am_farm": is_in_am,
+                    "travel_time_cl_str": f"{travel_sec // 60}m {travel_sec % 60}s",
+                    "can_attack_a": bool(t.template_a_available or t.action_url_a or not is_in_am),
+                    "can_attack_b": bool(t.template_b_available or t.action_url_b),
+                })
+                if len(targets_data) >= limit:
+                    break
+
+            return {
+                "status": "success",
+                "count": len(targets_data),
+                "template_a": am_state.template_a_troops,
+                "template_b": am_state.template_b_troops,
+                "targets": targets_data,
+            }
+        except Exception as e:
+            logger.error(f"Erro ao obter alvos de farm: {e}")
+            return {"status": "error", "message": str(e), "targets": []}
+
+    # --- Métodos de Controlo do Radar de Inativos (/api/radar/*) ---
+
+    def get_radar_inactives(
+        self,
+        world: Optional[str] = None,
+        max_distance: float = 25.0,
+        days_window: float = 7.0,
+        max_points_growth: int = 30,
+        min_points: int = 200,
+        max_points: int = 6000,
+        only_tribeless: bool = False,
+        include_single_member_tribes: bool = True,
+        include_barbarians: bool = False,
+        search_query: Optional[str] = None,
+        limit: int = 150,
+    ) -> Dict[str, Any]:
+        """Executa a varredura geoespacial de alvos inativos."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        target_world = world or (acc.world if acc else self.config.world)
+
+        curr_v = acc.current_village if acc else None
+        o_x = curr_v.x if curr_v else 500
+        o_y = curr_v.y if curr_v else 500
+
+        cfg = InactivityFilterConfig(
+            max_distance=max_distance,
+            days_window=days_window,
+            max_points_growth=max_points_growth,
+            min_points=min_points,
+            max_points=max_points,
+            only_tribeless=only_tribeless,
+            include_single_member_tribes=include_single_member_tribes,
+            include_barbarians=include_barbarians,
+            limit=limit,
+        )
+
+        report = self.inactivity_tracker.scan_inactives(
+            world=target_world,
+            origin_x=o_x,
+            origin_y=o_y,
+            filter_config=cfg,
+        )
+
+        farm_customs = set(getattr(self.config.farm, "custom_targets", []))
+        targets_list = []
+        q = (search_query or "").lower().strip()
+
+        for t in report.targets:
+            if q:
+                match_name = q in t.village_name.lower() or q in t.player_name.lower() or q in t.coords
+                if not match_name:
+                    continue
+
+            coords_tuple = (t.x, t.y)
+            is_in_farm = coords_tuple in farm_customs or t.coords in farm_customs
+
+            targets_list.append({
+                "village_id": t.village_id,
+                "village_name": t.village_name,
+                "coordinates": t.coords,
+                "x": t.x,
+                "y": t.y,
+                "player_id": t.player_id,
+                "player_name": t.player_name,
+                "tribe_id": t.ally_id,
+                "tribe_name": t.ally_name,
+                "tribe_tag": t.ally_tag,
+                "tribe_members_count": t.ally_members_count,
+                "current_points": t.player_points,
+                "previous_points": t.past_player_points,
+                "village_points": t.village_points,
+                "delta_points": t.delta_points,
+                "days_diff": t.days_diff,
+                "inactivity_category": t.inactivity_category,
+                "inactivity_label": t.inactivity_label,
+                "distance": t.distance,
+                "light_travel_time_str": t.travel_time_lc_str,
+                "spy_travel_time_str": t.travel_time_spy_str,
+                "eta_lc_str": t.eta_lc_str,
+                "eta_spy_str": t.eta_spy_str,
+                "is_in_farm_list": is_in_farm,
+            })
+
+        return {
+            "status": "success",
+            "world": target_world,
+            "origin_coords": f"{o_x}|{o_y}",
+            "scan_radius": max_distance,
+            "days_window": days_window,
+            "total_targets_found": len(targets_list),
+            "stagnant_count": report.stagnant_count,
+            "regressive_count": report.regressive_count,
+            "residual_count": report.residual_count,
+            "targets": targets_list,
+        }
+
+    async def sync_world_data(
+        self,
+        world: Optional[str] = None,
+        force: bool = False,
+    ) -> Dict[str, Any]:
+        """Dispara a sincronização de dados públicos do mundo."""
+        inst = self.world_manager.get_instance(world)
+        target_world = world or (inst.world if inst else self.config.world)
+        domain = inst.config.domain if inst else self.config.domain
+
+        self.broadcast_sync("WORLD_SYNC_STARTED", {"world": target_world})
+        result = await self.world_data_worker.sync_world_data(
+            world=target_world,
+            domain=domain,
+            force=force,
+        )
+
+        status_dict = self.get_world_sync_status(world=target_world)
+        self.broadcast_sync("WORLD_SYNC_FINISHED", {
+            "world": target_world,
+            "is_updated": result.is_updated,
+            "villages_count": result.villages_count,
+            "players_count": result.players_count,
+            "sync_status": status_dict,
+        })
+
+        return {
+            "status": "success",
+            "is_updated": result.is_updated,
+            "world": target_world,
+            "villages_count": result.villages_count,
+            "players_count": result.players_count,
+            "allies_count": result.allies_count,
+            "error": result.error,
+        }
+
+    def get_world_sync_status(self, world: Optional[str] = None) -> Dict[str, Any]:
+        """Retorna o status de sincronização e idade da base local."""
+        inst = self.world_manager.get_instance(world)
+        target_world = world or (inst.world if inst else self.config.world)
+
+        latest = self.world_database.get_latest_snapshot(target_world)
+        if not latest:
+            return {
+                "status": "success",
+                "world": target_world,
+                "has_snapshot": False,
+                "is_syncing": False,
+                "last_sync_timestamp": None,
+                "last_sync_human_str": "Nunca sincronizado",
+                "total_villages": 0,
+                "total_players": 0,
+                "total_allies": 0,
+                "history_days": 0,
+            }
+
+        last_ts = latest["timestamp"]
+        diff_min = int((time.time() - last_ts) / 60)
+        human_str = f"Há {diff_min} minutos" if diff_min < 60 else f"Há {diff_min // 60} horas"
+
+        all_snaps = self.world_database.get_all_snapshots(target_world)
+        history_days = 0.0
+        if len(all_snaps) > 1:
+            oldest_ts = all_snaps[-1]["timestamp"]
+            history_days = round((last_ts - oldest_ts) / 86400.0, 1)
+
+        return {
+            "status": "success",
+            "world": target_world,
+            "has_snapshot": True,
+            "is_syncing": False,
+            "last_sync_timestamp": last_ts,
+            "last_sync_human_str": human_str,
+            "total_villages": latest["villages_count"],
+            "total_players": latest["players_count"],
+            "total_allies": latest["allies_count"],
+            "history_days": history_days,
+            "total_snapshots": len(all_snaps),
+        }
+
+    def add_custom_farm_target(
+        self,
+        coords: Any = None,
+        x: Optional[int] = None,
+        y: Optional[int] = None,
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Adiciona uma coordenada à lista de alvos customizados de farm."""
+        inst = self.world_manager.get_instance(world)
+        cfg = inst.config if inst else self.config
+
+        if coords is not None and y is not None:
+            cleaned = f"{coords}|{y}".strip()
+        elif x is not None and y is not None:
+            cleaned = f"{x}|{y}".strip()
+        elif isinstance(coords, (tuple, list)) and len(coords) == 2:
+            cleaned = f"{coords[0]}|{coords[1]}".strip()
+        else:
+            cleaned = str(coords or "").strip()
+
+        customs = list(getattr(cfg.farm, "custom_targets", []))
+        if cleaned and cleaned not in customs:
+            customs.append(cleaned)
+            cfg.farm.custom_targets = customs
+            self.update_config_and_save({"farm": {"custom_targets": customs}})
+
+        self.broadcast_sync("FARM_TARGET_ADDED", {"coords": cleaned, "custom_targets": customs})
+        return {
+            "status": "success",
+            "message": f"Coordenada '{cleaned}' adicionada à lista de farm.",
+            "custom_targets": customs,
+        }
+
+    def get_radar_players_radius(
+        self,
+        world: Optional[str] = None,
+        max_distance: float = 25.0,
+        search_query: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Retorna o relatório de evolução de todos os jogadores num raio de X campos."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        target_world = world or (acc.world if acc else self.config.world)
+
+        curr_v = acc.current_village if acc else None
+        o_x = curr_v.x if curr_v else 500
+        o_y = curr_v.y if curr_v else 500
+
+        report = self.inactivity_tracker.get_players_evolution_report(
+            world=target_world,
+            origin_x=o_x,
+            origin_y=o_y,
+            max_distance=max_distance,
+            limit=limit,
+        )
+
+        players_list = report.get("players", [])
+        q = (search_query or "").lower().strip()
+        if q:
+            players_list = [
+                p for p in players_list
+                if q in p.get("player_name", "").lower()
+                or q in p.get("ally_name", "").lower()
+                or q in p.get("ally_tag", "").lower()
+                or q in p.get("nearest_coords", "")
+            ]
+
+        return {
+            "status": "success",
+            "world": target_world,
+            "origin_coords": f"{o_x}|{o_y}",
+            "scan_radius": max_distance,
+            "total_players_found": len(players_list),
+            "counts": report.get("counts", {}),
+            "players": players_list,
+        }
+
+    def get_player_timeline(
+        self,
+        player_id: int,
+        world: Optional[str] = None,
+        limit: int = 30,
+    ) -> Dict[str, Any]:
+        """Retorna a linha do tempo cronológica de medições de um jogador específico."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        target_world = world or (acc.world if acc else self.config.world)
+
+        timeline = self.inactivity_tracker.get_player_timeline(
+            world=target_world,
+            player_id=player_id,
+            limit=limit,
+        )
+        return {
+            "status": "success",
+            "world": target_world,
+            "player_id": player_id,
+            "timeline": timeline,
+        }
+
+
 
 
 

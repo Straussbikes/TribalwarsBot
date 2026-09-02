@@ -212,6 +212,9 @@ class AccountProfile:
             for vid, vcfg in cfg_data["villages"].items():
                 if isinstance(vcfg, dict):
                     valid_v = {k: v for k, v in vcfg.items() if k in VillageConfig.__dataclass_fields__}
+                    if "category" in valid_v:
+                        raw_c = str(valid_v["category"]).lower().strip()
+                        valid_v["category"] = "defense" if "def" in raw_c else "attack"
                     v_dict[str(vid)] = VillageConfig(**valid_v)
             bot_cfg.villages = v_dict
 

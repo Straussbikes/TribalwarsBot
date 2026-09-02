@@ -96,20 +96,9 @@ class QuestManager:
     O uso de itens de inventário é estritamente manual.
     """
 
-    async def get_quest_state(
-        self, account: TribalAccount, village_id: Optional[int] = None
-    ) -> QuestState:
-        """
-        Carrega 'screen=quest' e 'screen=main' e extrai o catálogo consolidado de missões
-        e recompensas de níveis de edifícios concluídos.
-        """
-        v_id = village_id or account.current_village_id or 0
-        html = await account.get_screen("quest", village_id=v_id)
-
-        raw = parse_quest_screen(html, account.last_game_data)
-        quests_dict: Dict[str, QuestItem] = {}
-
-        for q in raw.get("quests", []):
+    def _merge_raw_quests(self, quests_dict: Dict[str, QuestItem], raw_data: Dict[str, Any]) -> None:
+        """Funde coleções de missões e recompensas extraídas de múltiplos ecrãs/abas."""
+        for q in raw_data.get("quests", []):
             q_id = str(q.get("id", "")).strip()
             if not q_id:
                 continue
@@ -123,50 +112,66 @@ class QuestManager:
                 items=rew_dict.get("items", []),
                 description=rew_dict.get("description", ""),
             )
-            quests_dict[q_id] = QuestItem(
-                id=q_id,
-                title=str(q.get("title", "")),
-                description=str(q.get("description", "")),
-                finishable=bool(q.get("finishable", False)),
-                rewards=reward,
-                claim_url=q.get("claim_url"),
-            )
+            if q_id not in quests_dict:
+                quests_dict[q_id] = QuestItem(
+                    id=q_id,
+                    title=str(q.get("title", "")),
+                    description=str(q.get("description", "")),
+                    finishable=bool(q.get("finishable", False)),
+                    rewards=reward,
+                    claim_url=q.get("claim_url"),
+                )
+            else:
+                if q.get("finishable") or q.get("claim_url"):
+                    quests_dict[q_id].finishable = True
+                    if q.get("claim_url"):
+                        quests_dict[q_id].claim_url = q.get("claim_url")
+                if not quests_dict[q_id].title or quests_dict[q_id].title.startswith("Recompensa #") or quests_dict[q_id].title.startswith("Missão #"):
+                    if q.get("title") and not str(q.get("title")).startswith("Recompensa #"):
+                        quests_dict[q_id].title = str(q.get("title"))
 
-        # Se não encontramos missões concluídas em screen=quest, inspeciona também o ecrã do Edifício Principal (screen=main)
-        finishable_count = sum(1 for q in quests_dict.values() if q.finishable)
-        if finishable_count == 0:
-            try:
-                main_html = await account.get_screen("main", village_id=v_id)
-                main_raw = parse_quest_screen(main_html, account.last_game_data)
-                for q in main_raw.get("quests", []):
-                    q_id = str(q.get("id", "")).strip()
-                    if not q_id:
-                        continue
-                    if q_id not in quests_dict:
-                        rew_dict = q.get("rewards", {})
-                        reward = QuestReward(
-                            wood=rew_dict.get("wood", 0),
-                            stone=rew_dict.get("stone", 0),
-                            iron=rew_dict.get("iron", 0),
-                            pop=rew_dict.get("pop", 0),
-                            flags=rew_dict.get("flags", []),
-                            items=rew_dict.get("items", []),
-                            description=rew_dict.get("description", ""),
-                        )
-                        quests_dict[q_id] = QuestItem(
-                            id=q_id,
-                            title=str(q.get("title", "")),
-                            description=str(q.get("description", "")),
-                            finishable=bool(q.get("finishable", False)),
-                            rewards=reward,
-                            claim_url=q.get("claim_url"),
-                        )
-                    elif q.get("finishable") or q.get("claim_url"):
-                        quests_dict[q_id].finishable = True
-                        if q.get("claim_url"):
-                            quests_dict[q_id].claim_url = q.get("claim_url")
-            except Exception as e:
-                logger.debug(f"Não foi possível verificar recompensas em screen=main: {e}")
+    async def get_quest_state(
+        self, account: TribalAccount, village_id: Optional[int] = None
+    ) -> QuestState:
+        """
+        Carrega 'screen=quest', a sub-aba de 'Recompensas' (mode=rewards / tab=rewards)
+        e 'screen=main' para extrair o catálogo consolidado de missões e recompensas de níveis
+        de edifícios concluídos prontos para resgate.
+        """
+        v_id = village_id or account.current_village_id or 0
+        quests_dict: Dict[str, QuestItem] = {}
+
+        # 1. Carrega o ecrã principal de missões (screen=quest)
+        try:
+            html = await account.get_screen("quest", village_id=v_id)
+            raw = parse_quest_screen(html, account.last_game_data)
+            self._merge_raw_quests(quests_dict, raw)
+        except Exception as e:
+            logger.debug(f"Aviso ao consultar screen=quest: {e}")
+
+        # 2. Carrega a sub-aba nativa de Recompensas de Edifícios (screen=quest&mode=rewards)
+        try:
+            html_rewards = await account.get_screen("quest", village_id=v_id, extra_params={"mode": "rewards"})
+            raw_rewards = parse_quest_screen(html_rewards, account.last_game_data)
+            self._merge_raw_quests(quests_dict, raw_rewards)
+        except Exception as e:
+            logger.debug(f"Aviso ao consultar screen=quest&mode=rewards: {e}")
+
+        # 3. Fallback adicional para screen=quest&tab=rewards
+        try:
+            html_tab = await account.get_screen("quest", village_id=v_id, extra_params={"tab": "rewards"})
+            raw_tab = parse_quest_screen(html_tab, account.last_game_data)
+            self._merge_raw_quests(quests_dict, raw_tab)
+        except Exception as e:
+            logger.debug(f"Aviso ao consultar screen=quest&tab=rewards: {e}")
+
+        # 4. Inspeciona o Edifício Principal (screen=main) onde surgem avisos de edifícios concluídos
+        try:
+            main_html = await account.get_screen("main", village_id=v_id)
+            main_raw = parse_quest_screen(main_html, account.last_game_data)
+            self._merge_raw_quests(quests_dict, main_raw)
+        except Exception as e:
+            logger.debug(f"Aviso ao consultar recompensas em screen=main: {e}")
 
         quests = list(quests_dict.values())
         finishable_count = sum(1 for q in quests if q.finishable)
@@ -240,7 +245,7 @@ class QuestManager:
                 is_safe, reason = self.can_claim_safely(quest, curr_res, margin=safe_margin)
                 if not is_safe:
                     logger.warning(
-                        f"[{account.world}] Resgate da missão '{quest.title}' (ID {quest.id}) "
+                        f"[{account.world}] Resgate da recompensa/missão '{quest.title}' (ID {quest.id}) "
                         f"adiado por segurança: {reason}."
                     )
                     return False
@@ -263,10 +268,13 @@ class QuestManager:
                 )
                 return True
 
-            # Estratégia 2: GET com action=reward (padrão oficial Tribal Wars)
+            # Estratégia 2: GET com action=reward e mode=rewards (padrão oficial Tribal Wars)
             extra_params = {
+                "mode": "rewards",
                 "action": "reward",
+                "id": quest.id,
                 "quest_id": quest.id,
+                "reward_id": quest.id,
                 "h": account.csrf_token or "",
             }
             await account.get_screen("quest", village_id=v_id, extra_params=extra_params, apply_jitter=True)
@@ -281,7 +289,13 @@ class QuestManager:
                 await account.post_action(
                     screen="quest",
                     action="reward",
-                    data={"quest_id": quest.id, "h": account.csrf_token or ""},
+                    data={
+                        "id": quest.id,
+                        "quest_id": quest.id,
+                        "reward_id": quest.id,
+                        "mode": "rewards",
+                        "h": account.csrf_token or "",
+                    },
                     village_id=v_id,
                     apply_jitter=True,
                 )

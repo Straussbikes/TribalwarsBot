@@ -1,0 +1,16 @@
+{
+  "world": "pt114",
+  "created_at": 1788357679.2015064,
+  "last_updated": 1788357786.4832563,
+  "total_wood": 0,
+  "total_stone": 0,
+  "total_iron": 0,
+  "total_attacks_sent": 0,
+  "total_attacks_successful": 0,
+  "total_villages_farmed": 0,
+  "troops_recruited_by_unit": {},
+  "buildings_constructed_count": 19,
+  "hourly_buckets": {},
+  "recent_loot_events": [],
+  "recent_commands": []
+}

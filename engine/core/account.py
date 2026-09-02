@@ -105,10 +105,20 @@ class TribalAccount:
         # Histórico e telemetria de requisições de rede
         self._req_counter: int = 0
         self.request_history: deque = deque(maxlen=100)
+        self.stats_tracker: Optional[Any] = None
 
         # Sessão HTTP curl_cffi
         self._session: Optional[AsyncSession] = None
         self._lock = asyncio.Lock()
+
+    def get_stats_tracker(self) -> Any:
+        """Retorna ou instancia o rastreador de estatísticas do mundo e conta."""
+        if getattr(self, "stats_tracker", None) is not None:
+            return self.stats_tracker
+        from engine.core.stats import StatsTracker
+        acc_id = getattr(self, "username", None) or getattr(self, "profile_id", None) or "default"
+        self.stats_tracker = StatsTracker(world=self.world, account_id=acc_id)
+        return self.stats_tracker
 
     async def __aenter__(self) -> "TribalAccount":
         await self.init_session()
@@ -270,7 +280,23 @@ class TribalAccount:
 
         # Extrai todas as aldeias pertencentes à conta (suporte multi-aldeia)
         all_vills = extract_all_villages(html, game_data)
-        for v_id, v_data in all_vills.items():
+        valid_vills = {
+            v_id: v_data for v_id, v_data in all_vills.items()
+            if v_id > 0 and not (v_data.x == 0 and v_data.y == 0 and v_data.name.lower() in ("farm", "fazenda"))
+        }
+
+        # Se game_data trouxer a lista estrita de aldeias do jogador, purga chaves obsoletas
+        if game_data and isinstance(game_data.get("player"), dict):
+            p_villages = game_data["player"].get("villages")
+            if isinstance(p_villages, dict) and p_villages:
+                valid_ids = {int(k) for k in p_villages.keys() if str(k).isdigit() and int(k) > 0}
+                if village and village.id > 0:
+                    valid_ids.add(village.id)
+                stale_ids = [vid for vid in self.villages if vid not in valid_ids]
+                for sid in stale_ids:
+                    del self.villages[sid]
+
+        for v_id, v_data in valid_vills.items():
             if v_id not in self.villages:
                 self.villages[v_id] = v_data
             else:
@@ -282,6 +308,10 @@ class TribalAccount:
                 self.villages[v_id].resources = curr_res
                 self.villages[v_id].troops = curr_troops
                 self.villages[v_id].buildings = curr_blds
+
+        # Remove qualquer entrada inválida remanescente com id <= 0 ou nome de edifício corrompido
+        for invalid_id in [k for k, v in self.villages.items() if k <= 0 or (v.x == 0 and v.y == 0 and v.name.lower() in ("farm", "fazenda"))]:
+            del self.villages[invalid_id]
 
         # Identifica a aldeia que foi renderizada na resposta HTML
         rendered_village_id = village.id if village else (requested_village_id or self.current_village_id)

@@ -400,6 +400,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (elements.btnSyncAllVillages) elements.btnSyncAllVillages.click();
       } else if (targetId === "tab-market") {
         loadMarketData();
+      } else if (targetId === "tab-farm-assistant") {
+        refreshFarmAssistantTab();
       } else if (targetId === "tab-stats") {
         loadAndRenderStats();
       }
@@ -470,7 +472,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   window.wsClient.on("VILLAGE_CATEGORY_UPDATED", (data) => {
-    addLogEntry("INFO", "village", `Aldeia ${data.village_id} reclassificada como '${data.category}'.`);
+    const raw = data.category ? String(data.category).toLowerCase().trim() : "attack";
+    const norm = raw.startsWith("def") ? "defense" : "attack";
+    if (!state.villageCategories) state.villageCategories = {};
+    state.villageCategories[data.village_id] = norm;
+    if (state.village && state.village.id === parseInt(data.village_id, 10)) {
+      state.village.category = norm;
+      loadRecruitmentData();
+    }
+    const label = norm === "attack" ? "Ataque ⚔️ (Modelo Ataque Full)" : "Defesa 🛡️ (Modelo Defesa Full)";
+    addLogEntry("INFO", "village", `Aldeia ${data.village_id} reclassificada como '${label}'.`);
   });
 
   window.wsClient.on("ALL_VILLAGES_CYCLE_DONE", (data) => {
@@ -507,8 +518,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     loadBuildingData();
   });
 
-  window.wsClient.on("RECRUITMENT_CYCLE_EXECUTED", () => {
-    loadRecruitmentData();
+  window.wsClient.on("RECRUITMENT_CYCLE_EXECUTED", (data) => {
+    if (data && data.active_orders !== undefined) {
+      renderRecruitmentData(data);
+    } else {
+      loadRecruitmentData();
+    }
+  });
+
+  window.wsClient.on("RECRUITMENT_UPDATED", (data) => {
+    if (data && data.active_orders !== undefined) {
+      renderRecruitmentData(data);
+    } else {
+      loadRecruitmentData();
+    }
   });
 
   // Som Sintetizado de Emergência para Alertas Anti-Bot (Web Audio API nativa)
@@ -761,6 +784,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Renderiza Painel Multi-Aldeia e Balanceamento de Recursos
     if (data.account && data.account.villages) {
+      if (!state.villageCategories) state.villageCategories = {};
+      data.account.villages.forEach(v => {
+        if (v.id) {
+          const vCat = v.category ? String(v.category).toLowerCase().trim() : "attack";
+          state.villageCategories[v.id] = vCat.startsWith("def") ? "defense" : "attack";
+        }
+      });
       renderVillagesOverview(data.account.villages, data.resource_balance);
     }
 
@@ -1130,7 +1160,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     let totStone = 0;
     let totIron = 0;
 
-    if (!villages || villages.length === 0) {
+    const validVillages = (villages || []).filter(v => v && v.id > 0 && !(v.x === 0 && v.y === 0 && (v.name || "").toLowerCase().includes("farm")));
+
+    if (!validVillages || validVillages.length === 0) {
       elements.villagesTableBody.innerHTML = `
         <tr>
           <td colspan="7" style="text-align: center; padding: 24px; color: var(--text-muted);">
@@ -1143,12 +1175,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     if (elements.aggVillagesCount) {
-      elements.aggVillagesCount.textContent = villages.length.toString();
+      elements.aggVillagesCount.textContent = validVillages.length.toString();
     }
 
     if (!state.villageCategories) state.villageCategories = {};
 
-    elements.villagesTableBody.innerHTML = villages.map(v => {
+    elements.villagesTableBody.innerHTML = validVillages.map(v => {
       const isCurr = state.village && state.village.id === v.id;
       // Garante que a aldeia ativa reflete com exatidão os recursos mais recentes sincronizados
       const r = (isCurr && state.resources) ? state.resources : (v.resources || {});
@@ -1158,22 +1190,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       const maxStorage = r.storage_max || 1000;
       const storagePct = Math.min(100, Math.round(((r.wood + r.stone + r.iron) / (maxStorage * 3)) * 100));
-      const cat = (state.villageCategories[v.id] || v.category || "balanced").toLowerCase().trim();
+      const rawCat = (state.villageCategories[v.id] || v.category || "attack").toLowerCase().trim();
+      const cat = rawCat.startsWith("def") ? "defense" : "attack";
 
-      // Monta opções dinâmicas com todos os modelos disponíveis (Ataque, Defesa, Balanceado + Customizados)
-      const allModels = Object.keys(state.recruitmentModels || { attack: {}, defense: {} });
-      let optionsHtml = `
-        <option value="attack" ${cat === 'attack' ? 'selected' : ''}>⚔️ Ataque</option>
-        <option value="defense" ${cat === 'defense' ? 'selected' : ''}>🛡️ Defesa</option>
-        <option value="balanced" ${cat === 'balanced' ? 'selected' : ''}>⚖️ Balanceado</option>
+      const optionsHtml = `
+        <option value="attack" ${cat === 'attack' ? 'selected' : ''}>⚔️ Ataque (Modelo Ataque Full)</option>
+        <option value="defense" ${cat === 'defense' ? 'selected' : ''}>🛡️ Defesa (Modelo Defesa Full)</option>
       `;
-      allModels.forEach(m => {
-        const normM = m.toLowerCase().trim();
-        if (normM !== 'attack' && normM !== 'defense' && normM !== 'balanced') {
-          const capLabel = normM.charAt(0).toUpperCase() + normM.slice(1);
-          optionsHtml += `<option value="${normM}" ${cat === normM ? 'selected' : ''}>✨ ${capLabel}</option>`;
-        }
-      });
 
       return `
         <tr style="border-bottom: 1px solid var(--border-subtle); transition: background 0.15s ease;" onmouseover="this.style.background='rgba(30,41,59,0.5)'" onmouseout="this.style.background='transparent'">
@@ -1221,11 +1244,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     elements.villagesTableBody.querySelectorAll(".village-cat-select").forEach(sel => {
       sel.addEventListener("change", async () => {
         const vid = sel.getAttribute("data-village-id");
-        const newCat = sel.value.toLowerCase().trim();
+        const rawValue = sel.value.toLowerCase().trim();
+        const newCat = rawValue.startsWith("def") ? "defense" : "attack";
         state.villageCategories[vid] = newCat;
-        const catLabel = newCat === "attack" ? "Ataque ⚔️" : (newCat === "defense" ? "Defesa 🛡️" : (newCat === "balanced" ? "Balanceado ⚖️" : `✨ ${newCat}`));
+        const catLabel = newCat === "attack" ? "Ataque ⚔️ (Modelo Ataque Full)" : "Defesa 🛡️ (Modelo Defesa Full)";
         try {
-          console.log(`A alterar categoria da aldeia ${vid} para ${newCat}...`);
+          console.log(`A alterar tipo da aldeia ${vid} para ${newCat}...`);
           sel.style.opacity = "0.6";
           await window.api.setVillageCategory(vid, newCat);
           sel.style.opacity = "1";
@@ -1234,7 +1258,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           addLogEntry("SUCCESS", "village", `Aldeia ${vid} configurada com modelo '${catLabel}'. Persistido no SQLite.`);
           if (state.village && state.village.id === parseInt(vid, 10)) {
             state.village.category = newCat;
-            renderRecruitmentData({ active_orders: [] });
+            loadRecruitmentData();
           }
         } catch (err) {
           sel.style.opacity = "1";
@@ -2716,6 +2740,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   function openBuildingTemplateModal() {
     if (!elements.buildingTemplateModal) return;
     elements.buildingTemplateModal.style.display = "flex";
+    elements.buildingTemplateModal.classList.add("active");
     renderBuildingTemplatesModalList();
     const activeId = elements.bldTemplateSelect?.value || cachedBuildingTemplates[0]?.id;
     const found = cachedBuildingTemplates.find(t => t.id === activeId) || cachedBuildingTemplates[0];
@@ -2729,6 +2754,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   function closeBuildingTemplateModal() {
     if (elements.buildingTemplateModal) {
       elements.buildingTemplateModal.style.display = "none";
+      elements.buildingTemplateModal.classList.remove("active");
     }
     if (elements.bldTemplateSaveMsg) elements.bldTemplateSaveMsg.textContent = "";
   }
@@ -2999,6 +3025,35 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     renderLogEntry(entry);
   }
+
+  function showToast(type, message, duration = 3500) {
+    const logLevel = type === "error" ? "ERROR" : type === "success" ? "SUCCESS" : "INFO";
+    addLogEntry(logLevel, "ui", message);
+
+    let container = document.getElementById("toast-container");
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "toast-container";
+      container.style.cssText = "position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; max-width: 380px;";
+      document.body.appendChild(container);
+    }
+
+    const toast = document.createElement("div");
+    const bg = type === "error" ? "rgba(239, 68, 68, 0.95)" : type === "success" ? "rgba(16, 185, 129, 0.95)" : "rgba(30, 41, 59, 0.95)";
+    const border = type === "error" ? "var(--neon-rose)" : type === "success" ? "var(--neon-emerald)" : "var(--neon-cyan)";
+    const icon = type === "error" ? "❌" : type === "success" ? "✅" : "ℹ️";
+
+    toast.style.cssText = `background: ${bg}; border: 1px solid ${border}; color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 0.82rem; box-shadow: 0 8px 24px rgba(0,0,0,0.5); backdrop-filter: blur(8px); display: flex; align-items: center; gap: 8px; pointer-events: auto; transition: all 0.3s ease;`;
+    toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.opacity = "0";
+      toast.style.transform = "translateY(10px)";
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+  window.showToast = showToast;
 
   function renderLogEntry(entry) {
     if (state.logFilter !== "ALL" && entry.level !== state.logFilter) {
@@ -4413,19 +4468,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     // 3. Comparativo de Tropas Presentes vs Meta do Modelo Selecionado para a Aldeia
     const vId = (state.village && state.village.id) || null;
     const vCat = (vId && state.villageCategories && state.villageCategories[vId]) || (state.village && state.village.category) || "attack";
-    const vModelKey = (typeof vCat === "string") ? vCat.toLowerCase().trim() : "attack";
-    const activeTargetModel = state.recruitmentModels[vModelKey] || state.recruitmentModels["attack"] || {};
+    const vModelKey = (typeof vCat === "string" && vCat.toLowerCase().startsWith("def")) ? "defense" : "attack";
+    const activeTargetModel = (state.recruitmentModels && state.recruitmentModels[vModelKey]) || (state.recruitmentModels && state.recruitmentModels["attack"]) || {};
 
     const modelNameBadge = document.getElementById("rec-active-village-model-name");
     if (modelNameBadge) {
-      const displayLabel = vModelKey === "attack" ? "Modelo: ⚔️ Ataque Full" : (vModelKey === "defense" ? "Modelo: 🛡️ Defesa Full" : (vModelKey === "balanced" ? "Modelo: ⚖️ Balanceado" : `Modelo: ✨ ${vModelKey.charAt(0).toUpperCase() + vModelKey.slice(1)}`));
+      const displayLabel = vModelKey === "attack" ? "Modelo: ⚔️ Ataque Full" : "Modelo: 🛡️ Defesa Full";
       modelNameBadge.textContent = displayLabel;
     }
 
     const progressGrid = document.getElementById("rec-village-troops-progress-grid");
     if (progressGrid) {
+      if (data.troops_home && typeof data.troops_home === "object") {
+        state.army = { ...(state.army || {}), ...data.troops_home };
+      }
       progressGrid.innerHTML = REC_UNITS_METADATA.map(u => {
-        const cur = (state.army && state.army[u.id]) || 0;
+        const cur = (data.troops_home && data.troops_home[u.id] !== undefined)
+          ? data.troops_home[u.id]
+          : ((state.army && state.army[u.id]) || 0);
         const tgt = activeTargetModel[u.id] || 0;
         const pct = tgt > 0 ? Math.min(100, Math.round((cur / tgt) * 100)) : (cur > 0 ? 100 : 0);
         const isDone = tgt > 0 ? cur >= tgt : (tgt === 0);
@@ -4506,7 +4566,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (state.account?.villages) {
         renderVillagesOverview(state.account.villages, state.resource_balance);
       }
-      renderRecruitmentData({ active_orders: [] });
+      loadRecruitmentData();
     } catch (err) {
       addLogEntry("ERROR", "recruitment", `Erro ao guardar modelos: ${err.message}`);
       alert(`Falha ao guardar modelos no SQLite: ${err.message}`);
@@ -4970,6 +5030,733 @@ document.addEventListener("DOMContentLoaded", async () => {
   elements.btnMetricWood?.addEventListener("click", () => setStatsMetric("wood"));
   elements.btnMetricStone?.addEventListener("click", () => setStatsMetric("stone"));
   elements.btnMetricIron?.addEventListener("click", () => setStatsMetric("iron"));
+
+  // =========================================================================
+  // --- MÓDULO 4: ASSISTENTE DE SAQUE & FARM + RADAR DE INATIVOS (Fase 4) ---
+  // =========================================================================
+
+  let activeFarmSubtab = "am-farm";
+
+  function switchFarmSubtab(subtab) {
+    activeFarmSubtab = subtab;
+    const btnAm = document.getElementById("btn-subtab-am-farm");
+    const btnRadar = document.getElementById("btn-subtab-radar-inactives");
+    const viewAm = document.getElementById("subtab-view-am-farm");
+    const viewRadar = document.getElementById("subtab-view-radar-inactives");
+
+    if (btnAm) btnAm.className = subtab === "am-farm" ? "farm-subtab-btn active" : "farm-subtab-btn";
+    if (btnRadar) btnRadar.className = subtab === "radar-inactives" ? "farm-subtab-btn active" : "farm-subtab-btn";
+    if (viewAm) viewAm.style.display = subtab === "am-farm" ? "flex" : "none";
+    if (viewRadar) viewRadar.style.display = subtab === "radar-inactives" ? "flex" : "none";
+
+    if (subtab === "am-farm") {
+      loadAmFarmView();
+    } else {
+      loadRadarInactivesView();
+    }
+  }
+  window.switchFarmSubtab = switchFarmSubtab;
+
+  async function refreshFarmAssistantTab() {
+    if (activeFarmSubtab === "am-farm") {
+      await loadAmFarmView();
+    } else {
+      await loadRadarInactivesView();
+    }
+  }
+
+  async function loadAmFarmView() {
+    try {
+      const statusRes = await window.api.getFarmStatus();
+      if (statusRes && statusRes.status === "success") {
+        // Toggle Master
+        const toggleMaster = document.getElementById("toggle-farm-master");
+        if (toggleMaster) toggleMaster.checked = !!statusRes.enabled;
+
+        // Village Badge
+        const vCoordsBadge = document.getElementById("farm-village-coords-badge");
+        if (vCoordsBadge) vCoordsBadge.textContent = `(${statusRes.village_coords || "0|0"})`;
+
+        // Available Troops Grid
+        const troopsGrid = document.getElementById("farm-available-troops-grid");
+        if (troopsGrid) {
+          const troops = statusRes.available_troops || {};
+          const unitIcons = {
+            spear: "🗡️ Lanceiros",
+            sword: "🛡️ Espadachins",
+            axe: "🪓 Vikings",
+            spy: "👁️ Espiões",
+            light: "🐎 Cavalaria Leve",
+            heavy: "🛡️ Cav. Pesada",
+          };
+          let html = "";
+          for (const [u, label] of Object.entries(unitIcons)) {
+            const count = troops[u] || 0;
+            const highlight = count > 0 ? "color: var(--neon-cyan); font-weight: 700;" : "color: var(--text-muted);";
+            html += `<div style="background: rgba(30, 41, 59, 0.5); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+              ${label}: <span style="${highlight}">${count}</span>
+            </div>`;
+          }
+          troopsGrid.innerHTML = html;
+        }
+
+        // Config Inputs
+        const defTemp = document.getElementById("farm-cfg-default-template");
+        if (defTemp) defTemp.value = statusRes.default_template || "A";
+        const maxDist = document.getElementById("farm-cfg-max-distance");
+        if (maxDist) maxDist.value = statusRes.max_distance || 25;
+        const minInt = document.getElementById("farm-cfg-min-interval");
+        if (minInt) minInt.value = statusRes.min_interval_seconds || 45;
+        const maxInt = document.getElementById("farm-cfg-max-interval");
+        if (maxInt) maxInt.value = statusRes.max_interval_seconds || 90;
+        const avoidConc = document.getElementById("farm-cfg-avoid-concurrent");
+        if (avoidConc) avoidConc.checked = statusRes.avoid_concurrent_attacks !== false;
+        const bootUnl = document.getElementById("farm-cfg-bootstrap-unlisted");
+        if (bootUnl) bootUnl.checked = statusRes.bootstrap_unlisted_barbarians !== false;
+        const stopLoss = document.getElementById("farm-cfg-stop-on-losses");
+        if (stopLoss) stopLoss.checked = statusRes.stop_on_losses !== false;
+      }
+
+      // Carregar Alvos de Farm
+      const targetsRes = await window.api.getFarmTargets();
+      const tbody = document.getElementById("farm-targets-table-body");
+      const templateASum = document.getElementById("farm-template-a-summary");
+      const templateBSum = document.getElementById("farm-template-b-summary");
+      const totalBarbsEl = document.getElementById("farm-stats-total-targets");
+      const inTransitEl = document.getElementById("farm-stats-in-transit");
+
+      function formatTemplateTroops(tObj) {
+        if (!tObj || typeof tObj !== "object") return "Não configurado";
+        const unitLabels = {
+          spear: "🗡️",
+          sword: "🛡️",
+          axe: "🪓",
+          archer: "🏹",
+          spy: "👁️",
+          light: "🐎",
+          marcher: "🏹🐎",
+          heavy: "🛡️🐎",
+          ram: "🚪",
+          catapult: "☄️",
+          knight: "👑",
+          snob: "🎩",
+        };
+        const parts = [];
+        for (const [u, qty] of Object.entries(tObj)) {
+          const n = parseInt(qty, 10) || 0;
+          if (n > 0) {
+            const icon = unitLabels[u] || u;
+            parts.push(`${icon} ${n}`);
+          }
+        }
+        return parts.length > 0 ? parts.join(" &bull; ") : "Vazio (0 tropas)";
+      }
+
+      if (targetsRes && targetsRes.status === "success") {
+        if (targetsRes.template_a) farmModalTemplatesData.A = { ...farmModalTemplatesData.A, ...targetsRes.template_a };
+        if (targetsRes.template_b) farmModalTemplatesData.B = { ...farmModalTemplatesData.B, ...targetsRes.template_b };
+
+        if (templateASum) {
+          templateASum.innerHTML = formatTemplateTroops(targetsRes.template_a);
+        }
+        if (templateBSum) {
+          templateBSum.innerHTML = formatTemplateTroops(targetsRes.template_b);
+        }
+
+        const targets = targetsRes.targets || [];
+        if (totalBarbsEl) totalBarbsEl.textContent = targets.length;
+        const inTransitCount = targets.filter(t => t.has_attack_in_transit).length;
+        if (inTransitEl) inTransitEl.textContent = inTransitCount;
+
+        if (tbody) {
+          if (targets.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 24px;">Nenhuma aldeia bárbara encontrada no raio configurado.</td></tr>`;
+          } else {
+            let html = "";
+            for (const t of targets) {
+              const colorClass = `farm-report-${t.last_report_color || 'none'}`;
+              const lootBadge = t.loot_status === "full"
+                ? `<span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 0.72rem;">Cheio</span>`
+                : t.loot_status === "partial"
+                ? `<span style="background: rgba(6, 182, 212, 0.2); color: var(--neon-cyan); padding: 2px 6px; border-radius: 4px; font-size: 0.72rem;">Parcial</span>`
+                : `<span style="color: var(--text-muted); font-size: 0.72rem;">-</span>`;
+              const transitBadge = t.has_attack_in_transit
+                ? `<span style="color: var(--neon-amber); font-weight: 700;">⚔️ A Caminho</span>`
+                : `<span style="color: var(--neon-emerald);">Livre</span>`;
+              const sourceBadge = !t.is_in_am_farm
+                ? `<span style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); padding: 1px 5px; border-radius: 4px; font-size: 0.68rem; margin-left: 6px;">Mapa</span>`
+                : "";
+              const reportHtml = t.is_in_am_farm
+                ? `<span class="farm-report-dot ${colorClass}" title="Relatório: ${t.last_report_color}"></span>`
+                : `<span title="Descoberta no Mapa (aguarda 1º saque)" style="font-size: 0.72rem; color: #c084fc; font-weight: 600;">✨ Novo</span>`;
+
+              html += `<tr>
+                <td><strong>${escapeHtml(t.name)}</strong>${sourceBadge}</td>
+                <td><span style="font-family: var(--font-mono); color: var(--neon-cyan);">${t.coordinates}</span></td>
+                <td>${t.distance.toFixed(1)} camp.</td>
+                <td><span style="font-family: var(--font-mono); font-size: 0.78rem;">${t.travel_time_cl_str || '-'}</span></td>
+                <td>${reportHtml}</td>
+                <td>${t.wall_level !== null ? `Nv. ${t.wall_level}` : '?'}</td>
+                <td>${lootBadge} ${transitBadge}</td>
+                <td style="text-align: right;">
+                  <button class="btn btn-secondary btn-sm" onclick="triggerManualFarm('${t.village_id}', 'A')" style="padding: 2px 8px; font-size: 0.75rem; margin-right: 4px;" title="Atacar com Modelo A">⚔️ A</button>
+                  <button class="btn btn-secondary btn-sm" onclick="triggerManualFarm('${t.village_id}', 'B')" style="padding: 2px 8px; font-size: 0.75rem;" title="Atacar com Modelo B">⚔️ B</button>
+                </td>
+              </tr>`;
+            }
+            tbody.innerHTML = html;
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Erro ao carregar AM Farm:", err);
+    }
+  }
+
+  window.triggerManualFarm = async function(villageId, template) {
+    try {
+      showToast("info", `A enviar ataque modelo ${template}...`);
+      await window.api.triggerFarmWave(true, villageId);
+      showToast("success", `Comando enviado para o alvo.`);
+      await loadAmFarmView();
+    } catch (e) {
+      showToast("error", `Falha ao enviar saque: ${e.message}`);
+    }
+  };
+
+  async function loadRadarInactivesView() {
+    try {
+      // Status de sincronização
+      const syncStatus = await window.api.getRadarSyncStatus();
+      const badgeSync = document.getElementById("radar-sync-status-badge");
+      if (badgeSync && syncStatus) {
+        badgeSync.textContent = syncStatus.has_snapshot
+          ? `✓ Atualizado (${syncStatus.last_sync_human_str} | ${syncStatus.total_villages.toLocaleString()} aldeias)`
+          : "⚠️ Base não sincronizada";
+      }
+
+      // Parâmetros de filtro
+      const maxDist = parseFloat(document.getElementById("radar-filter-max-distance")?.value || "25");
+      const days = parseInt(document.getElementById("radar-filter-days-window")?.value || "7", 10);
+      const minPts = parseInt(document.getElementById("radar-filter-min-points")?.value || "200", 10);
+      const maxPts = parseInt(document.getElementById("radar-filter-max-points")?.value || "5000", 10);
+      const maxGrowth = parseInt(document.getElementById("radar-filter-max-growth")?.value || "30", 10);
+      const onlyTribeless = !!document.getElementById("radar-filter-only-tribeless")?.checked;
+      const singleTribe = !!document.getElementById("radar-filter-single-tribe")?.checked;
+      const includeBarbs = !!document.getElementById("radar-filter-barbarians")?.checked;
+      const searchQuery = document.getElementById("radar-search-query")?.value || "";
+
+      const filters = {
+        max_distance: maxDist,
+        days_window: days,
+        min_points: minPts,
+        max_points: maxPts,
+        max_points_growth: maxGrowth,
+        only_tribeless: onlyTribeless,
+        include_single_member_tribes: singleTribe,
+        include_barbarians: includeBarbs,
+        search_query: searchQuery,
+      };
+
+      const inactRes = await window.api.getRadarInactives(filters);
+      const tbody = document.getElementById("radar-inactives-table-body");
+      const countStagnant = document.getElementById("radar-count-stagnant");
+      const countRegressive = document.getElementById("radar-count-regressive");
+      const countResidual = document.getElementById("radar-count-residual");
+      const countTotal = document.getElementById("radar-count-total");
+
+      if (inactRes && inactRes.status === "success") {
+        if (countStagnant) countStagnant.textContent = inactRes.stagnant_count || 0;
+        if (countRegressive) countRegressive.textContent = inactRes.regressive_count || 0;
+        if (countResidual) countResidual.textContent = inactRes.residual_count || 0;
+        if (countTotal) countTotal.textContent = inactRes.total_targets_found || 0;
+
+        const targets = inactRes.targets || [];
+        if (tbody) {
+          if (targets.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 24px;">Nenhum alvo inativo encontrado com os filtros atuais. Experimente aumentar o raio de busca ou sincronizar os dados do mundo.</td></tr>`;
+          } else {
+            let html = "";
+            for (const t of targets) {
+              const deltaClass = t.delta_points < 0 ? "delta-regressive" : (t.delta_points === 0 ? "delta-stagnant" : "delta-residual");
+              const deltaPrefix = t.delta_points > 0 ? `+${t.delta_points}` : `${t.delta_points}`;
+              const farmBtnText = t.is_in_farm_list ? "✓ Na Lista" : "➕ Add Farm";
+              const farmBtnDisabled = t.is_in_farm_list ? "disabled style='opacity: 0.6; padding: 3px 8px; font-size: 0.75rem;'" : "style='padding: 3px 8px; font-size: 0.75rem;'";
+
+              html += `<tr>
+                <td><strong>${escapeHtml(t.player_name)}</strong></td>
+                <td><span style="color: var(--neon-purple); font-weight: 600;">${t.tribe_tag ? escapeHtml(t.tribe_tag) : '-'}</span></td>
+                <td>${escapeHtml(t.village_name)}</td>
+                <td><span style="font-family: var(--font-mono); color: var(--neon-cyan);">${t.coordinates}</span></td>
+                <td>${t.current_points.toLocaleString()} pts</td>
+                <td><span class="delta-tag ${deltaClass}">${deltaPrefix} pts</span></td>
+                <td>${t.distance.toFixed(1)} camp.</td>
+                <td><span style="font-family: var(--font-mono); font-size: 0.78rem;">${t.light_travel_time_str}</span> <small style="color: var(--text-muted);">(${t.eta_lc_str})</small></td>
+                <td><span style="font-family: var(--font-mono); font-size: 0.78rem;">${t.spy_travel_time_str}</span></td>
+                <td style="text-align: right;">
+                  <button class="btn btn-secondary btn-sm" onclick="addRadarTarget('${t.coordinates}')" ${farmBtnDisabled}>${farmBtnText}</button>
+                </td>
+              </tr>`;
+            }
+            tbody.innerHTML = html;
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Erro ao carregar Radar de Inativos:", err);
+    }
+  }
+
+  window.addRadarTarget = async function(coords) {
+    try {
+      const res = await window.api.addRadarTargetToFarm(coords);
+      showToast("success", res.message || `Coordenada ${coords} adicionada à lista de farm.`);
+      await loadRadarInactivesView();
+    } catch (e) {
+      showToast("error", `Falha ao adicionar alvo: ${e.message}`);
+    }
+  };
+
+  // Event Listeners da Aba Farm
+  document.getElementById("toggle-farm-master")?.addEventListener("change", async (e) => {
+    try {
+      await window.api.toggleFarm(e.target.checked);
+      showToast("info", `Auto-Farm ${e.target.checked ? "ativado" : "desativado"}.`);
+    } catch (err) {
+      showToast("error", `Falha ao alternar farm: ${err.message}`);
+    }
+  });
+
+  document.getElementById("btn-trigger-farm-wave")?.addEventListener("click", async () => {
+    try {
+      showToast("info", "A disparar ronda de saques do Assistente de Saque...");
+      const res = await window.api.triggerFarmWave(true);
+      showToast("success", res.message || "Ronda de farm concluída com sucesso!");
+      await loadAmFarmView();
+    } catch (err) {
+      showToast("error", `Erro ao disparar saques: ${err.message}`);
+    }
+  });
+
+  document.getElementById("btn-save-farm-settings")?.addEventListener("click", async () => {
+    try {
+      const payload = {
+        default_template: document.getElementById("farm-cfg-default-template")?.value || "A",
+        max_distance: parseFloat(document.getElementById("farm-cfg-max-distance")?.value || "25"),
+        min_interval_seconds: parseFloat(document.getElementById("farm-cfg-min-interval")?.value || "45"),
+        max_interval_seconds: parseFloat(document.getElementById("farm-cfg-max-interval")?.value || "90"),
+        min_delay_per_attack_ms: parseInt(document.getElementById("farm-cfg-min-delay")?.value || "250", 10),
+        max_delay_per_attack_ms: parseInt(document.getElementById("farm-cfg-max-delay")?.value || "650", 10),
+        avoid_concurrent_attacks: !!document.getElementById("farm-cfg-avoid-concurrent")?.checked,
+        bootstrap_unlisted_barbarians: !!document.getElementById("farm-cfg-bootstrap-unlisted")?.checked,
+        stop_on_losses: !!document.getElementById("farm-cfg-stop-on-losses")?.checked,
+      };
+      await window.api.updateFarmConfig(payload);
+      showToast("success", "Configurações de farm guardadas com sucesso!");
+    } catch (err) {
+      showToast("error", `Falha ao guardar configurações: ${err.message}`);
+    }
+  });
+
+  document.getElementById("btn-refresh-farm-targets-list")?.addEventListener("click", loadAmFarmView);
+
+  document.getElementById("btn-radar-sync-world")?.addEventListener("click", async () => {
+    try {
+      showToast("info", "A sincronizar dados oficiais do mundo (village.txt, player.txt)...");
+      const res = await window.api.syncWorldData(null, true);
+      showToast("success", `Sincronização concluída: ${res.villages_count} aldeias carregadas.`);
+      await loadRadarInactivesView();
+    } catch (err) {
+      showToast("error", `Erro na sincronização: ${err.message}`);
+    }
+  });
+
+  document.getElementById("btn-apply-radar-filters")?.addEventListener("click", loadRadarInactivesView);
+
+  let radarSearchTimer = null;
+  document.getElementById("radar-search-query")?.addEventListener("input", () => {
+    clearTimeout(radarSearchTimer);
+    radarSearchTimer = setTimeout(loadRadarInactivesView, 350);
+  });
+
+  // =========================================================================
+  // --- MÓDULO 4.2: EVOLUÇÃO E MONITORIZAÇÃO DE JOGADORES NO RAIO X ---
+  // =========================================================================
+
+  let currentRadarMode = "inactives";
+
+  function switchRadarMode(mode) {
+    currentRadarMode = mode;
+    const btnInact = document.getElementById("btn-radar-view-inactives");
+    const btnEvo = document.getElementById("btn-radar-view-evolution");
+    const viewInact = document.getElementById("radar-mode-inactives");
+    const viewEvo = document.getElementById("radar-mode-evolution");
+
+    if (btnInact) {
+      btnInact.className = mode === "inactives" ? "btn btn-primary btn-sm" : "btn btn-secondary btn-sm";
+      btnInact.style.background = mode === "inactives" ? "" : "rgba(30,41,59,0.5)";
+      btnInact.style.color = mode === "inactives" ? "" : "var(--text-muted)";
+    }
+    if (btnEvo) {
+      btnEvo.className = mode === "evolution" ? "btn btn-primary btn-sm" : "btn btn-secondary btn-sm";
+      btnEvo.style.background = mode === "evolution" ? "" : "rgba(30,41,59,0.5)";
+      btnEvo.style.color = mode === "evolution" ? "" : "var(--text-muted)";
+    }
+
+    if (viewInact) viewInact.style.display = mode === "inactives" ? "flex" : "none";
+    if (viewEvo) viewEvo.style.display = mode === "evolution" ? "flex" : "none";
+
+    if (mode === "evolution") {
+      loadRadarPlayersEvolutionView();
+    } else {
+      loadRadarInactivesView();
+    }
+  }
+  window.switchRadarMode = switchRadarMode;
+
+  async function loadRadarPlayersEvolutionView() {
+    try {
+      const radiusInput = document.getElementById("radar-evo-radius");
+      const radius = radiusInput ? parseFloat(radiusInput.value) || 25 : 25;
+      const searchInput = document.getElementById("radar-evo-search-query");
+      const query = searchInput ? searchInput.value.trim() : "";
+
+      const tbody = document.getElementById("radar-evolution-table-body");
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 24px;">A varrer jogadores e calcular séries temporais no raio de ${radius} campos...</td></tr>`;
+      }
+
+      const res = await window.api.getRadarPlayersRadius({
+        max_distance: radius,
+        search_query: query,
+        limit: 150,
+      });
+
+      if (res && res.status === "success") {
+        const counts = res.counts || {};
+        const countAcc = document.getElementById("radar-evo-count-accelerating");
+        const countGrow = document.getElementById("radar-evo-count-growing");
+        const countStag = document.getElementById("radar-evo-count-stagnant");
+        const countReg = document.getElementById("radar-evo-count-regressive");
+        const countTot = document.getElementById("radar-evo-count-total");
+
+        if (countAcc) countAcc.textContent = counts.accelerating || 0;
+        if (countGrow) countGrow.textContent = counts.growing || 0;
+        if (countStag) countStag.textContent = (counts.stagnant || 0) + (counts.inactive || 0);
+        if (countReg) countReg.textContent = counts.regressive || 0;
+        if (countTot) countTot.textContent = res.total_players_found || 0;
+
+        const players = res.players || [];
+        if (tbody) {
+          if (players.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 24px;">Nenhum jogador encontrado no raio de ${radius} campos. Experimente aumentar o raio ou sincronizar novos snapshots.</td></tr>`;
+          } else {
+            let html = "";
+            for (const p of players) {
+              const delta24Prefix = p.delta_24h > 0 ? `+${p.delta_24h}` : `${p.delta_24h}`;
+              const delta24Class = p.delta_24h > 0 ? "color: var(--neon-emerald);" : (p.delta_24h < 0 ? "color: var(--neon-rose);" : "color: var(--text-muted);");
+
+              const delta7dPrefix = p.delta_7d > 0 ? `+${p.delta_7d}` : `${p.delta_7d}`;
+              const delta7dClass = p.delta_7d > 0 ? "color: var(--neon-emerald);" : (p.delta_7d < 0 ? "color: var(--neon-rose);" : "color: var(--text-muted);");
+
+              const trendBadge = `<span class="badge" style="background: rgba(255,255,255,0.05); color: ${p.trend_color}; border: 1px solid ${p.trend_color}; font-size: 0.72rem; padding: 2px 8px;">${escapeHtml(p.trend_label)}</span>`;
+
+              const safePName = escapeHtml(p.player_name || "").replace(/'/g, "\\'");
+              const safeAlly = escapeHtml(p.ally_tag || "").replace(/'/g, "\\'");
+
+              html += `<tr>
+                <td><strong>${escapeHtml(p.player_name)}</strong></td>
+                <td><span style="color: var(--neon-purple); font-weight: 600;">${p.ally_tag ? escapeHtml(p.ally_tag) : '-'}</span></td>
+                <td>
+                  <div>${escapeHtml(p.nearest_village_name)}</div>
+                  <span style="font-family: var(--font-mono); color: var(--neon-cyan); font-size: 0.75rem;">(${p.nearest_coords})</span>
+                </td>
+                <td><span style="font-weight: 600;">${p.nearest_distance.toFixed(1)}</span> camp.</td>
+                <td><strong>${(p.player_points || 0).toLocaleString()}</strong> pts</td>
+                <td><span class="badge" style="background: rgba(30,41,59,0.8);">${p.villages_count || 1}</span></td>
+                <td><span style="${delta24Class} font-family: var(--font-mono); font-weight: 700;">${delta24Prefix} pts</span></td>
+                <td><span style="${delta7dClass} font-family: var(--font-mono); font-weight: 700;">${delta7dPrefix} pts</span></td>
+                <td>${trendBadge}</td>
+                <td style="text-align: right; white-space: nowrap;">
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="openPlayerHistoryModal(${p.player_id}, '${safePName}', '${safeAlly}', ${p.player_points})" style="padding: 2px 8px; font-size: 0.75rem;">
+                    <span>📊</span> Histórico
+                  </button>
+                  <button type="button" class="btn btn-outline btn-sm" onclick="addRadarTarget('${p.nearest_coords}')" style="padding: 2px 8px; font-size: 0.75rem; border-color: rgba(6,182,212,0.4); color: var(--neon-cyan); margin-left: 4px;">
+                    <span>➕</span> Farm
+                  </button>
+                </td>
+              </tr>`;
+            }
+            tbody.innerHTML = html;
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Erro ao carregar evolução dos jogadores:", err);
+      showToast("error", `Erro ao carregar jogadores no raio: ${err.message}`);
+    }
+  }
+  window.loadRadarPlayersEvolutionView = loadRadarPlayersEvolutionView;
+
+  async function triggerRadarSyncEvo() {
+    try {
+      showToast("info", "A recolher novo snapshot oficial do mundo...");
+      const res = await window.api.syncWorldData(null, true);
+      showToast("success", `Snapshot recolhido: ${res.villages_count} aldeias e ${res.players_count} jogadores sincronizados.`);
+      await loadRadarPlayersEvolutionView();
+    } catch (err) {
+      showToast("error", `Erro ao sincronizar snapshot: ${err.message}`);
+    }
+  }
+  window.triggerRadarSyncEvo = triggerRadarSyncEvo;
+
+  let radarEvoSearchTimer = null;
+  document.getElementById("radar-evo-search-query")?.addEventListener("input", () => {
+    clearTimeout(radarEvoSearchTimer);
+    radarEvoSearchTimer = setTimeout(loadRadarPlayersEvolutionView, 350);
+  });
+
+  async function openPlayerHistoryModal(playerId, playerName, allyTag, currentPoints) {
+    const modal = document.getElementById("player-history-modal");
+    if (!modal) return;
+
+    const titleEl = document.getElementById("player-history-modal-title");
+    if (titleEl) {
+      titleEl.innerHTML = `<span>📈</span> Evolução Temporal: <span style="color: var(--neon-cyan);">${escapeHtml(playerName || "Jogador")}</span>`;
+    }
+
+    const metaBar = document.getElementById("player-history-meta-bar");
+    if (metaBar) {
+      metaBar.innerHTML = `
+        <div><strong>ID:</strong> <span style="font-family: var(--font-mono);">${playerId}</span></div>
+        <div><strong>Tribo:</strong> <span style="color: var(--neon-purple); font-weight: 600;">${allyTag || 'Sem Tribo'}</span></div>
+        <div><strong>Pontos Atuais:</strong> <span style="color: var(--neon-emerald); font-weight: 700;">${(currentPoints || 0).toLocaleString()} pts</span></div>
+      `;
+    }
+
+    const tbody = document.getElementById("player-history-table-body");
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 16px;">A recuperar medições no histórico SQLite...</td></tr>`;
+    }
+
+    modal.style.display = "flex";
+
+    try {
+      const res = await window.api.getPlayerHistory(playerId);
+      if (res && res.status === "success") {
+        const timeline = res.timeline || [];
+        if (tbody) {
+          if (timeline.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 16px;">Apenas 1 medição disponível. O bot continuará a registrar novos snapshots periodicamente.</td></tr>`;
+          } else {
+            let html = "";
+            for (const row of timeline) {
+              const deltaPrefix = row.delta > 0 ? `+${row.delta}` : `${row.delta}`;
+              const deltaColor = row.delta > 0 ? "color: var(--neon-emerald);" : (row.delta < 0 ? "color: var(--neon-rose);" : "color: var(--text-muted);");
+
+              html += `<tr>
+                <td><span style="font-family: var(--font-mono);">${row.date_human}</span> <small style="color: var(--text-muted);">(${row.hours_diff > 0 ? '+' + row.hours_diff + 'h' : 'base'})</small></td>
+                <td><strong>${row.points.toLocaleString()}</strong></td>
+                <td><span style="${deltaColor} font-family: var(--font-mono); font-weight: 700;">${deltaPrefix}</span></td>
+                <td>${row.villages_count}</td>
+                <td>#${row.rank || '-'}</td>
+                <td><span style="color: var(--neon-purple);">${row.ally_tag || '-'}</span></td>
+              </tr>`;
+            }
+            tbody.innerHTML = html;
+          }
+        }
+      }
+    } catch (e) {
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--neon-rose); padding: 16px;">Erro ao obter histórico: ${e.message}</td></tr>`;
+      }
+    }
+  }
+  window.openPlayerHistoryModal = openPlayerHistoryModal;
+
+  function closePlayerHistoryModal() {
+    const modal = document.getElementById("player-history-modal");
+    if (modal) modal.style.display = "none";
+  }
+  window.closePlayerHistoryModal = closePlayerHistoryModal;
+
+  // --- Gestor Modal de Modelos de Saque (AM Farm) ---
+  const UNIT_HAUL_CAPACITIES = {
+    spear: 25,
+    sword: 15,
+    axe: 10,
+    archer: 10,
+    spy: 0,
+    light: 80,
+    marcher: 50,
+    heavy: 50,
+    ram: 0,
+    catapult: 0,
+    knight: 100,
+    snob: 0,
+  };
+
+  const UNIT_METADATA = [
+    { key: "spear", name: "Lanceiro", icon: "🗡️" },
+    { key: "sword", name: "Espadachim", icon: "🛡️" },
+    { key: "axe", name: "Viking", icon: "🪓" },
+    { key: "archer", name: "Arqueiro", icon: "🏹" },
+    { key: "spy", name: "Espião", icon: "👁️" },
+    { key: "light", name: "Cavalaria Leve", icon: "🐎" },
+    { key: "marcher", name: "Arq. a Cavalo", icon: "🏹🐎" },
+    { key: "heavy", name: "Cav. Pesada", icon: "🛡️🐎" },
+    { key: "ram", name: "Aríete", icon: "🚪" },
+    { key: "catapult", name: "Catapulta", icon: "☄️" },
+    { key: "knight", name: "Paladino", icon: "👑" },
+    { key: "snob", name: "Nobre", icon: "🎩" },
+  ];
+
+  let farmModalActiveTmpl = "A";
+  let farmModalTemplatesData = {
+    A: { spear: 0, sword: 0, axe: 0, archer: 0, spy: 0, light: 5, marcher: 0, heavy: 0, ram: 0, catapult: 0, knight: 0, snob: 0 },
+    B: { spear: 0, sword: 0, axe: 0, archer: 0, spy: 0, light: 10, marcher: 0, heavy: 0, ram: 0, catapult: 0, knight: 0, snob: 0 },
+  };
+
+  function openFarmTemplatesModal() {
+    const modal = document.getElementById("farm-templates-modal");
+    if (modal) {
+      modal.style.display = "flex";
+      modal.classList.add("active");
+    }
+    selectFarmModalTemplate(farmModalActiveTmpl);
+  }
+
+  function closeFarmTemplatesModal() {
+    const modal = document.getElementById("farm-templates-modal");
+    if (modal) {
+      modal.style.display = "none";
+      modal.classList.remove("active");
+    }
+    const msg = document.getElementById("farm-tmpl-save-status-msg");
+    if (msg) msg.textContent = "";
+  }
+
+  function selectFarmModalTemplate(tmpl) {
+    farmModalActiveTmpl = tmpl.toUpperCase();
+    const btnA = document.getElementById("btn-tab-farm-tmpl-a");
+    const btnB = document.getElementById("btn-tab-farm-tmpl-b");
+    if (btnA) {
+      btnA.className = farmModalActiveTmpl === "A" ? "btn btn-primary" : "btn btn-secondary";
+      btnA.style.background = farmModalActiveTmpl === "A" ? "var(--gradient-primary)" : "rgba(30,41,59,0.5)";
+      btnA.style.color = farmModalActiveTmpl === "A" ? "#fff" : "var(--text-muted)";
+    }
+    if (btnB) {
+      btnB.className = farmModalActiveTmpl === "B" ? "btn btn-primary" : "btn btn-secondary";
+      btnB.style.background = farmModalActiveTmpl === "B" ? "var(--gradient-primary)" : "rgba(30,41,59,0.5)";
+      btnB.style.color = farmModalActiveTmpl === "B" ? "#fff" : "var(--text-muted)";
+    }
+    renderFarmTemplateUnitsGrid();
+    calcAndRenderHaulCapacity();
+  }
+
+  function renderFarmTemplateUnitsGrid() {
+    const grid = document.getElementById("farm-tmpl-units-grid");
+    if (!grid) return;
+    const currentUnits = farmModalTemplatesData[farmModalActiveTmpl] || {};
+
+    let html = "";
+    for (const u of UNIT_METADATA) {
+      const qty = currentUnits[u.key] || 0;
+      html += `
+        <div style="background: rgba(30, 41, 59, 0.6); padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 6px;">
+          <div style="font-size: 0.75rem; font-weight: 600; color: var(--text-main); display: flex; align-items: center; justify-content: space-between;">
+            <span>${u.icon} ${u.name}</span>
+            <small style="color: var(--text-muted); font-size: 0.68rem;">(${UNIT_HAUL_CAPACITIES[u.key] || 0} cap)</small>
+          </div>
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="adjustFarmUnit('${u.key}', -1)" style="padding: 2px 7px; font-size: 0.72rem;">-</button>
+            <input type="number" id="input-farm-unit-${u.key}" value="${qty}" min="0" max="10000" style="width: 100%; text-align: center; font-family: var(--font-mono); font-size: 0.8rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); color: #fff; border-radius: 4px; padding: 2px 4px;" oninput="onFarmUnitInput('${u.key}', this.value)">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="adjustFarmUnit('${u.key}', 1)" style="padding: 2px 7px; font-size: 0.72rem;">+</button>
+          </div>
+        </div>
+      `;
+    }
+    grid.innerHTML = html;
+  }
+
+  window.adjustFarmUnit = function(unitKey, delta) {
+    const curr = farmModalTemplatesData[farmModalActiveTmpl] = farmModalTemplatesData[farmModalActiveTmpl] || {};
+    const val = Math.max(0, (curr[unitKey] || 0) + delta);
+    curr[unitKey] = val;
+    const input = document.getElementById(`input-farm-unit-${unitKey}`);
+    if (input) input.value = val;
+    calcAndRenderHaulCapacity();
+  };
+
+  window.onFarmUnitInput = function(unitKey, valStr) {
+    const curr = farmModalTemplatesData[farmModalActiveTmpl] = farmModalTemplatesData[farmModalActiveTmpl] || {};
+    const n = Math.max(0, parseInt(valStr, 10) || 0);
+    curr[unitKey] = n;
+    calcAndRenderHaulCapacity();
+  };
+
+  function calcAndRenderHaulCapacity() {
+    const curr = farmModalTemplatesData[farmModalActiveTmpl] || {};
+    let totalCap = 0;
+    for (const [u, qty] of Object.entries(curr)) {
+      totalCap += (parseInt(qty, 10) || 0) * (UNIT_HAUL_CAPACITIES[u] || 0);
+    }
+    const capEl = document.getElementById("farm-tmpl-haul-capacity");
+    if (capEl) capEl.textContent = totalCap.toLocaleString();
+  }
+
+  window.applyFarmPreset = function(presetKey) {
+    const curr = farmModalTemplatesData[farmModalActiveTmpl] = {
+      spear: 0, sword: 0, axe: 0, archer: 0, spy: 0, light: 0, marcher: 0, heavy: 0, ram: 0, catapult: 0, knight: 0, snob: 0
+    };
+    if (presetKey === "micro_2lc") {
+      curr.light = 2;
+    } else if (presetKey === "std_4lc_1spy") {
+      curr.light = 4;
+      curr.spy = 1;
+    } else if (presetKey === "infantry_early") {
+      curr.spear = 10;
+      curr.sword = 10;
+    } else if (presetKey === "heavy_10lc") {
+      curr.light = 10;
+      curr.spy = 2;
+    }
+    renderFarmTemplateUnitsGrid();
+    calcAndRenderHaulCapacity();
+  };
+
+  async function saveFarmTemplateToGame() {
+    const msgEl = document.getElementById("farm-tmpl-save-status-msg");
+    try {
+      if (msgEl) msgEl.textContent = "A gravar modelo no servidor do jogo...";
+      const tmpl = farmModalActiveTmpl.toLowerCase();
+      const units = farmModalTemplatesData[farmModalActiveTmpl] || {};
+      const res = await window.api.updateFarmTemplate(tmpl, units);
+      if (res && res.status === "success") {
+        showToast("success", `Modelo ${farmModalActiveTmpl} guardado com sucesso no jogo!`);
+        if (msgEl) msgEl.textContent = `✓ Modelo ${farmModalActiveTmpl} gravado!`;
+        setTimeout(closeFarmTemplatesModal, 800);
+        await loadAmFarmView();
+      } else {
+        throw new Error(res.message || "Falha ao gravar.");
+      }
+    } catch (err) {
+      if (msgEl) msgEl.textContent = `Erro: ${err.message}`;
+      showToast("error", `Falha ao gravar modelo: ${err.message}`);
+    }
+  }
+
+  // Listeners do Modal de Modelos
+  window.openFarmTemplatesModal = openFarmTemplatesModal;
+  window.closeFarmTemplatesModal = closeFarmTemplatesModal;
+  window.selectFarmModalTemplate = selectFarmModalTemplate;
+  document.getElementById("btn-open-farm-templates-modal")?.addEventListener("click", openFarmTemplatesModal);
+  document.getElementById("btn-close-farm-templates-modal")?.addEventListener("click", closeFarmTemplatesModal);
+  document.getElementById("btn-cancel-farm-templates-modal")?.addEventListener("click", closeFarmTemplatesModal);
+  document.getElementById("btn-tab-farm-tmpl-a")?.addEventListener("click", () => selectFarmModalTemplate("A"));
+  document.getElementById("btn-tab-farm-tmpl-b")?.addEventListener("click", () => selectFarmModalTemplate("B"));
+  document.getElementById("btn-save-farm-template-to-game")?.addEventListener("click", saveFarmTemplateToGame);
 
   let initialLoaded = false;
 

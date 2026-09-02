@@ -5,7 +5,7 @@
     "_comentario": "Templates dispon\u00edveis: 'rush_resources' (recursos), 'balanced' (balanceado), 'military_rush' (tropas/cavalaria) ou 'custom'",
     "template": "custom",
     "max_queue": 2,
-    "interval_seconds": 75.0,
+    "interval_seconds": 320.0,
     "custom_plan": [
       [
         "wood",

@@ -62,12 +62,17 @@ class TestVillageCoordinator(unittest.IsolatedAsyncioTestCase):
         self.coordinator.set_village_category(self.account, self.config, 102, "attack")
         self.assertEqual(self.coordinator.get_village_category(self.account, self.config, 102), VillageCategory.ATTACK)
 
-    def test_custom_village_category(self):
-        """Testa suporte a modelos/categorias customizadas como 'nuke_squad'."""
-        self.coordinator.set_village_category(self.account, self.config, 101, "nuke_squad")
+    def test_strict_village_category(self):
+        """Testa suporte e normalização estrita de categorias para attack ou defense."""
+        self.coordinator.set_village_category(self.account, self.config, 101, "defense")
         cat = self.coordinator.get_village_category(self.account, self.config, 101)
-        self.assertEqual(cat, "nuke_squad")
-        self.assertEqual(self.config.villages["101"].category, "nuke_squad")
+        self.assertEqual(cat, VillageCategory.DEFENSE)
+        self.assertEqual(self.config.villages["101"].category, "defense")
+
+        self.coordinator.set_village_category(self.account, self.config, 101, "attack")
+        cat = self.coordinator.get_village_category(self.account, self.config, 101)
+        self.assertEqual(cat, VillageCategory.ATTACK)
+        self.assertEqual(self.config.villages["101"].category, "attack")
 
     def test_category_building_plans(self):
         """Testa se o plano de construção reflete a categoria da aldeia."""

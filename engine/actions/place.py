@@ -113,9 +113,14 @@ class UnitsCount:
     knight: int = 0
     snob: int = 0
 
-    def total_units(self) -> int:
+    @property
+    def total(self) -> int:
         """Contagem numérica absoluta de tropas."""
         return sum(self.to_dict().values())
+
+    def total_units(self) -> int:
+        """Contagem numérica absoluta de tropas (alias)."""
+        return self.total
 
     def carrying_capacity(self) -> int:
         """Capacidade total de carga de recursos do conjunto de tropas."""
@@ -341,7 +346,10 @@ class PlaceManager:
                 logger.error(f"[{account.world}] Erro na confirmação final: {err['error_message']}")
                 return False
 
-            logger.info(f"[{account.world}] ✅ Comando militar despachado com sucesso!")
+            target_name = confirmation_data.get("target_name") or "Alvo"
+            target_coords = confirmation_data.get("target_coords") or ""
+            dur = confirmation_data.get("duration_str") or "N/A"
+            logger.info(f"[{account.world}] ✅ [COMANDO DESPACHADO] {target_name} ({target_coords}) | Duração: {dur}")
             return True
         except Exception as e:
             logger.error(f"[{account.world}] Falha ao confirmar comando final: {e}")
@@ -355,10 +363,11 @@ class PlaceManager:
         is_attack: bool = True,
         village_id: Optional[int] = None,
         allow_partial: bool = False,
+        adapt_missing_spies: bool = False,
     ) -> bool:
         """
         Fluxo completo de envio de comando militar (Etapa 1 + Etapa 2):
-        1. Valida tropas disponíveis na aldeia.
+        1. Valida tropas disponíveis na aldeia de acordo com o modelo requisitado.
         2. Submete o formulário de preparação.
         3. Valida e despacha a confirmação final.
         """
@@ -386,8 +395,8 @@ class PlaceManager:
                     missing.append(f"{wanted - avail} {u}")
 
             troops_to_send = units
-            # Se a única unidade em falta for espião (early game) e a aldeia tiver tropas de ataque, adapta
-            if missing == [f"{units.spy} spy"] and (state.units.spear > 0 or state.units.axe > 0 or state.units.light > 0):
+            # Apenas se expressamente configurado para adaptação de espião em early-game
+            if adapt_missing_spies and missing == [f"{units.spy} spy"] and (state.units.spear > 0 or state.units.axe > 0 or state.units.light > 0):
                 adapted_dict = units.to_dict()
                 adapted_dict["spy"] = 0
                 adapted_units = UnitsCount.from_dict(adapted_dict)

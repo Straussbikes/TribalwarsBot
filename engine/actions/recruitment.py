@@ -222,6 +222,16 @@ class RecruitmentManager:
                 )
             else:
                 logger.info(f"[{account.world}] ✅ Recrutamento processado no {building.capitalize()}: {order_summary}")
+
+            try:
+                tracker = getattr(account, "stats_tracker", None) or (account.get_stats_tracker() if hasattr(account, "get_stats_tracker") else None)
+                if tracker:
+                    for u, cnt in valid_orders.items():
+                        if cnt > 0:
+                            tracker.record_recruitment(village_id=v_id or 0, unit=u, count=cnt)
+            except Exception as e_st:
+                logger.debug(f"Aviso ao registar estatísticas de recrutamento: {e_st}")
+
             return True
         except Exception as e:
             logger.error(f"[{account.world}] Falha ao recrutar no {building}: {e}")

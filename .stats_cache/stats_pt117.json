@@ -1,16 +1,606 @@
 {
   "world": "pt117",
   "created_at": 1788088113.742273,
-  "last_updated": 1788088113.7422736,
-  "total_wood": 0,
-  "total_stone": 0,
-  "total_iron": 0,
-  "total_attacks_sent": 0,
-  "total_attacks_successful": 0,
-  "total_villages_farmed": 0,
+  "last_updated": 1788347502.6574788,
+  "total_wood": 1000,
+  "total_stone": 1000,
+  "total_iron": 1000,
+  "total_attacks_sent": 35,
+  "total_attacks_successful": 35,
+  "total_villages_farmed": 20,
   "troops_recruited_by_unit": {},
   "buildings_constructed_count": 0,
-  "hourly_buckets": {},
-  "recent_loot_events": [],
-  "recent_commands": []
+  "hourly_buckets": {
+    "2026-09-02 11:00": {
+      "hour_key": "2026-09-02 11:00",
+      "timestamp": 1788343200.0,
+      "wood": 1000,
+      "stone": 1000,
+      "iron": 1000,
+      "total": 3000,
+      "attacks_count": 35,
+      "attacks_successful": 2,
+      "villages_farmed": 20,
+      "troops_recruited": 0
+    }
+  },
+  "recent_loot_events": [
+    {
+      "timestamp": 1788347502.6574788,
+      "village_id": 12345,
+      "target_x": 503,
+      "target_y": 503,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788347502.6538594,
+      "village_id": 12345,
+      "target_x": 502,
+      "target_y": 502,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788347502.6229143,
+      "village_id": 12345,
+      "target_x": 452,
+      "target_y": 552,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788347502.6188178,
+      "village_id": 12345,
+      "target_x": 451,
+      "target_y": 551,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788347176.9815454,
+      "village_id": 12345,
+      "target_x": 503,
+      "target_y": 503,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788347176.9775739,
+      "village_id": 12345,
+      "target_x": 502,
+      "target_y": 502,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788347176.9426563,
+      "village_id": 12345,
+      "target_x": 452,
+      "target_y": 552,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788347176.938091,
+      "village_id": 12345,
+      "target_x": 451,
+      "target_y": 551,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788347131.22528,
+      "village_id": 12345,
+      "target_x": 503,
+      "target_y": 503,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788347131.2218957,
+      "village_id": 12345,
+      "target_x": 502,
+      "target_y": 502,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788347131.186276,
+      "village_id": 12345,
+      "target_x": 452,
+      "target_y": 552,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788347131.1825075,
+      "village_id": 12345,
+      "target_x": 451,
+      "target_y": 551,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788346905.108883,
+      "village_id": 12345,
+      "target_x": 503,
+      "target_y": 503,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788346905.105279,
+      "village_id": 12345,
+      "target_x": 502,
+      "target_y": 502,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788346905.0651164,
+      "village_id": 12345,
+      "target_x": 452,
+      "target_y": 552,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788346905.0625117,
+      "village_id": 12345,
+      "target_x": 451,
+      "target_y": 551,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788346827.6753576,
+      "village_id": 12345,
+      "target_x": 503,
+      "target_y": 503,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788346827.672821,
+      "village_id": 12345,
+      "target_x": 502,
+      "target_y": 502,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788346827.6477802,
+      "village_id": 12345,
+      "target_x": 452,
+      "target_y": 552,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    },
+    {
+      "timestamp": 1788346827.6452436,
+      "village_id": 12345,
+      "target_x": 451,
+      "target_y": 551,
+      "wood": 50,
+      "stone": 50,
+      "iron": 50,
+      "total": 150,
+      "wall": 0,
+      "losses": false,
+      "village_name": "Aldeia B\u00e1rbara"
+    }
+  ],
+  "recent_commands": [
+    {
+      "timestamp": 1788347502.6558447,
+      "command_type": "farm",
+      "target_coords": "503|503",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347502.652134,
+      "command_type": "farm",
+      "target_coords": "502|502",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347502.6210015,
+      "command_type": "farm",
+      "target_coords": "452|552",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347502.6168332,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347502.6008852,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347502.5864446,
+      "command_type": "farm",
+      "target_coords": "455|553",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347502.582774,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347176.979687,
+      "command_type": "farm",
+      "target_coords": "503|503",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347176.9756215,
+      "command_type": "farm",
+      "target_coords": "502|502",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347176.9401631,
+      "command_type": "farm",
+      "target_coords": "452|552",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347176.935929,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347176.9226797,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347176.9063244,
+      "command_type": "farm",
+      "target_coords": "455|553",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347176.9020603,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347131.2239034,
+      "command_type": "farm",
+      "target_coords": "503|503",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347131.2201948,
+      "command_type": "farm",
+      "target_coords": "502|502",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347131.1843765,
+      "command_type": "farm",
+      "target_coords": "452|552",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347131.1807811,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347131.16669,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347131.1491475,
+      "command_type": "farm",
+      "target_coords": "455|553",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788347131.1458056,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346905.1073086,
+      "command_type": "farm",
+      "target_coords": "503|503",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346905.1034238,
+      "command_type": "farm",
+      "target_coords": "502|502",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346905.063814,
+      "command_type": "farm",
+      "target_coords": "452|552",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346905.0612636,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346905.0491183,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346905.035192,
+      "command_type": "farm",
+      "target_coords": "455|553",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346905.0321512,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346827.674166,
+      "command_type": "farm",
+      "target_coords": "503|503",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346827.671741,
+      "command_type": "farm",
+      "target_coords": "502|502",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346827.6466935,
+      "command_type": "farm",
+      "target_coords": "452|552",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346827.6441128,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346827.6322072,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346827.6200933,
+      "command_type": "farm",
+      "target_coords": "455|553",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    },
+    {
+      "timestamp": 1788346827.6173682,
+      "command_type": "farm",
+      "target_coords": "451|551",
+      "units": {},
+      "success": true,
+      "response_time_ms": 0,
+      "details": ""
+    }
+  ]
 }

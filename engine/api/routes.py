@@ -97,6 +97,50 @@ class ArbitrageToggleRequest(BaseModel):
     emergency_queue_seconds: Optional[float] = None
 
 
+class FarmToggleRequest(BaseModel):
+    enabled: Optional[bool] = None
+    world: Optional[str] = None
+
+
+class FarmTriggerRequest(BaseModel):
+    force: Optional[bool] = True
+    village_id: Optional[int] = None
+    world: Optional[str] = None
+
+
+class FarmConfigRequest(BaseModel):
+    world: Optional[str] = None
+    enabled: Optional[bool] = None
+    default_template: Optional[str] = None
+    max_distance: Optional[float] = None
+    scan_all_radius_barbarians: Optional[bool] = None
+    bootstrap_unlisted_barbarians: Optional[bool] = None
+    min_interval_seconds: Optional[float] = None
+    max_interval_seconds: Optional[float] = None
+    min_delay_per_attack_ms: Optional[int] = None
+    max_delay_per_attack_ms: Optional[int] = None
+    avoid_concurrent_attacks: Optional[bool] = None
+    stop_on_losses: Optional[bool] = None
+    custom_targets: Optional[List[Any]] = None
+
+
+class RadarSyncRequest(BaseModel):
+    world: Optional[str] = None
+    force: Optional[bool] = False
+
+
+class RadarTargetAddRequest(BaseModel):
+    coords: str
+    world: Optional[str] = None
+
+
+class FarmTemplateUpdateRequest(BaseModel):
+    template: str
+    units: Dict[str, int]
+    village_id: Optional[int] = None
+    world: Optional[str] = None
+
+
 class RadarFarmRequest(BaseModel):
     radius: Optional[float] = None
     squad_troops: Optional[Dict[str, int]] = None
@@ -961,6 +1005,135 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
             emergency_queue_seconds=payload.emergency_queue_seconds,
         )
         return ActionResponse(status=res["status"], message=res.get("message"))
+
+    # --- Endpoints do Assistente de Saque & Farm (/api/farm/*) ---
+
+    @router.get("/farm/status")
+    def get_farm_status(world: Optional[str] = None):
+        """Retorna o estado operacional do módulo de farm e tropas disponíveis."""
+        return context.get_farm_status(world=world)
+
+    @router.post("/farm/toggle", response_model=ActionResponse)
+    def toggle_farm(payload: FarmToggleRequest):
+        """Liga ou desliga o envio contínuo de saques."""
+        res = context.toggle_farm_module(enabled=payload.enabled, world=payload.world)
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    @router.post("/farm/trigger")
+    async def trigger_farm_wave(payload: FarmTriggerRequest):
+        """Dispara uma execução assíncrona imediata da ronda de saques."""
+        return await context.trigger_farm_cycle(
+            force=payload.force if payload.force is not None else True,
+            village_id=payload.village_id,
+            world=payload.world,
+        )
+
+    @router.post("/farm/config")
+    def update_farm_config(payload: FarmConfigRequest):
+        """Atualiza e persiste os parâmetros operacionais do Assistente de Saque."""
+        raw_dict = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
+        world = raw_dict.pop("world", None)
+        return context.update_farm_configuration(payload=raw_dict, world=world)
+
+    @router.get("/farm/targets")
+    async def get_farm_targets(
+        radius: Optional[float] = None,
+        limit: int = 100,
+        village_id: Optional[int] = None,
+        world: Optional[str] = None,
+    ):
+        """Lista as aldeias bárbaras disponíveis com relatórios e status de envio."""
+        return await context.get_farm_targets(
+            radius=radius,
+            limit=limit,
+            village_id=village_id,
+            world=world,
+        )
+
+    @router.post("/farm/templates")
+    async def update_farm_template(payload: FarmTemplateUpdateRequest):
+        """Atualiza e persiste a configuração do Modelo A ou B diretamente no jogo."""
+        return await context.update_farm_template(
+            template=payload.template,
+            units=payload.units,
+            village_id=payload.village_id,
+            world=payload.world,
+        )
+
+    # --- Endpoints do Radar de Inativos (/api/radar/*) ---
+
+    @router.get("/radar/inactives")
+    def get_radar_inactives(
+        world: Optional[str] = None,
+        max_distance: float = 25.0,
+        days_window: float = 7.0,
+        max_points_growth: int = 30,
+        min_points: int = 200,
+        max_points: int = 6000,
+        only_tribeless: bool = False,
+        include_single_member_tribes: bool = True,
+        include_barbarians: bool = False,
+        search_query: Optional[str] = None,
+        limit: int = 150,
+    ):
+        """Varre e retorna alvos inativos com base nos filtros informados."""
+        return context.get_radar_inactives(
+            world=world,
+            max_distance=max_distance,
+            days_window=days_window,
+            max_points_growth=max_points_growth,
+            min_points=min_points,
+            max_points=max_points,
+            only_tribeless=only_tribeless,
+            include_single_member_tribes=include_single_member_tribes,
+            include_barbarians=include_barbarians,
+            search_query=search_query,
+            limit=limit,
+        )
+
+    @router.post("/radar/sync")
+    async def sync_world_dumps(payload: RadarSyncRequest):
+        """Dispara o worker assíncrono para download dos dados do mundo em background."""
+        return await context.sync_world_data(world=payload.world, force=payload.force or False)
+
+    @router.get("/radar/sync-status")
+    def get_world_sync_status(world: Optional[str] = None):
+        """Consulta o progresso do download e idade da base local."""
+        return context.get_world_sync_status(world=world)
+
+    @router.post("/radar/targets/add", response_model=ActionResponse)
+    def add_radar_target_to_farm(payload: RadarTargetAddRequest):
+        """Adiciona uma coordenada de inativo à lista fixa de farm."""
+        res = context.add_custom_farm_target(coords=payload.coords, world=payload.world)
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    @router.get("/radar/players-radius")
+    def get_radar_players_radius(
+        world: Optional[str] = None,
+        max_distance: float = 25.0,
+        search_query: Optional[str] = None,
+        limit: int = 100,
+    ):
+        """Retorna a evolução estatística completa dos jogadores no raio de X campos."""
+        return context.get_radar_players_radius(
+            world=world,
+            max_distance=max_distance,
+            search_query=search_query,
+            limit=limit,
+        )
+
+    @router.get("/radar/player-history/{player_id}")
+    def get_radar_player_history(
+        player_id: int,
+        world: Optional[str] = None,
+        limit: int = 30,
+    ):
+        """Retorna a linha do tempo cronológica de medições e estatísticas de um jogador."""
+        return context.get_player_timeline(
+            player_id=player_id,
+            world=world,
+            limit=limit,
+        )
 
     # --- Endpoints de Radar de Bárbaras & Saque Recorrente (Item 2.3) ---
 

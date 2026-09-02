@@ -6,6 +6,7 @@ Extração resiliente de 'game_data', tokens CSRF, recursos e deteção de bot p
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 import urllib.parse
 
@@ -264,11 +265,16 @@ def extract_all_villages(
         for v_id_str, raw_label in matches:
             try:
                 v_id = int(v_id_str)
-                # Procura coordenadas no formato (123|456) ou 123|456
+                if v_id <= 0:
+                    continue
+
+                # Exige coordenadas no formato (123|456) ou 123|456 para evitar opções genéricas de formulário
                 coord_match = re.search(r'\(?(\d{1,3})\|(\d{1,3})\)?', raw_label)
                 if coord_match:
                     x = int(coord_match.group(1))
                     y = int(coord_match.group(2))
+                    if x <= 0 or y <= 0:
+                        continue
                     # Remove tags HTML e coordenadas do nome
                     name = raw_label[:coord_match.start()].strip()
                     name = re.sub(r'<[^>]+>', '', name).strip()
@@ -280,10 +286,6 @@ def extract_all_villages(
                         villages[v_id].name = name
                         villages[v_id].x = x
                         villages[v_id].y = y
-                else:
-                    clean_name = re.sub(r'<[^>]+>', '', raw_label).strip()
-                    if v_id not in villages and clean_name:
-                        villages[v_id] = VillageData(id=v_id, name=clean_name)
             except (ValueError, TypeError):
                 continue
 
@@ -296,10 +298,14 @@ def extract_all_villages(
         for v_id_str, raw_label in link_matches:
             try:
                 v_id = int(v_id_str)
+                if v_id <= 0:
+                    continue
                 coord_match = re.search(r'\(?(\d{1,3})\|(\d{1,3})\)?', raw_label)
                 if coord_match and v_id not in villages:
                     x = int(coord_match.group(1))
                     y = int(coord_match.group(2))
+                    if x <= 0 or y <= 0:
+                        continue
                     clean_name = raw_label[:coord_match.start()].strip()
                     clean_name = re.sub(r'<[^>]+>', '', clean_name).strip()
                     villages[v_id] = VillageData(
@@ -311,7 +317,8 @@ def extract_all_villages(
             except (ValueError, TypeError):
                 continue
 
-    return villages
+    # Remove qualquer aldeia inválida (sem ID positivo)
+    return {k: v for k, v in villages.items() if k > 0 and (v.x > 0 or v.y > 0 or v.name)}
 
 
 def parse_overview_villages(html: str) -> Dict[int, VillageData]:
@@ -1005,27 +1012,38 @@ def parse_command_confirmation(html: str) -> Dict[str, Any]:
 
     normalized = html.replace("&amp;", "&")
 
-    # 1. Verifica erros retornados pelo jogo (ex.: proteção de iniciantes, aldeia inválida)
-    error_match = re.search(r'<div[^>]*class=["\'](?:error_box|info_box\s+error)["\'][^>]*>(.*?)</div>', normalized, re.DOTALL | re.IGNORECASE)
-    if error_match:
+    # 1. Verifica erros reais e visíveis retornados pelo jogo (ex.: proteção de iniciantes, aldeia inválida)
+    for error_match in re.finditer(r'<div[^>]*class=["\'](?:error_box|info_box\s+error|error)["\'][^>]*>(.*?)</div>', normalized, re.DOTALL | re.IGNORECASE):
+        tag_open = error_match.group(0)
+        # Se for template invisível (display: none), ignora
+        if "display:none" in tag_open.replace(" ", "").lower():
+            continue
         err_msg = re.sub(r'<[^>]+>', '', error_match.group(1)).strip()
-        result["success"] = False
-        result["error_message"] = err_msg
-        return result
+        if err_msg:
+            result["success"] = False
+            result["error_message"] = err_msg
+            return result
 
-    # 2. Extrai todos os campos input hidden do formulário de confirmação
-    hidden_inputs = re.findall(
-        r'<input[^>]*type=["\']hidden["\'][^>]*name=["\']([^"\']+)["\'][^>]*value=["\']([^"\']*)["\']|<input[^>]*value=["\']([^"\']*)["\'][^>]*type=["\']hidden["\'][^>]*name=["\']([^"\']+)["\']',
-        normalized,
-        re.IGNORECASE,
-    )
+    # Verifica caixas de erro genéricas caso não sejam vazias nem ocultas
+    for err_tag in re.finditer(r'<(?:p|span|td|div)[^>]*class=["\'][^"\']*\berror\b[^"\']*["\'][^>]*>(.*?)</(?:p|span|td|div)>', normalized, re.DOTALL | re.IGNORECASE):
+        tag_str = err_tag.group(0)
+        if "display:none" in tag_str.replace(" ", "").lower():
+            continue
+        err_text = re.sub(r'<[^>]+>', '', err_tag.group(1)).strip()
+        if err_text and len(err_text) > 3 and "error_box" not in err_text:
+            result["success"] = False
+            result["error_message"] = err_text
+            return result
 
-    for g1, g2, g3, g4 in hidden_inputs:
-        if g1:
-            name, val = g1, g2
-        else:
-            name, val = g4, g3
-        result["hidden_fields"][name] = val
+    # 2. Extrai todos os campos input hidden do formulário de confirmação de forma independente da ordem
+    for input_match in re.finditer(r'<input\b[^>]*>', normalized, re.IGNORECASE):
+        tag = input_match.group(0)
+        if not re.search(r'type=["\']hidden["\']', tag, re.IGNORECASE):
+            continue
+        name_m = re.search(r'name=["\']([^"\']+)["\']', tag, re.IGNORECASE)
+        val_m = re.search(r'value=["\']([^"\']*)["\']', tag, re.IGNORECASE)
+        if name_m:
+            result["hidden_fields"][name_m.group(1)] = val_m.group(1) if val_m else ""
 
     # 3. Duração da marcha
     dur_match = re.search(
@@ -1037,20 +1055,22 @@ def parse_command_confirmation(html: str) -> Dict[str, Any]:
     if dur_match:
         result["duration_str"] = next(g for g in dur_match.groups() if g is not None)
 
-
     # 4. Chegada
     arrival_match = re.search(r'Chegada:?\s*</td>\s*<td>\s*(.*?)(?:<span|</td>)', normalized, re.DOTALL | re.IGNORECASE)
     if arrival_match:
         result["arrival_time"] = re.sub(r'<[^>]+>', '', arrival_match.group(1)).strip()
 
-    # 5. Coordenadas do alvo
+    # 5. Coordenadas e Nome do alvo
     coords_match = re.search(r'\((\d{1,3}\|\d{1,3})\)', normalized)
     if coords_match:
         result["target_coords"] = coords_match.group(1)
 
-    # Validação mínima: campo 'chck' ou 'action_id' ou 'h'
+    target_name_match = re.search(r'(?:Destino|Target):?\s*</td>\s*<td>\s*(?:<span[^>]*>)?\s*([^<\(]+)', normalized, re.IGNORECASE)
+    if target_name_match:
+        result["target_name"] = target_name_match.group(1).strip()
+
+    # Validação mínima: presença de campos ocultos de confirmação
     if not result["hidden_fields"]:
-        # Se não encontrou campos ocultos, pode não ser a página de confirmação
         if "action=command" not in normalized and "try=confirm" not in normalized:
             result["success"] = False
             result["error_message"] = "Formulário de confirmação não localizado na página."
@@ -1059,25 +1079,44 @@ def parse_command_confirmation(html: str) -> Dict[str, Any]:
 
 
 # Regex para Assistente de Farm (screen=am_farm)
-PLUNDER_ROW_REGEX = re.compile(
-    r'<tr[^>]*id=["\']village_(\d+)["\'][^>]*>(.*?)</tr>',
+PLUNDER_ROW_REGEX: Pattern[str] = re.compile(
+    r'<tr[^>]*id=["\']village_(\d+)["\'][^>]*>(.*?)(?=<tr[^>]*id=["\']village_\d+["\']|</table>|$)',
     re.DOTALL | re.IGNORECASE,
 )
 
 
+# Capacidade de transporte de recursos por unidade militar
+UNIT_HAUL_CAPACITY: Dict[str, int] = {
+    "spear": 25,
+    "sword": 15,
+    "axe": 10,
+    "archer": 10,
+    "spy": 0,
+    "light": 80,
+    "marcher": 50,
+    "heavy": 50,
+    "ram": 0,
+    "catapult": 0,
+    "knight": 100,
+    "snob": 0,
+}
+
+
 def parse_am_farm_targets(html: str) -> List[Dict[str, Any]]:
     """
-    Extrai a lista de aldeias bárbaras disponíveis no Assistente de Farm (screen=am_farm).
+    Extrai a lista estruturada de aldeias bárbaras disponíveis no Assistente de Farm (screen=am_farm).
     Retorna uma lista de dicionários contendo: target_id, target_name, target_coords,
-    distance, report_color, wall_level, template_a_id, template_b_id, template_a_available, template_b_available.
+    distance, report_color, loot_status, wall_level, has_attack_in_transit, template_a_id,
+    template_b_id, template_a_available, template_b_available, action_url_a, action_url_b.
     """
     targets: List[Dict[str, Any]] = []
     if not html:
         return targets
 
     normalized = html.replace("&amp;", "&")
+    parsed_global_templates = parse_am_farm_templates(html)
 
-    # Localiza cada linha da tabela de saques (tr id="village_12345")
+    # Localiza cada bloco da tabela de saques (tr id="village_12345" abrangendo sub-linhas mobile)
     for row_match in PLUNDER_ROW_REGEX.finditer(normalized):
         target_id = row_match.group(1)
         row_content = row_match.group(2)
@@ -1098,7 +1137,9 @@ def parse_am_farm_targets(html: str) -> List[Dict[str, Any]]:
             target_name = re.sub(r'\(\d{1,3}\|\d{1,3}\)', '', raw_n).strip()
 
         # 2. Distância
-        dist_match = re.search(r'(\d+\.\d+)\s*(?:campos|fields)?|<td>(\d+(?:\.\d+)?)</td>', row_content, re.IGNORECASE)
+        dist_match = re.search(r'<img[^>]*rechts\.webp[^>]*>\s*([\d\.]+)', row_content, re.IGNORECASE)
+        if not dist_match:
+            dist_match = re.search(r'(\d+\.\d+)\s*(?:campos|fields)?|<td>(\d+(?:\.\d+)?)</td>', row_content, re.IGNORECASE)
         distance = 0.0
         if dist_match:
             val = next(g for g in dist_match.groups() if g is not None)
@@ -1109,7 +1150,7 @@ def parse_am_farm_targets(html: str) -> List[Dict[str, Any]]:
 
         # 3. Status do último relatório (verde, amarelo, vermelho, azul)
         report_color = "none"
-        if "dots/green" in row_content or "dot green" in row_content or "max_loot/1" in row_content:
+        if "dots/green" in row_content or "dot green" in row_content:
             report_color = "green"
         elif "dots/yellow" in row_content or "dot yellow" in row_content:
             report_color = "yellow"
@@ -1118,10 +1159,24 @@ def parse_am_farm_targets(html: str) -> List[Dict[str, Any]]:
         elif "dots/blue" in row_content or "dot blue" in row_content:
             report_color = "blue"
 
-        # 4. Nível de muralha
+        # 4. Estado de Saque (cheio vs parcial)
+        loot_status = "unknown"
+        if "max_loot/1" in row_content or "max_loot_1" in row_content or "loot_full" in row_content:
+            loot_status = "full"
+        elif "max_loot/0" in row_content or "max_loot_0" in row_content or "loot_partial" in row_content:
+            loot_status = "partial"
+        elif "max_loot" in row_content:
+            loot_status = "empty"
+
+        # 5. Deteção de ataques em trânsito para a mesma aldeia
+        has_attack_in_transit = False
+        if re.search(r'(?:command/attack|command_attack|icon header attack|class=["\'][^"\']*\battack\b[^"\']*["\']|alt=["\'](?:Ataque|Attack)["\']|title=["\'](?:Ataque|Attack)["\'])', row_content, re.IGNORECASE):
+            has_attack_in_transit = True
+
+        # 6. Nível de muralha
         wall_level = 0
         wall_match = re.search(
-            r'(?:Muralha|Wall)[:\s]*<span[^>]*>(\d+)</span>|(?:Muralha|Wall)[:\s]*(\d+)|<td[^>]*class=["\']wall["\'][^>]*>(\d+)</td>',
+            r'<img[^>]*wall\.webp[^>]*>\s*(\d+)|(?:Muralha|Wall)[:\s]*<span[^>]*>(\d+)</span>|(?:Muralha|Wall)[:\s]*(\d+)|<td[^>]*class=["\']wall["\'][^>]*>(\d+)</td>',
             row_content,
             re.IGNORECASE,
         )
@@ -1132,18 +1187,14 @@ def parse_am_farm_targets(html: str) -> List[Dict[str, Any]]:
             except ValueError:
                 wall_level = 0
 
-        # 5. Botões do Modelo A e Modelo B
-        # Exemplo: href="...action=farm&target=12345&template_id=987&h=..."
-        # ou class="farm_icon farm_icon_a"
-        def extract_template_btn(tmpl_letter: str) -> Tuple[Optional[str], bool]:
-            # Captura a tag completa <a> do modelo correspondente
+        # 7. Botões e URLs dos Modelos A e B
+        def extract_template_btn(tmpl_letter: str) -> Tuple[Optional[str], bool, Optional[str]]:
             btn_match = re.search(
                 rf'(<a\s+[^>]*class=["\'][^"\']*farm_icon_{tmpl_letter}[^"\']*["\'][^>]*>)',
                 row_content,
                 re.IGNORECASE,
             )
             if not btn_match:
-                # Fallback por URL com action=farm e template_id
                 btn_match = re.search(
                     rf'(<a\s+[^>]*href=["\'][^"\']*[?&]action=farm[^"\']*[?&]target={target_id}[^"\']*[?&]template_id=(\d+)[^"\']*["\'][^>]*>)',
                     row_content,
@@ -1152,17 +1203,25 @@ def parse_am_farm_targets(html: str) -> List[Dict[str, Any]]:
 
             if btn_match:
                 tag_str = btn_match.group(1)
-                # Extrai template_id da URL contida no atributo href
-                t_id_m = re.search(r'[?&]template_id=(\d+)', tag_str)
-                t_id = t_id_m.group(1) if t_id_m else None
-                # Verifica se este botão específico possui classe disabled
+                # Tenta extrair de sendUnits(this, target, template_id)
+                su_m = re.search(r'sendUnits\([^,]+,\s*\d+,\s*(\d+)\)', tag_str)
+                t_id = su_m.group(1) if su_m else None
+                if not t_id:
+                    t_id_m = re.search(r'[?&]template_id=(\d+)', tag_str)
+                    t_id = t_id_m.group(1) if t_id_m else None
+
+                # Fallback para o ID global do template
+                if not t_id and parsed_global_templates:
+                    t_id = parsed_global_templates.get("template_ids", {}).get(tmpl_letter)
+
+                href_m = re.search(r'href=["\']([^"\']+)["\']', tag_str)
+                action_url = href_m.group(1) if href_m and href_m.group(1) != "#" else None
                 is_disabled = "farm_icon_disabled" in tag_str or "disabled" in tag_str.lower()
-                return t_id, not is_disabled
-            return None, False
+                return t_id, not is_disabled, action_url
+            return None, False, None
 
-
-        tmpl_a_id, tmpl_a_avail = extract_template_btn("a")
-        tmpl_b_id, tmpl_b_avail = extract_template_btn("b")
+        tmpl_a_id, tmpl_a_avail, action_url_a = extract_template_btn("a")
+        tmpl_b_id, tmpl_b_avail, action_url_b = extract_template_btn("b")
 
         targets.append({
             "target_id": target_id,
@@ -1170,44 +1229,102 @@ def parse_am_farm_targets(html: str) -> List[Dict[str, Any]]:
             "target_coords": coords,
             "distance": distance,
             "report_color": report_color,
+            "loot_status": loot_status,
             "wall_level": wall_level,
+            "has_attack_in_transit": has_attack_in_transit,
             "template_a_id": tmpl_a_id,
             "template_b_id": tmpl_b_id,
             "template_a_available": tmpl_a_avail,
             "template_b_available": tmpl_b_avail,
+            "action_url_a": action_url_a,
+            "action_url_b": action_url_b,
         })
 
     return targets
 
 
-def parse_am_farm_templates(html: str) -> Dict[str, Dict[str, int]]:
+def parse_am_farm_templates(html: str) -> Dict[str, Any]:
     """
-    Extrai as contagens de tropas configuradas para o Modelo A e Modelo B no Assistente de Farm.
+    Extrai as contagens de tropas configuradas e calcula a capacidade total de carga
+    para o Modelo A e Modelo B no Assistente de Farm.
+    Suporta o formulário nativo de edição de modelos (action=edit_all),
+    definições em JavaScript nativo (Accountmanager.farm.templates)
+    e modelos tradicionais/testes (a[unit]).
     """
-    templates: Dict[str, Dict[str, int]] = {
+    templates: Dict[str, Any] = {
         "a": {u: 0 for u in ALL_UNITS},
         "b": {u: 0 for u in ALL_UNITS},
+        "haul_capacity": {"a": 0, "b": 0},
+        "template_ids": {"a": None, "b": None},
+        "template_news": {"a": "0", "b": "0"},
     }
     if not html:
         return templates
 
     normalized = html.replace("&amp;", "&")
 
-    for tmpl in ("a", "b"):
-        for unit in ALL_UNITS:
-            # Padrão: <input name="a[spear]" value="5" /> ou name="template_a[spear]"
-            pattern = re.compile(
-                rf'<input[^>]*name=["\'](?:template_)?{tmpl}\[{unit}\]["\'][^>]*value=["\'](\d+)["\']|'
-                rf'<input[^>]*value=["\'](\d+)["\'][^>]*name=["\'](?:template_)?{tmpl}\[{unit}\]["\']',
-                re.IGNORECASE,
-            )
-            m = pattern.search(normalized)
-            if m:
-                val = next(g for g in m.groups() if g is not None)
-                try:
-                    templates[tmpl][unit] = int(val)
-                except ValueError:
-                    templates[tmpl][unit] = 0
+    # 1. Tenta extrair a partir do formulário 'action=edit_all'
+    form_m = re.search(r'<form[^>]*action=[^>]*action=edit_all[^>]*>(.*?)</form>', normalized, re.DOTALL | re.IGNORECASE)
+    if form_m:
+        form_html = form_m.group(1)
+        # Dividir em seção A e B com base no ícone B
+        parts_a_b = re.split(r'farm_icon_b', form_html, flags=re.IGNORECASE)
+        sections = [("a", parts_a_b[0])]
+        if len(parts_a_b) > 1:
+            sections.append(("b", parts_a_b[1]))
+
+        for tmpl, sec_html in sections:
+            id_m = re.search(r'name=["\']template\[(\d+)\]\[id\]["\']', sec_html)
+            if id_m:
+                t_id = id_m.group(1)
+                templates["template_ids"][tmpl] = t_id
+                new_m = re.search(rf'name=["\']template\[{t_id}\]\[new\]["\'][^>]*value=["\'](\d+)["\']', sec_html)
+                if new_m:
+                    templates["template_news"][tmpl] = new_m.group(1)
+
+                total_cap = 0
+                for unit in ALL_UNITS:
+                    u_m = re.search(rf'name=["\']{unit}\[{t_id}\]["\'][^>]*value=["\'](\d+)["\']', sec_html, re.IGNORECASE)
+                    if not u_m:
+                        u_m = re.search(rf'value=["\'](\d+)["\'][^>]*name=["\']{unit}\[{t_id}\]["\']', sec_html, re.IGNORECASE)
+                    if u_m:
+                        qty = int(u_m.group(1))
+                        templates[tmpl][unit] = qty
+                        total_cap += qty * UNIT_HAUL_CAPACITY.get(unit, 0)
+                templates["haul_capacity"][tmpl] = total_cap
+
+    # 2. Extração / Reforço via JavaScript nativo Accountmanager.farm.templates['t_...']
+    js_matches = re.findall(r'Accountmanager\.farm\.templates\[[\'\"]t_(\d+)[\'\"]\]\[[\'\"](\w+)[\'\"]\]\s*=\s*(\d+)', normalized)
+    if js_matches:
+        for t_id, u_key, val in js_matches:
+            unit = u_key.lower().strip()
+            qty = int(val)
+            for tmpl in ("a", "b"):
+                if templates["template_ids"].get(tmpl) == t_id and unit in templates[tmpl]:
+                    if templates[tmpl][unit] == 0:
+                        templates[tmpl][unit] = qty
+                        templates["haul_capacity"][tmpl] += qty * UNIT_HAUL_CAPACITY.get(unit, 0)
+
+    # 3. Fallback tradicional: name="a[unit]" ou name="template_a[unit]"
+    if sum(templates["a"].values()) == 0 and sum(templates["b"].values()) == 0:
+        for tmpl in ("a", "b"):
+            total_capacity = 0
+            for unit in ALL_UNITS:
+                pattern = re.compile(
+                    rf'<input[^>]*name=["\'](?:template_)?{tmpl}\[{unit}\]["\'][^>]*value=["\'](\d+)["\']|'
+                    rf'<input[^>]*value=["\'](\d+)["\'][^>]*name=["\'](?:template_)?{tmpl}\[{unit}\]["\']',
+                    re.IGNORECASE,
+                )
+                m = pattern.search(normalized)
+                if m:
+                    val = next(g for g in m.groups() if g is not None)
+                    try:
+                        qty = int(val)
+                        templates[tmpl][unit] = qty
+                        total_capacity += qty * UNIT_HAUL_CAPACITY.get(unit, 0)
+                    except ValueError:
+                        templates[tmpl][unit] = 0
+            templates["haul_capacity"][tmpl] = total_capacity
 
     return templates
 
@@ -1388,35 +1505,25 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
         result["available_units"][unit_key] = max_val
 
     # 2. Extração da fila ativa de recrutamento (#trainqueue_... ou .trainqueue ou linhas de treino)
-    # Exemplo: <td>20 Lanceiro</td> ou <td>20 Spear</td> seguido de timer e horário
     queue_row_regex = re.compile(
-        r'<tr[^>]*class=["\'](?:lit\s+)?trainqueue_[^"\']*["\'][^>]*>(.*?)</tr>|<tr[^>]*>(.*?<span[^>]*class=["\']timer["\'][^>]*>[\d:]+</span>.*?)</tr>',
+        r'<tr[^>]*>(?:(?!</tr>).)*?</tr>|<div[^>]*class=["\'][^"\']*trainqueue[^"\']*["\'][^>]*>(?:(?!</div>).)*?</div>',
         re.DOTALL | re.IGNORECASE,
     )
 
     for row_m in queue_row_regex.finditer(normalized):
-        row_content = row_m.group(1) or row_m.group(2)
+        row_content = row_m.group(0)
         if not row_content:
             continue
 
-        # Procura padrão de quantidade + nome de tropa (ex: "25 Lanceiro", "10 Cavalaria Leve")
-        unit_found = None
-        count_found = 0
-
-        # Verifica cada unidade conhecida
-        for name_key, canonic_key in UNIT_NAME_TO_KEY.items():
-            pattern = re.compile(rf'(\d+)\s+{re.escape(name_key)}\b', re.IGNORECASE)
-            m = pattern.search(row_content)
-            if m:
-                count_found = int(m.group(1))
-                unit_found = canonic_key
-                break
-
-        if not unit_found or count_found <= 0:
+        lower_content = row_content.lower()
+        # Se for cabeçalho de tabela (<th>), ignora
+        if "<th" in lower_content:
             continue
 
         # Timer
         timer_match = re.search(r'<span[^>]*class=["\']timer["\'][^>]*>([\d:]+)</span>', row_content, re.IGNORECASE)
+        if not timer_match:
+            timer_match = re.search(r'\b(\d{1,2}:\d{2}:\d{2})\b', row_content)
         timer_str = timer_match.group(1) if timer_match else ""
 
         # Conclusão / hora
@@ -1426,6 +1533,69 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
         # Link de cancelamento se existir
         cancel_match = re.search(r'href=["\']([^"\']*[?&]action=cancel[^"\']*)["\']', row_content, re.IGNORECASE)
         cancel_url = cancel_match.group(1) if cancel_match else None
+
+        # Se não tem timer nem cancel_url nem trainqueue_ na linha/bloco, não é uma ordem de treino
+        if not (timer_str or cancel_url or "trainqueue" in lower_content):
+            continue
+
+        unit_found = None
+        count_found = 0
+
+        # Método 1: Busca ampla por sprites, classes, imagens ou data attributes
+        # Exemplos no TW: class="unit_sprite_smaller spear", class="unit_sprite spear", class="unit_spear",
+        # class="unit-item spear", data-unit="spear", src=".../unit_spear.png", src=".../spear.png"
+        for u in ALL_UNITS:
+            pattern = re.compile(
+                rf'(?:class=["\'][^"\']*\b(?:unit_sprite_smaller|unit_sprite_small|unit_sprite|unit_icon|unit_link|unit-item|unit)\b[^"\']*\b{u}\b[^"\']*["\'])|'
+                rf'(?:class=["\'][^"\']*\b(?:unit_{u}|unit-{u})\b[^"\']*["\'])|'
+                rf'(?:data-unit=["\']{u}["\'])|'
+                rf'(?:[/\b]{u}\.(?:png|webp|gif|svg)\b)|'
+                rf'(?:unit[_-]{u}\.(?:png|webp|gif|svg)\b)',
+                re.IGNORECASE,
+            )
+            if pattern.search(row_content):
+                unit_found = u
+                break
+
+        # Texto limpo sem tags HTML para análise contextual de contagem e unidade
+        clean_text = re.sub(r'<[^>]+>', ' ', row_content)
+        clean_text = ' '.join(clean_text.split())
+
+        # Método 2: Mapeamento de texto ("25 Lanceiros", "10 Cavalaria Leve", "50 Vikings", etc.)
+        if not unit_found:
+            for name_key, canonic_key in UNIT_NAME_TO_KEY.items():
+                pattern = re.compile(rf'(?:^|\b)(?:(\d+)\s*(?:x\s*)?)?{re.escape(name_key)}(?:\s*\(?(\d+)\)?)?\b', re.IGNORECASE)
+                m = pattern.search(clean_text)
+                if m:
+                    unit_found = canonic_key
+                    val = m.group(1) or m.group(2)
+                    if val:
+                        count_found = int(val)
+                    break
+
+        # Se a unidade foi identificada por sprite ou texto mas o count ainda não foi capturado:
+        if unit_found and count_found <= 0:
+            for name_key, canonic_key in UNIT_NAME_TO_KEY.items():
+                if canonic_key == unit_found:
+                    m_cnt = re.search(rf'(\d+)\s*(?:x\s*)?{re.escape(name_key)}|{re.escape(name_key)}\s*\(?(\d+)\)?', clean_text, re.IGNORECASE)
+                    if m_cnt:
+                        val_str = m_cnt.group(1) or m_cnt.group(2)
+                        if val_str:
+                            count_found = int(val_str)
+                            break
+            if count_found <= 0:
+                timer_digits = set(re.findall(r'\d+', timer_str)) if timer_str else set()
+                nums = re.findall(r'\b(\d+)\b', clean_text)
+                for num_str in nums:
+                    if num_str in timer_digits:
+                        continue
+                    n_val = int(num_str)
+                    if 0 < n_val < 50000:
+                        count_found = n_val
+                        break
+
+        if not unit_found or count_found <= 0:
+            continue
 
         result["queue"].append({
             "unit": unit_found,
@@ -1450,73 +1620,79 @@ def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) ->
     quests: List[Dict[str, Any]] = []
     seen_ids = set()
 
-    # 1. Extração via game_data se disponível
+    # 1. Extração via game_data se disponível (missões, recompensas e marcos)
     if game_data and isinstance(game_data, dict):
-        q_data = game_data.get("quest") or game_data.get("quests") or game_data.get("Quests")
-        if isinstance(q_data, dict):
-            raw_list = q_data.get("quests") or q_data.get("list") or q_data
-            if isinstance(raw_list, dict):
-                raw_list = list(raw_list.values())
-            if isinstance(raw_list, list):
-                for item in raw_list:
-                    if isinstance(item, dict):
-                        q_id = str(item.get("id", "")).strip()
-                        if not q_id or q_id in seen_ids:
-                            continue
-                        title = str(item.get("title") or item.get("name") or f"Missão #{q_id}").strip()
-                        desc = str(item.get("description") or "").strip()
-                        state_str = str(item.get("state", "")).lower()
-                        finishable = bool(
-                            item.get("finishable")
-                            or item.get("completed")
-                            or item.get("finished")
-                            or item.get("can_be_completed")
-                            or item.get("goals_completed") is True
-                            or state_str in ("finished", "completed", "claimable")
-                        )
-                        claim_url = item.get("claim_url") or item.get("url")
-                        rewards = item.get("rewards") or item.get("reward") or {}
+        raw_sources = [
+            game_data.get("quest"),
+            game_data.get("quests"),
+            game_data.get("rewards"),
+            game_data.get("milestones"),
+        ]
+        for src in raw_sources:
+            if isinstance(src, dict):
+                sub_sources = [src.get("quests"), src.get("rewards"), src.get("list"), src.get("milestones"), src]
+                for s in sub_sources:
+                    if isinstance(s, dict):
+                        s = list(s.values())
+                    if isinstance(s, list):
+                        for item in s:
+                            if isinstance(item, dict):
+                                q_id = str(item.get("id") or item.get("reward_id") or item.get("quest_id") or "").strip()
+                                if not q_id or q_id in seen_ids:
+                                    continue
+                                title = str(item.get("title") or item.get("name") or f"Recompensa #{q_id}").strip()
+                                desc = str(item.get("description") or "").strip()
+                                state_str = str(item.get("state") or item.get("status") or "").lower()
+                                finishable = bool(
+                                    item.get("finishable")
+                                    or item.get("completed")
+                                    or item.get("finished")
+                                    or item.get("can_be_completed")
+                                    or item.get("can_claim")
+                                    or item.get("claimable")
+                                    or item.get("goals_completed") is True
+                                    or state_str in ("finished", "completed", "claimable", "open_reward", "ready")
+                                )
+                                claim_url = item.get("claim_url") or item.get("url")
+                                rewards = item.get("rewards") or item.get("reward") or {}
+                                res_obj = rewards.get("resources") if isinstance(rewards.get("resources"), dict) else rewards
+                                wood = int(res_obj.get("wood", 0) or 0)
+                                stone = int(res_obj.get("stone", 0) or 0)
+                                iron = int(res_obj.get("iron", 0) or 0)
+                                pop = int(rewards.get("pop", 0) or 0)
 
-                        # Suporte a formatos planos e aninhados de recursos
-                        res_obj = rewards.get("resources") if isinstance(rewards.get("resources"), dict) else rewards
-                        wood = int(res_obj.get("wood", 0) or 0)
-                        stone = int(res_obj.get("stone", 0) or 0)
-                        iron = int(res_obj.get("iron", 0) or 0)
-                        pop = int(rewards.get("pop", 0) or 0)
+                                seen_ids.add(q_id)
+                                quests.append({
+                                    "id": q_id,
+                                    "title": title,
+                                    "description": desc,
+                                    "finishable": finishable,
+                                    "claim_url": claim_url,
+                                    "rewards": {
+                                        "wood": wood,
+                                        "stone": stone,
+                                        "iron": iron,
+                                        "pop": pop,
+                                        "flags": rewards.get("flags", []) if isinstance(rewards, dict) else [],
+                                        "items": rewards.get("items", []) if isinstance(rewards, dict) else [],
+                                        "description": str(rewards.get("description", "")) if isinstance(rewards, dict) else "",
+                                    },
+                                })
 
-                        seen_ids.add(q_id)
-                        quests.append({
-                            "id": q_id,
-                            "title": title,
-                            "description": desc,
-                            "finishable": finishable,
-                            "claim_url": claim_url,
-                            "rewards": {
-                                "wood": wood,
-                                "stone": stone,
-                                "iron": iron,
-                                "pop": pop,
-                                "flags": rewards.get("flags", []),
-                                "items": rewards.get("items", []),
-                                "description": str(rewards.get("description", "")),
-                            },
-                        })
-
-    # 2. Localização e fatiamento robusto de blocos de missões no HTML
+    # 2. Localização e fatiamento robusto de blocos de missões e recompensas no HTML
     raw_starts = [
         m
         for m in re.finditer(
-            r'<(?:div|tr|li)[^>]*?(?:class=["\'][^"\']*\b(?:quest_item|quest-item|quest_container|quest-container|quest_reward)\b[^"\']*["\']|data-quest-id=["\']\w+["\'])',
+            r'<(?:div|tr|li)[^>]*?(?:class=["\'][^"\']*\b(?:quest_item|quest-item|quest_container|quest-container|quest_reward|reward_item|reward-item|reward_row|reward_container|reward_list_item|milestone|milestone_item|reward)\b[^"\']*["\']|data-quest-id=["\']\w+["\']|data-reward-id=["\']\w+["\']|data-id=["\']\w+["\'])',
             normalized,
             re.IGNORECASE,
         )
     ]
-    # Fallback para class com \bquest\b isolado se não encontrar classes específicas
     if not raw_starts:
         raw_starts = [
             m
             for m in re.finditer(
-                r'<(?:div|tr|li)[^>]*?class=["\'][^"\']*\bquest\b[^"\']*["\']',
+                r'<(?:div|tr|li)[^>]*?class=["\'][^"\']*\b(?:quest|reward)\b[^"\']*["\']',
                 normalized,
                 re.IGNORECASE,
             )
@@ -1524,7 +1700,9 @@ def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) ->
     block_starts = [m.start() for m in raw_starts]
 
     claim_btn_regex = re.compile(
-        r'<a[^>]*href=["\']([^"\']*[?&]action=(?:claim_reward|claim|reward|claim_quest)[^"\']*)["\'][^>]*>(.*?)</a>',
+        r'<a[^>]*href=["\']([^"\']*[?&]action=(?:claim_reward|claim|reward|claim_quest|reward_claim)[^"\']*)["\'][^>]*>(.*?)</a>|'
+        r'<a[^>]*href=["\']([^"\']*)["\'][^>]*>\s*(?:Receber recompensa|Resgatar recompensa|Receber|Resgatar|Reclamar|Claim|Coletar)\s*</a>|'
+        r'<button[^>]*data-(?:id|quest-id|reward-id)=["\'](\w+)["\'][^>]*>(?:(?!</button>).)*?(?:Receber|Resgatar|Claim|Recompensa)(?:(?!</button>).)*?</button>',
         re.DOTALL | re.IGNORECASE,
     )
 
@@ -1534,23 +1712,26 @@ def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) ->
 
         # Extração de ID
         q_id = None
-        id_m = re.search(r'(?:data-quest-id|data-id)=["\'](\w+)["\']', content, re.IGNORECASE)
+        id_m = re.search(r'(?:data-quest-id|data-reward-id|data-id)=["\'](\w+)["\']', content, re.IGNORECASE)
         if id_m:
             q_id = id_m.group(1)
 
         claim_match = claim_btn_regex.search(content)
-        claim_url = claim_match.group(1) if claim_match else None
+        claim_url = None
+        if claim_match:
+            claim_url = claim_match.group(1) or claim_match.group(3)
+            if not q_id and claim_match.group(4):
+                q_id = claim_match.group(4)
+
         if not q_id and claim_url:
-            url_id_m = re.search(r'[?&](?:quest_id|quest|id)=(\w+)', claim_url, re.IGNORECASE)
+            url_id_m = re.search(r'[?&](?:quest_id|reward_id|quest|id)=(\w+)', claim_url, re.IGNORECASE)
             if url_id_m:
                 q_id = url_id_m.group(1)
 
         if not q_id:
-            # Fallback numérico
             q_id = str(len(quests) + 1)
 
         if q_id in seen_ids:
-            # Se a missão já existe, mas encontramos um claim_url específico no HTML, atualizamos
             for existing_q in quests:
                 if existing_q["id"] == q_id:
                     if claim_url and not existing_q["claim_url"]:
@@ -1560,11 +1741,11 @@ def parse_quest_screen(html: str, game_data: Optional[Dict[str, Any]] = None) ->
             continue
 
         title_m = re.search(
-            r'<(?:h\d|b|strong|span)[^>]*class=["\']?[^"\']*(?:title|name|quest_name)[^"\']*["\']?[^>]*>(.*?)</(?:h\d|b|strong|span)>',
+            r'<(?:h\d|b|strong|span|a)[^>]*class=["\']?[^"\']*(?:title|name|quest_name|reward_name)[^"\']*["\']?[^>]*>(.*?)</(?:h\d|b|strong|span|a)>',
             content,
             re.IGNORECASE,
         )
-        title = title_m.group(1).strip() if title_m else f"Missão #{q_id}"
+        title = title_m.group(1).strip() if title_m else f"Recompensa #{q_id}"
         title = re.sub(r'<[^>]+>', '', title).strip()
 
         wood_m = re.search(r'(?:icon header wood|cost_wood|wood)[^>]*>.*?([\d\.]+)', content, re.IGNORECASE)
@@ -2345,6 +2526,207 @@ def parse_market_offers(html: str) -> List[Dict[str, Any]]:
         })
 
     return offers
+
+
+# ============================================================================
+# 11. Coleta de Recursos / Scavenging (screen=place&mode=scavenge)
+# ============================================================================
+
+SCAVENGE_CATEGORY_INFO: Dict[int, Dict[str, Any]] = {
+    1: {
+        "name": "Pequena Coleta",
+        "description": "Lazy Scavenging",
+        "loot_ratio": 0.10,
+        "duration_factor": 1.0,
+    },
+    2: {
+        "name": "Média Coleta",
+        "description": "Humble Scavenging",
+        "loot_ratio": 0.25,
+        "duration_factor": 1.5,
+    },
+    3: {
+        "name": "Grande Coleta",
+        "description": "Clever Scavenging",
+        "loot_ratio": 0.50,
+        "duration_factor": 2.0,
+    },
+    4: {
+        "name": "Coleta Extrema",
+        "description": "Great Scavenging",
+        "loot_ratio": 0.75,
+        "duration_factor": 2.5,
+    },
+}
+
+
+def parse_scavenge_options(html: str) -> List[Dict[str, Any]]:
+    """
+    Extrai o estado de desbloqueio e atividade das 4 categorias de Coleta de Recursos (Scavenging).
+    Retorna uma lista de 4 dicionários com:
+    - id: int (1 a 4)
+    - name: str
+    - is_unlocked: bool
+    - is_locked: bool
+    - is_scavenging: bool
+    - unlock_cost: Dict[str, int]
+    - unlock_time_seconds: int
+    - time_remaining_seconds: int
+    - return_time_iso: Optional[str]
+    - loot_ratio: float
+    - duration_factor: float
+    """
+    options: List[Dict[str, Any]] = []
+    if not html:
+        return options
+
+    # 1. Tentar extração via bloco JSON / JavaScript (ScavengeScreen ou window.Scavenge)
+    json_match = re.search(
+        r'(?:ScavengeScreen\.init|options)\s*[:=]\s*({.+?})(?:;|\n|</script>)',
+        html,
+        re.DOTALL | re.IGNORECASE,
+    )
+    extracted_json: Optional[Dict[str, Any]] = None
+    if json_match:
+        try:
+            extracted_json = json.loads(json_match.group(1))
+        except Exception:
+            extracted_json = None
+
+    for opt_id in (1, 2, 3, 4):
+        info = SCAVENGE_CATEGORY_INFO.get(opt_id, {})
+        opt_data: Dict[str, Any] = {
+            "id": opt_id,
+            "name": info.get("name", f"Coleta {opt_id}"),
+            "description": info.get("description", ""),
+            "is_unlocked": False,
+            "is_locked": True,
+            "is_scavenging": False,
+            "unlock_cost": {"wood": 0, "stone": 0, "iron": 0},
+            "unlock_time_seconds": 0,
+            "time_remaining_seconds": 0,
+            "return_time_iso": None,
+            "loot_ratio": info.get("loot_ratio", 0.10),
+            "duration_factor": info.get("duration_factor", 1.0),
+        }
+
+        # Extração via JSON se disponível
+        if extracted_json and str(opt_id) in extracted_json:
+            j_opt = extracted_json[str(opt_id)]
+            is_unlocked = j_opt.get("is_unlocked", False)
+            opt_data["is_unlocked"] = is_unlocked
+            opt_data["is_locked"] = not is_unlocked
+            if "scavenge_data" in j_opt and j_opt["scavenge_data"]:
+                opt_data["is_scavenging"] = True
+                opt_data["time_remaining_seconds"] = int(j_opt["scavenge_data"].get("time_left", 0))
+            if "unlock_cost" in j_opt:
+                opt_data["unlock_cost"] = {
+                    "wood": int(j_opt["unlock_cost"].get("wood", 0)),
+                    "stone": int(j_opt["unlock_cost"].get("stone", 0)),
+                    "iron": int(j_opt["unlock_cost"].get("iron", 0)),
+                }
+            options.append(opt_data)
+            continue
+
+        # 2. Extração via DOM / Padrões HTML
+        # Procura o container da opção (por id, data-option-id ou classe)
+        block_pattern = (
+            rf'<[^>]+(?:id=["\']?scavenge_option_{opt_id}["\']?|data-option-id=["\']?{opt_id}["\']?|option-{opt_id})[^>]*>'
+            rf'(.*?)(?=(?:<[^>]+(?:class=["\'][^"\']*scavenge-option|id=["\']scavenge_option_|<form|candidate-squad)|</body>|$))'
+        )
+        block_m = re.search(block_pattern, html, re.DOTALL | re.IGNORECASE)
+        block_html = block_m.group(1) if block_m else ""
+
+        # Categoria 1 é sempre desbloqueada por defeito no jogo
+        if opt_id == 1:
+            opt_data["is_unlocked"] = True
+            opt_data["is_locked"] = False
+        else:
+            # Se encontrar botão de desbloqueio ou custo de desbloqueio, está bloqueada
+            has_unlock_btn = bool(
+                re.search(r'(?:desbloquear|unlock|btn-unlock|unlock_option)', block_html, re.IGNORECASE)
+            )
+            is_locked = has_unlock_btn or ("locked" in block_html.lower() and "unlocked" not in block_html.lower())
+            opt_data["is_unlocked"] = not is_locked
+            opt_data["is_locked"] = is_locked
+
+            if is_locked:
+                # Extrai custos de desbloqueio
+                wood_m = re.search(r'class=["\']?wood["\']?[^>]*>[\s\n]*([\d\.]+)', block_html, re.IGNORECASE)
+                stone_m = re.search(r'class=["\']?stone["\']?[^>]*>[\s\n]*([\d\.]+)', block_html, re.IGNORECASE)
+                iron_m = re.search(r'class=["\']?iron["\']?[^>]*>[\s\n]*([\d\.]+)', block_html, re.IGNORECASE)
+                opt_data["unlock_cost"] = {
+                    "wood": int(wood_m.group(1).replace(".", "")) if wood_m else 0,
+                    "stone": int(stone_m.group(1).replace(".", "")) if stone_m else 0,
+                    "iron": int(iron_m.group(1).replace(".", "")) if iron_m else 0,
+                }
+
+        # Verifica se há expedição em andamento nesta categoria
+        is_active = bool(
+            re.search(r'(?:return-countdown|data-endtime|scavenge-active|tempo restante|time_left)', block_html, re.IGNORECASE)
+        )
+        if is_active:
+            opt_data["is_scavenging"] = True
+            # Extrai tempo restante em segundos ou timestamp
+            time_m = re.search(r'data-endtime=["\']?(\d+)["\']?', block_html, re.IGNORECASE)
+            if time_m:
+                end_ts = int(time_m.group(1))
+                diff = int(end_ts - time.time())
+                if diff > 0:
+                    opt_data["time_remaining_seconds"] = diff
+
+            if opt_data["time_remaining_seconds"] == 0:
+                cd_m = re.search(r'(?:return-countdown|countdown)[^>]*>[\s\n]*(\d+):(\d+):(\d+)', block_html, re.IGNORECASE)
+                if cd_m:
+                    h, m, s = int(cd_m.group(1)), int(cd_m.group(2)), int(cd_m.group(3))
+                    opt_data["time_remaining_seconds"] = h * 3600 + m * 60 + s
+                else:
+                    opt_data["time_remaining_seconds"] = 300  # Fallback padrão se não conseguir calcular exato
+
+        options.append(opt_data)
+
+    return options
+
+
+def parse_scavenge_available_troops(html: str) -> Dict[str, int]:
+    """
+    Extrai a contagem de tropas disponíveis na aldeia para envio em expedições de Coleta.
+    Retorna um dicionário como {'spear': 150, 'sword': 80, 'axe': 45, 'light': 20, ...}.
+    """
+    troops: Dict[str, int] = {
+        "spear": 0,
+        "sword": 0,
+        "axe": 0,
+        "archer": 0,
+        "light": 0,
+        "marcher": 0,
+        "heavy": 0,
+        "knight": 0,
+    }
+    if not html:
+        return troops
+
+    for unit in troops.keys():
+        # Procura inputs com name="unit" ou links com data-unit="unit" ou class="units-entry-unit"
+        pattern = (
+            rf'(?:name=["\']{unit}["\']|data-unit=["\']{unit}["\']|class=["\'][^"\']*{unit}[^"\']*["\'])'
+            rf'[^>]*?(?:data-all-count=["\']?(\d+)["\']?|value=["\']?(\d+)["\']?|>[\s\n]*\(?(\d+)\)?)'
+        )
+        m = re.search(pattern, html, re.IGNORECASE)
+        if m:
+            val_str = m.group(1) or m.group(2) or m.group(3) or "0"
+            troops[unit] = int(val_str)
+        else:
+            # Fallback para regex genérico de tropas
+            unit_link_m = re.search(
+                rf'unit_link_{unit}["\'][^>]*>[\s\n]*\(?(\d+)\)?',
+                html,
+                re.IGNORECASE,
+            )
+            if unit_link_m:
+                troops[unit] = int(unit_link_m.group(1))
+
+    return troops
 
 
 

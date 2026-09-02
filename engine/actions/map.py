@@ -578,6 +578,47 @@ class MapManager:
         result.sort(key=lambda v: v.distance)
         return result
 
+    async def get_tactical_map(
+        self,
+        account: TribalAccount,
+        center_x: int,
+        center_y: int,
+        radius: float = 15.0,
+        village_id: Optional[int] = None,
+        use_cache: bool = True,
+    ) -> MapData:
+        """
+        Consulta os dados do mapa tático e devolve a estrutura consolidada MapData.
+        """
+        cached_villages, timestamp = self.load_cache(account.world)
+        cache_age_hours = (time.time() - timestamp) / 3600.0
+
+        if use_cache and cached_villages and cache_age_hours < 12.0:
+            for v in cached_villages:
+                v.distance = self.calculate_distance(center_x, center_y, v.x, v.y)
+            villages = [v for v in cached_villages if radius <= 0 or v.distance <= radius]
+            villages.sort(key=lambda v: v.distance)
+        else:
+            villages = await self.fetch_map_data(
+                account=account,
+                center_x=center_x,
+                center_y=center_y,
+                radius=radius,
+                village_id=village_id,
+            )
+            if villages:
+                existing_dict = {v.id: v for v in cached_villages}
+                for v in villages:
+                    existing_dict[v.id] = v
+                self.save_cache(account.world, list(existing_dict.values()))
+
+        return MapData(
+            center_x=center_x,
+            center_y=center_y,
+            radius=radius,
+            villages=villages,
+        )
+
     async def scan_nearby_barbarians(
         self,
         account: TribalAccount,

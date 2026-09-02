@@ -65,17 +65,15 @@ class Resources:
 
 
 class VillageCategory(str, Enum):
-    """Categorias de especialização tática de aldeias."""
-    ATTACK = "attack"      # Aldeia ofensiva (Machados, Leves, Aríetes)
-    DEFENSE = "defense"    # Aldeia defensiva (Lanças, Espadas, Pesadas, Muralha)
-    BALANCED = "balanced"  # Aldeia equilibrada / mista / inicial (Recursos e misto de tropas)
+    """Categorias de especialização tática de aldeias (estritamente Ataque ou Defesa)."""
+    ATTACK = "attack"      # Aldeia ofensiva (Modelo de Recrutamento de Ataque)
+    DEFENSE = "defense"    # Aldeia defensiva (Modelo de Recrutamento de Defesa)
 
 
 # Arquétipos padrão de templates de construção por categoria
 CATEGORY_BUILDING_TEMPLATES = {
     VillageCategory.ATTACK: "military_rush",
     VillageCategory.DEFENSE: "wall_focus",
-    VillageCategory.BALANCED: "balanced",
 }
 
 # Arquétipos padrão de metas de recrutamento por categoria
@@ -92,13 +90,6 @@ CATEGORY_RECRUITMENT_TARGETS = {
         "heavy": 100,
         "spy": 25,
     },
-    VillageCategory.BALANCED: {
-        "spear": 150,
-        "sword": 150,
-        "axe": 150,
-        "light": 75,
-        "spy": 20,
-    },
 }
 
 
@@ -111,7 +102,7 @@ class VillageData:
     x: int = 0
     y: int = 0
     points: int = 0
-    category: VillageCategory = VillageCategory.BALANCED
+    category: VillageCategory = VillageCategory.ATTACK
     resources: Resources = field(default_factory=Resources)
     troops: Dict[str, int] = field(default_factory=dict)
     buildings: Dict[str, int] = field(default_factory=dict)

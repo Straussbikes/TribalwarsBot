@@ -23,7 +23,7 @@
       "enabled": true,
       "mode": "am_farm",
       "template": "A",
-      "max_distance": 15.0,
+      "max_distance": 25.0,
       "skip_losses": true,
       "skip_wall": true,
       "interval_minutes": 10.0,
@@ -82,14 +82,15 @@
       "min_transfer_amount": 1000,
       "max_merchants_percent": 0.8,
       "max_merchant_ratio": 0.8
-    }
+    },
+    "villages": {}
   },
   "proxy": null,
   "username": "",
   "password_enc": "",
   "auto_login": true,
   "keep_alive": true,
-  "last_used": "2026-08-30T12:16:52.233587",
-  "created_at": 1788088612.188595,
+  "last_used": "2026-09-02T18:26:41.131485",
+  "created_at": 1788370001.0839267,
   "is_active": false
 }

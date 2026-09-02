@@ -101,11 +101,22 @@ class StatsTracker:
     além de logs recentes de eventos.
     """
 
-    def __init__(self, world: str = "pt117", cache_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        world: str = "pt117",
+        cache_dir: Optional[Path] = None,
+        account_id: Optional[str] = None,
+    ):
         self.world = world
+        self.account_id = account_id
         self.cache_dir = cache_dir or Path(".stats_cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.cache_file = self.cache_dir / f"stats_{self.world}.json"
+
+        safe_acc = "".join(c for c in (account_id or "") if c.isalnum() or c in ("-", "_")).lower()
+        if safe_acc:
+            self.cache_file = self.cache_dir / f"stats_{safe_acc}_{self.world}.json"
+        else:
+            self.cache_file = self.cache_dir / f"stats_{self.world}.json"
 
         # Totais acumulados globais
         self.total_wood: int = 0

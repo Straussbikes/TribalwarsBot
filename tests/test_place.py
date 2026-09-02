@@ -343,9 +343,42 @@ class TestPlaceAsyncActions(unittest.IsolatedAsyncioTestCase):
             units=requested,
             is_attack=True,
             allow_partial=False,
+            adapt_missing_spies=True,
         )
         self.assertTrue(success)
+
+    def test_parse_command_confirmation_with_hidden_error_box_and_varied_input_order(self):
+        """Valida que caixas de erro vazias ou com display:none não abortam a confirmação."""
+        html = """
+        <!DOCTYPE html>
+        <html>
+        <body>
+            <div id="error_box" class="error_box" style="display:none"></div>
+            <div class="info_box error" style="display: none;"></div>
+            <form action="/game.php?screen=place&action=command" method="post">
+                <!-- Atributo name antes de type -->
+                <input name="chck" type="hidden" value="valid_hash_123" />
+                <input name="x" value="465" type="hidden" />
+                <input type="hidden" name="y" value="559" />
+                <input type="hidden" name="action_id" value="cmd_999" />
+                <table>
+                    <tr><td>Destino:</td><td>Aldeia Bárbara (465|559)</td></tr>
+                    <tr><td>Duração:</td><td>0:12:30</td></tr>
+                </table>
+            </form>
+        </body>
+        </html>
+        """
+        res = parse_command_confirmation(html)
+        self.assertTrue(res["success"])
+        self.assertEqual(res["error_message"], "")
+        self.assertEqual(res["hidden_fields"]["chck"], "valid_hash_123")
+        self.assertEqual(res["hidden_fields"]["x"], "465")
+        self.assertEqual(res["hidden_fields"]["y"], "559")
+        self.assertEqual(res["target_coords"], "465|559")
+        self.assertEqual(res["duration_str"], "0:12:30")
 
 
 if __name__ == "__main__":
     unittest.main()
+

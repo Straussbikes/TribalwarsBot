@@ -516,6 +516,101 @@ class SidecarApi {
       method: "DELETE",
     });
   }
+
+  // --- Assistente de Saque & Farm (/api/farm/*) ---
+  async getFarmStatus(world = null) {
+    const q = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/farm/status${q}`);
+  }
+
+  async toggleFarm(enabled, world = null) {
+    return await this.request("/api/farm/toggle", {
+      method: "POST",
+      body: JSON.stringify({ enabled, world }),
+    });
+  }
+
+  async triggerFarmWave(force = true, villageId = null, world = null) {
+    return await this.request("/api/farm/trigger", {
+      method: "POST",
+      body: JSON.stringify({ force, village_id: villageId, world }),
+    });
+  }
+
+  async updateFarmConfig(configData) {
+    return await this.request("/api/farm/config", {
+      method: "POST",
+      body: JSON.stringify(configData),
+    });
+  }
+
+  async getFarmTargets(radius = null, limit = 100, villageId = null, world = null) {
+    const params = new URLSearchParams();
+    if (radius) params.append("radius", radius);
+    if (limit) params.append("limit", limit);
+    if (villageId) params.append("village_id", villageId);
+    if (world) params.append("world", world);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return await this.request(`/api/farm/targets${qs}`);
+  }
+
+  async updateFarmTemplate(template, units, villageId = null, world = null) {
+    return await this.request("/api/farm/templates", {
+      method: "POST",
+      body: JSON.stringify({
+        template,
+        units,
+        village_id: villageId,
+        world,
+      }),
+    });
+  }
+
+  // --- Radar de Inativos & Inno-Farming (/api/radar/*) ---
+  async getRadarInactives(filters = {}) {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(filters)) {
+      if (v !== undefined && v !== null) params.append(k, v);
+    }
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    return await this.request(`/api/radar/inactives${qs}`);
+  }
+
+  async syncWorldData(world = null, force = false) {
+    return await this.request("/api/radar/sync", {
+      method: "POST",
+      body: JSON.stringify({ world, force }),
+    });
+  }
+
+  async getRadarSyncStatus(world = null) {
+    const q = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/radar/sync-status${q}`);
+  }
+
+  async addRadarTargetToFarm(coords, world = null) {
+    return await this.request("/api/radar/targets/add", {
+      method: "POST",
+      body: JSON.stringify({ coords, world }),
+    });
+  }
+
+  async getRadarPlayersRadius(params = {}) {
+    const usp = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== "") usp.append(k, v);
+    }
+    const qs = usp.toString() ? `?${usp.toString()}` : "";
+    return await this.request(`/api/radar/players-radius${qs}`);
+  }
+
+  async getPlayerHistory(playerId, world = null, limit = 30) {
+    const usp = new URLSearchParams();
+    if (world) usp.append("world", world);
+    if (limit) usp.append("limit", limit);
+    const qs = usp.toString() ? `?${usp.toString()}` : "";
+    return await this.request(`/api/radar/player-history/${playerId}${qs}`);
+  }
 }
 
 // Exporta instância global

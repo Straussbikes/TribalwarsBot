@@ -333,6 +333,11 @@ class MainBuildingState:
         return self.queue_count >= self.max_queue_size
 
     @property
+    def levels(self) -> Dict[str, int]:
+        """Alias para compatibilidade direta com dicionário de edifícios."""
+        return self.buildings
+
+    @property
     def virtual_levels(self) -> Dict[str, int]:
         """
         Calcula os níveis efetivos/virtuais:
@@ -1288,6 +1293,13 @@ class MainBuildingManager:
                     f"[{account.world}] ✅ Sucesso ao colocar na fila: "
                     f"'{b_name}' para Nível {candidate.target_level}!"
                 )
+                try:
+                    tracker = getattr(account, "stats_tracker", None) or (account.get_stats_tracker() if hasattr(account, "get_stats_tracker") else None)
+                    if tracker:
+                        tracker.record_building(village_id=v_id, building=candidate.building, target_level=candidate.target_level)
+                except Exception as e_st:
+                    logger.debug(f"Aviso ao registar estatística de construção: {e_st}")
+
                 # Se ainda houver vagas, re-lê o estado para avançar com o próximo do plano
                 if state.queue_count + 1 < limit:
                     state = await self.get_state(account, village_id=v_id)
@@ -1297,7 +1309,8 @@ class MainBuildingManager:
                 break
 
         # Se os requisitos de tropas foram concluídos e o Ferreiro existe, dispara auto-pesquisa imediata
-        if recruitment_targets and state.levels.get("smith", 0) >= 1:
+        smith_lvl = state.buildings.get("smith", 0) if hasattr(state, "buildings") else state.levels.get("smith", 0)
+        if recruitment_targets and smith_lvl >= 1:
             try:
                 from engine.actions.smith import SmithManager
                 smith_mgr = getattr(self, "smith_manager", None) or SmithManager()

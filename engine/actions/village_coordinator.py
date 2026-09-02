@@ -51,19 +51,15 @@ class MultiVillageCoordinator:
         category: str,
     ) -> bool:
         """
-        Define a categoria ou modelo de tropas de uma aldeia (attack, defense, balanced ou modelo customizado)
+        Define a categoria ou modelo de tropas de uma aldeia (estritamente 'attack' ou 'defense')
         e atualiza a configuração ativa e memória.
         """
-        normalized_cat = category.lower().strip()
-        if not normalized_cat:
-            normalized_cat = "balanced"
+        raw = str(category).lower().strip()
+        normalized_cat = "defense" if "def" in raw else "attack"
 
         # 1. Atualiza no modelo de aldeia em memória
         if village_id in account.villages:
-            try:
-                account.villages[village_id].category = VillageCategory(normalized_cat)
-            except ValueError:
-                account.villages[village_id].category = normalized_cat
+            account.villages[village_id].category = VillageCategory(normalized_cat)
 
         # 2. Atualiza no BotConfig
         from engine.config.settings import VillageConfig
@@ -75,8 +71,8 @@ class MultiVillageCoordinator:
         logger.info(f"[{account.world}] Aldeia {village_id} categorizada como '{normalized_cat}'.")
         return True
 
-    def get_village_category(self, account: TribalAccount, config: BotConfig, village_id: int) -> Any:
-        """Retorna a categoria ou modelo atribuído à aldeia (ou BALANCED por defeito)."""
+    def get_village_category(self, account: TribalAccount, config: BotConfig, village_id: int) -> VillageCategory:
+        """Retorna a categoria atribuída à aldeia (estritamente VillageCategory.ATTACK ou VillageCategory.DEFENSE)."""
         cat_str = None
         if str(village_id) in config.villages and config.villages[str(village_id)].category:
             cat_str = str(config.villages[str(village_id)].category).lower().strip()
@@ -86,12 +82,9 @@ class MultiVillageCoordinator:
             cat_str = v_cat.value if hasattr(v_cat, "value") else str(v_cat).lower().strip()
 
         if not cat_str:
-            return VillageCategory.BALANCED
+            return VillageCategory.ATTACK
 
-        try:
-            return VillageCategory(cat_str)
-        except ValueError:
-            return cat_str
+        return VillageCategory.DEFENSE if "def" in cat_str else VillageCategory.ATTACK
 
     async def sync_all_villages(self, account: TribalAccount) -> List[VillageData]:
         """
@@ -217,9 +210,21 @@ class MultiVillageCoordinator:
         Identifica aldeias doadoras (excedente) e aldeias recetoras (défice),
         e calcula ordens de transferência recomendadas.
         """
-        villages = list(account.villages.values())
+        villages = [
+            v for v in account.villages.values()
+            if v.id > 0 and not (v.x == 0 and v.y == 0 and v.name.lower() in ("farm", "fazenda"))
+        ]
         if not villages:
             return {"status": "empty", "message": "Nenhuma aldeia para balancear."}
+
+        if len(villages) <= 1:
+            return {
+                "status": "single_village",
+                "message": "Conta possui apenas uma aldeia; balanceamento não requerido.",
+                "averages": None,
+                "donors": [],
+                "receivers": [],
+            }
 
         total_wood = sum(v.resources.wood for v in villages)
         total_stone = sum(v.resources.stone for v in villages)

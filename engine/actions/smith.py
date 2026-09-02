@@ -243,30 +243,54 @@ def parse_smith_page(html: str) -> Dict[str, Any]:
 
         is_explicit_researched = False
         if block_content:
-            if re.search(r'\b(?:pesquisado|nível\s+1|level\s+1)\b|icon header checked', lower_block):
-                if "não pesquisado" not in lower_block and "requisitos não" not in lower_block and "não atingidos" not in lower_block:
-                    if not has_costs and not research_url:
-                        is_explicit_researched = True
+            has_researched_marker = bool(
+                re.search(r'\b(?:pesquisado|pesquisada|desenvolvido|desenvolvida|conclu[ií]d[oa])\b', lower_block)
+                or re.search(r'\b(?:n[ií]vel|level)\s*[:\s]*[1-9]\b', lower_block)
+                or re.search(r'\b1\s*/\s*1\b|\b10\s*/\s*10\b', lower_block)
+                or re.search(r'icon\s+header\s+checked|unit_researched|\bresearched\b', lower_block)
+            )
+            has_unmet_marker = bool(
+                "não pesquisado" in lower_block
+                or "não pesquisada" in lower_block
+                or "requisitos não" in lower_block
+                or "não atingidos" in lower_block
+                or "não cumpridos" in lower_block
+            )
+            has_research_action = bool(
+                research_url
+                or "action=research" in lower_block
+                or "ajaxaction=research" in lower_block
+                or "name=\"research\"" in lower_block
+                or re.search(r'<button[^>]*class=["\'][^"\']*(?:btn[-_]build|btn[-_]research)[^"\']*["\']', lower_block)
+            )
 
-        if research_url:
+            if has_researched_marker and not has_unmet_marker and not has_research_action:
+                is_explicit_researched = True
+
+        if is_explicit_researched:
+            status = "researched"
+            level = 1
+            wood, stone, iron = 0, 0, 0
+        elif research_url or (block_content and has_research_action):
             status = "can_research"
             level = 0
         elif "em pesquisa" in lower_block or "a pesquisar" in lower_block or re.search(r'<span[^>]*class=["\']timer["\']', lower_block):
             status = "researching"
             level = 0
-        elif is_explicit_researched:
-            status = "researched"
-            level = 1
         elif "requisito" in lower_block or "requisitos não" in lower_block or "não atingidos" in lower_block or "não cumpridos" in lower_block:
             status = "unavailable"
             level = 0
-        elif has_costs:
-            # Requisitos cumpridos, unidade disponível para pesquisa (ou a aguardar recursos)
+        elif has_costs and ("recursos insuficientes" in lower_block or re.search(r'\bpesquisar\b', lower_block)):
             status = "can_research"
             level = 0
         elif not block_content:
             status = "unavailable"
             level = 0
+        else:
+            # Se a linha existe e não há botão de pesquisa nem requisitos pendentes, a tecnologia já está pesquisada
+            status = "researched"
+            level = 1
+            wood, stone, iron = 0, 0, 0
 
         result["units"][canonic_key] = {
             "unit": canonic_key,
@@ -451,6 +475,21 @@ class SmithManager:
             village_res = account.villages[v_id].resources
 
         for u in check_list:
+            # Se a aldeia já possui tropas desta unidade treinadas, a pesquisa já foi concluída
+            if v_id in account.villages:
+                v_troops = getattr(account.villages[v_id], "troops", None)
+                unit_qty = 0
+                if isinstance(v_troops, dict):
+                    val = v_troops.get(u, 0)
+                    if isinstance(val, (int, float)):
+                        unit_qty = val
+                elif hasattr(v_troops, u):
+                    val = getattr(v_troops, u, 0)
+                    if isinstance(val, (int, float)):
+                        unit_qty = val
+                if isinstance(unit_qty, (int, float)) and unit_qty > 0:
+                    continue
+
             u_info = state.units.get(u)
             if not u_info:
                 continue

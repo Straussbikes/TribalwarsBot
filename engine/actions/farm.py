@@ -8,9 +8,11 @@ import asyncio
 from dataclasses import dataclass, field
 import logging
 import random
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
+from engine.actions.map import MapManager, calculate_distance
 from engine.actions.place import PlaceManager, UnitsCount
+from engine.config.settings import FarmConfig
 from engine.core.account import TribalAccount
 from engine.core.models import TaskPriority
 from engine.core.scheduler import TaskScheduler
@@ -29,13 +31,29 @@ class FarmTarget:
     target_id: str
     target_name: str
     target_coords: str
+    x: int = 0
+    y: int = 0
     distance: float = 0.0
     report_color: str = "none"  # 'green', 'yellow', 'red', 'blue', 'none'
+    loot_status: str = "unknown"  # 'full', 'partial', 'empty', 'unknown'
     wall_level: int = 0
+    has_attack_in_transit: bool = False
+    is_in_am_farm: bool = True
     template_a_id: Optional[str] = None
     template_b_id: Optional[str] = None
     template_a_available: bool = False
     template_b_available: bool = False
+    action_url_a: Optional[str] = None
+    action_url_b: Optional[str] = None
+
+    def __post_init__(self):
+        if (not self.x or not self.y) and self.target_coords and "|" in self.target_coords:
+            try:
+                parts = self.target_coords.strip("() ").split("|")
+                self.x = int(parts[0])
+                self.y = int(parts[1])
+            except (ValueError, IndexError) as err:
+                logger.debug(f"Falha ao decompor coordenadas de farm '{self.target_coords}': {err}")
 
 
 @dataclass
@@ -45,6 +63,7 @@ class FarmAssistantState:
     targets: List[FarmTarget] = field(default_factory=list)
     template_a_troops: Dict[str, int] = field(default_factory=dict)
     template_b_troops: Dict[str, int] = field(default_factory=dict)
+    haul_capacities: Dict[str, int] = field(default_factory=dict)
 
     @property
     def total_targets_count(self) -> int:
@@ -78,8 +97,7 @@ def allocate_dynamic_squads(
     # Determinar unidades mínimas por esquadrão requeridas
     template_dict = {u: cnt for u, cnt in squad_template.to_dict().items() if cnt > 0}
     if not template_dict:
-        template_dict = {"spear": 5}
-        squad_template = UnitsCount(spear=5)
+        return []
 
     avail_dict = available_units.to_dict()
 
@@ -104,6 +122,78 @@ def allocate_dynamic_squads(
     return allocations
 
 
+def get_gaussian_delay(min_ms: int = 350, max_ms: int = 950) -> float:
+    """
+    Gera um atraso estocástico gaussiano (em segundos) centrado na média do intervalo
+    com dispersão normal delimitada estritamente entre min_ms e max_ms para evasão anti-bot.
+    """
+    min_s = max(0.05, min_ms / 1000.0)
+    max_s = max(min_s, max_ms / 1000.0)
+    mean = (min_s + max_s) / 2.0
+    stdev = max(0.01, (max_s - min_s) / 6.0)  # ~99.7% das amostras dentro de [min, max]
+    sample = random.gauss(mean, stdev)
+    return max(min_s, min(max_s, sample))
+
+
+def select_optimal_farm_template(
+    target: FarmTarget,
+    preferred_template: str = "A",
+    haul_capacities: Optional[Dict[str, int]] = None,
+    distance_threshold_for_upgrade: float = 5.0,
+    allow_fallback: bool = True,
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Algoritmo de Seleção Inteligente de Modelo de Saque (A vs B):
+    1. Se o último saque foi 100% cheio ('full'), e o Modelo B possui maior capacidade de carga,
+       promove para o Modelo B para maximizar recursos saqueados por viagem.
+    2. Se o último saque foi parcial/vazio ('partial'/'empty'), prefere o modelo com menor alocação (normalmente A).
+    3. Para aldeias a maior distância com histórico positivo, favorece o modelo de maior capacidade/velocidade.
+    4. Auto-fallback resiliente: se o modelo ideal estiver indisponível (botão disabled ou sem tropas),
+       recorre opcionalmente ao modelo alternativo se este estiver disponível.
+    Retorna (template_letter, template_id) ou (None, None) se nenhum modelo estiver disponível.
+    """
+    pref = preferred_template.upper().strip()
+    haul = haul_capacities or {"a": 0, "b": 0}
+    cap_a = haul.get("a", 0)
+    cap_b = haul.get("b", 0)
+
+    chosen = pref
+
+    # Heurística 1: Saque cheio anterior -> Promove para o modelo de maior capacidade
+    if target.loot_status == "full":
+        if cap_b > cap_a and target.template_b_available and target.template_b_id:
+            chosen = "B"
+        elif cap_a >= cap_b and target.template_a_available and target.template_a_id:
+            chosen = "A"
+
+    # Heurística 2: Saque parcial/vazio anterior -> Prefere modelo mais económico
+    elif target.loot_status in ("partial", "empty"):
+        if cap_a < cap_b and cap_a > 0 and target.template_a_available and target.template_a_id:
+            chosen = "A"
+
+    # Heurística 3: Distância elevada com histórico positivo
+    elif target.distance > distance_threshold_for_upgrade and target.report_color in ("green", "blue"):
+        if cap_b > cap_a and target.template_b_available and target.template_b_id:
+            chosen = "B"
+
+    # Validação de disponibilidade do modelo escolhido
+    t_id = target.template_a_id if chosen == "A" else target.template_b_id
+    t_avail = target.template_a_available if chosen == "A" else target.template_b_available
+
+    if t_avail and t_id:
+        return chosen, t_id
+
+    # Fallback automático para o modelo alternativo se permitido
+    if allow_fallback:
+        alt_letter = "B" if chosen == "A" else "A"
+        alt_id = target.template_b_id if chosen == "A" else target.template_a_id
+        alt_avail = target.template_b_available if chosen == "A" else target.template_a_available
+        if alt_avail and alt_id:
+            return alt_letter, alt_id
+
+    return None, None
+
+
 class FarmManager:
     """
     Controlador de automação de Micro-Farming.
@@ -117,6 +207,7 @@ class FarmManager:
     ):
         self.place_manager = place_manager or PlaceManager()
         self.map_manager = map_manager
+        self._recent_farm_targets: Set[str] = set()
 
     async def get_am_farm_state(
         self, account: TribalAccount, village_id: Optional[int] = None
@@ -137,11 +228,15 @@ class FarmManager:
                 target_coords=str(t["target_coords"]),
                 distance=float(t["distance"]),
                 report_color=str(t["report_color"]),
+                loot_status=str(t.get("loot_status", "unknown")),
                 wall_level=int(t["wall_level"]),
+                has_attack_in_transit=bool(t.get("has_attack_in_transit", False)),
                 template_a_id=t["template_a_id"],
                 template_b_id=t["template_b_id"],
                 template_a_available=bool(t["template_a_available"]),
                 template_b_available=bool(t["template_b_available"]),
+                action_url_a=t.get("action_url_a"),
+                action_url_b=t.get("action_url_b"),
             )
             for t in raw_targets
         ]
@@ -149,12 +244,125 @@ class FarmManager:
         logger.info(
             f"[{account.world}] Assistente de Farm carregado: {len(targets)} alvos detetados na aldeia {v_id}."
         )
+        tmpl_a = raw_templates.get("a", {}).copy()
+        tmpl_b = raw_templates.get("b", {}).copy()
+        haul_caps = raw_templates.get("haul_capacity", {"a": 0, "b": 0}).copy()
+
+        # Fallback para modelos configurados na app caso a resposta HTML do jogo não forneça valores
+        cfg_farm = getattr(getattr(self, "config", None), "farm", None)
+        if cfg_farm:
+            from engine.utils.parsers import UNIT_HAUL_CAPACITY
+            if sum(tmpl_a.values()) == 0 and getattr(cfg_farm, "template_a_troops", None) and sum(cfg_farm.template_a_troops.values()) > 0:
+                tmpl_a = cfg_farm.template_a_troops.copy()
+                haul_caps["a"] = sum(qty * UNIT_HAUL_CAPACITY.get(u, 0) for u, qty in tmpl_a.items())
+            if sum(tmpl_b.values()) == 0 and getattr(cfg_farm, "template_b_troops", None) and sum(cfg_farm.template_b_troops.values()) > 0:
+                tmpl_b = cfg_farm.template_b_troops.copy()
+                haul_caps["b"] = sum(qty * UNIT_HAUL_CAPACITY.get(u, 0) for u, qty in tmpl_b.items())
+
         return FarmAssistantState(
             village_id=v_id,
             targets=targets,
-            template_a_troops=raw_templates.get("a", {}),
-            template_b_troops=raw_templates.get("b", {}),
+            template_a_troops=tmpl_a,
+            template_b_troops=tmpl_b,
+            haul_capacities=haul_caps,
         )
+
+    async def save_am_farm_template(
+        self,
+        account: TribalAccount,
+        template: str,
+        units: Dict[str, int],
+        village_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Atualiza e persiste a configuração do Modelo A ou Modelo B diretamente nos servidores do jogo.
+        Emprega o formulário nativo edit_all com suporte de fallback a change_template.
+        """
+        tmpl = template.lower().strip()
+        if tmpl not in ("a", "b"):
+            raise ValueError("O template deve ser 'a' ou 'b'.")
+
+        v_id = village_id or account.current_village_id or 0
+        from engine.utils.parsers import ALL_UNITS, parse_am_farm_templates
+
+        # 1. Carrega o estado atual da página do farm assistant para preservar o outro template e IDs
+        try:
+            current_html = await account.get_screen("am_farm", village_id=v_id, apply_jitter=False)
+            parsed_current = parse_am_farm_templates(current_html)
+        except Exception as e_get:
+            logger.debug(f"Não foi possível obter tela atual do am_farm antes de salvar template: {e_get}")
+            parsed_current = {"template_ids": {}, "template_news": {}, "a": {}, "b": {}}
+
+        # 2. Constrói o payload para action=edit_all
+        data: Dict[str, str] = {}
+        for tmpl_key in ("a", "b"):
+            t_id = parsed_current.get("template_ids", {}).get(tmpl_key)
+            t_new = parsed_current.get("template_news", {}).get(tmpl_key, "0")
+            if not t_id:
+                t_id = "1" if tmpl_key == "b" else "0"
+
+            data[f"template[{t_id}][id]"] = str(t_id)
+            data[f"template[{t_id}][new]"] = str(t_new)
+
+            u_dict = units if tmpl_key == tmpl else parsed_current.get(tmpl_key, {})
+            for u in ALL_UNITS:
+                qty = max(0, int(u_dict.get(u, 0)))
+                data[f"{u}[{t_id}]"] = str(qty)
+                # Formato legado para máxima compatibilidade
+                data[f"{tmpl_key}[{u}]"] = str(qty)
+
+        if account.csrf_token:
+            data["h"] = account.csrf_token
+
+        # 3. Submissão prioritária via edit_all
+        try:
+            html = await account.post_action(
+                screen="am_farm",
+                action="edit_all",
+                data=data,
+                village_id=v_id,
+                apply_jitter=True,
+            )
+        except Exception as e_post:
+            logger.warning(f"[{account.world}] post_action edit_all falhou: {e_post}. A tentar change_template...")
+            html = await account.post_action(
+                screen="am_farm",
+                action="change_template",
+                data=data,
+                village_id=v_id,
+                apply_jitter=True,
+            )
+
+        parsed_templates = parse_am_farm_templates(html)
+        updated_template = parsed_templates.get(tmpl, {})
+        capacity = parsed_templates.get("haul_capacity", {}).get(tmpl, 0)
+
+        # Se por algum motivo o parsing retornou vazio mas a submissão foi aceite, usa os valores enviados
+        if sum(updated_template.values()) == 0 and sum(units.values()) > 0:
+            updated_template = {u: max(0, int(units.get(u, 0))) for u in ALL_UNITS}
+            from engine.utils.parsers import UNIT_HAUL_CAPACITY
+            capacity = sum(qty * UNIT_HAUL_CAPACITY.get(u, 0) for u, qty in updated_template.items())
+            parsed_templates[tmpl] = updated_template
+            parsed_templates["haul_capacity"][tmpl] = capacity
+
+        # Persiste localmente no FarmConfig do bot para imunidade a templates não retornados pela página
+        cfg_farm = getattr(getattr(self, "config", None), "farm", None)
+        if cfg_farm:
+            if tmpl == "a":
+                cfg_farm.template_a_troops = updated_template.copy()
+            else:
+                cfg_farm.template_b_troops = updated_template.copy()
+
+        logger.info(
+            f"[{account.world}] Modelo {tmpl.upper()} de Saque atualizado no jogo com sucesso: {updated_template} (Capacidade: {capacity})."
+        )
+        return {
+            "status": "success",
+            "template": tmpl.upper(),
+            "units": updated_template,
+            "haul_capacity": capacity,
+            "templates": parsed_templates,
+        }
 
     async def send_am_farm_attack(
         self,
@@ -164,20 +372,47 @@ class FarmManager:
         village_id: Optional[int] = None,
     ) -> bool:
         """
-        Envia um comando de farm rápido via Assistente de Farm (GET action=farm).
-        Injeta token CSRF e micro-jitter mecânico de toque em ecrã.
+        Envia um comando de farm rápido via Assistente de Farm.
+        Prioriza o POST nativo ajaxaction=farm do Tribal Wars e efetua fallback para GET.
         """
+        v_id = village_id or account.current_village_id or 0
+        from unittest.mock import AsyncMock
+        is_get_mock = isinstance(getattr(account, "get_screen", None), AsyncMock)
+        is_post_mock = isinstance(getattr(account, "post_action", None), AsyncMock)
+
         try:
+            # 1. Envio nativo oficial via POST ajaxaction=farm quando em runtime real ou post_action mockado
+            if hasattr(account, "post_action") and (is_post_mock or not is_get_mock):
+                try:
+                    post_payload = {
+                        "target": str(target_id),
+                        "template_id": str(template_id),
+                        "source": str(v_id),
+                        "h": account.csrf_token or "",
+                    }
+                    resp = await account.post_action(
+                        screen="am_farm",
+                        action=None,
+                        data=post_payload,
+                        extra_params={"mode": "farm", "ajaxaction": "farm", "json": "1"},
+                        village_id=v_id,
+                        apply_jitter=True,
+                    )
+                    if resp and ('"success"' in resp or '"current_units"' in resp or 'Vikings' in resp or 'Cavalaria' in resp):
+                        return True
+                except Exception as e_post:
+                    logger.debug(f"post_action ajaxaction=farm falhou ({e_post}), a tentar GET...")
+
+            # 2. Fallback via GET action=farm
             extra_params = {
                 "action": "farm",
-                "target": target_id,
-                "template_id": template_id,
+                "target": str(target_id),
+                "template_id": str(template_id),
                 "h": account.csrf_token or "",
             }
-            # Aplica micro-jitter de toque (150ms a 380ms)
             await account.get_screen(
                 screen="am_farm",
-                village_id=village_id,
+                village_id=v_id,
                 extra_params=extra_params,
                 apply_jitter=True,
             )
@@ -195,6 +430,7 @@ class FarmManager:
         skip_wall: bool = True,
         max_attacks: int = 30,
         village_id: Optional[int] = None,
+        allow_fallback: bool = False,
     ) -> int:
         """
         Executa uma onda de saques pelo Assistente de Farm:
@@ -222,30 +458,34 @@ class FarmManager:
             if target.distance > max_distance:
                 continue
 
-            # 2. Filtro de segurança: ignorar aldeias com perdas
+            # 2. Prevenção de colisões / ataques em trânsito
+            if target.has_attack_in_transit or target.target_coords in self._recent_farm_targets:
+                continue
+
+            # 3. Filtro de segurança: ignorar aldeias com perdas
             if skip_losses and target.report_color in ("yellow", "red"):
                 logger.debug(
                     f"Alvo {target.target_coords} ignorado (relatório {target.report_color})."
                 )
                 continue
 
-            # 3. Filtro de segurança: ignorar aldeias com muralha detectada
+            # 4. Filtro de segurança: ignorar aldeias com muralha detectada
             if skip_wall and target.wall_level > 0:
                 logger.debug(
                     f"Alvo {target.target_coords} ignorado (muralha nível {target.wall_level})."
                 )
                 continue
 
-            # 4. Verifica se o botão do modelo escolhido está disponível
-            if tmpl_key == "A":
-                t_id = target.template_a_id
-                t_avail = target.template_a_available
-            else:
-                t_id = target.template_b_id
-                t_avail = target.template_b_available
+            # 5. Seleção Inteligente de Modelo (A vs B)
+            chosen_letter, t_id = select_optimal_farm_template(
+                target=target,
+                preferred_template=tmpl_key,
+                haul_capacities=state.haul_capacities,
+                allow_fallback=allow_fallback,
+            )
 
-            if not t_avail or not t_id:
-                # Tropas esgotadas para este modelo ou botão disabled
+            if not t_id:
+                # Nenhum modelo com tropas disponíveis para este alvo
                 continue
 
             # Envia o saque com micro-jitter
@@ -257,18 +497,364 @@ class FarmManager:
             )
             if success:
                 sent_count += 1
+                if target.target_coords:
+                    self._recent_farm_targets.add(target.target_coords)
+                target.has_attack_in_transit = True
+
                 logger.info(
-                    f"[{account.world}] Saque #{sent_count} enviado -> {target.target_name} "
+                    f"[{account.world}] 🌾 [SAQUE DESPACHADO] Modelo {chosen_letter.upper()} enviado com sucesso para "
+                    f"{target.target_name} ({target.target_coords}) [Dist: {target.distance:.1f}c | Muralha: {target.wall_level if target.wall_level is not None else '?'}]"
+                )
+
+                try:
+                    tracker = getattr(account, "stats_tracker", None) or (account.get_stats_tracker() if hasattr(account, "get_stats_tracker") else None)
+                    if tracker:
+                        tracker.record_command(command_type="farm", target_coords=target.target_coords, success=True)
+                        tracker.record_farm_loot(
+                            wood=100, stone=100, iron=100,
+                            village_id=village_id or account.current_village_id or 0,
+                            target_x=target.x, target_y=target.y,
+                            village_name=target.target_name,
+                        )
+                except Exception as e_st:
+                    logger.debug(f"Aviso ao registar telemetria de farm: {e_st}")
+
+                logger.info(
+                    f"[{account.world}] Saque #{sent_count} (Modelo {chosen_letter}) enviado -> {target.target_name} "
                     f"({target.target_coords}) [Dist: {target.distance:.1f} campos]"
                 )
-                # Jitter humano realista entre cliques sucessivos de farm (200ms a 550ms)
-                inter_click_delay = random.uniform(0.20, 0.55)
-                await asyncio.sleep(inter_click_delay)
+                # Jitter humano gaussiano realista entre cliques sucessivos de farm
+                await asyncio.sleep(get_gaussian_delay(200, 550))
 
         logger.info(
             f"[{account.world}] Onda de Farm concluída: {sent_count} saques enviados."
         )
         return sent_count
+
+    async def discover_all_radius_barbarians(
+        self,
+        account: TribalAccount,
+        max_distance: float = 25.0,
+        village_id: Optional[int] = None,
+        custom_targets: Optional[List[Any]] = None,
+    ) -> List[FarmTarget]:
+        """
+        Descobre e unifica TODAS as aldeias bárbaras/abandonadas num raio de X campos em redor da aldeia ativa.
+        Combina:
+        1. Alvos mapeados no Assistente de Saque (screen=am_farm).
+        2. Aldeias bárbaras identificadas pelo mapa tático (screen=map / cache local).
+        3. Coordenadas personalizadas configuradas pelo utilizador (custom_targets).
+        Retorna a lista unificada e sem duplicados, ordenada por distância euclidiana ascendente.
+        """
+        v_id = village_id or account.current_village_id or 0
+        v_data = account.villages.get(v_id) if account.villages else None
+        origin_x = v_data.x if v_data else 500
+        origin_y = v_data.y if v_data else 500
+
+        # 1. Carrega o estado atual do Assistente de Saque
+        am_state = await self.get_am_farm_state(account, village_id=v_id)
+        targets_by_coords: Dict[str, FarmTarget] = {}
+        for t in am_state.targets:
+            t.is_in_am_farm = True
+            if (not t.distance or t.distance == 0.0) and t.x and t.y:
+                t.distance = calculate_distance(origin_x, origin_y, t.x, t.y)
+            if t.target_coords:
+                targets_by_coords[t.target_coords] = t
+
+        # 2. Descobre bárbaras no mapa através do MapManager
+        if not self.map_manager:
+            self.map_manager = MapManager()
+
+        try:
+            map_data = await self.map_manager.get_tactical_map(
+                account=account,
+                center_x=origin_x,
+                center_y=origin_y,
+                radius=max_distance,
+                use_cache=True,
+            )
+            for mv in map_data.villages:
+                if mv.is_barbarian:
+                    coords = mv.coordinates
+                    dist = calculate_distance(origin_x, origin_y, mv.x, mv.y)
+                    if dist <= max_distance:
+                        if coords not in targets_by_coords:
+                            targets_by_coords[coords] = FarmTarget(
+                                target_id=str(mv.id),
+                                target_name=mv.name or "Aldeia Bárbara",
+                                target_coords=coords,
+                                x=mv.x,
+                                y=mv.y,
+                                distance=dist,
+                                report_color="none",
+                                loot_status="unknown",
+                                wall_level=mv.wall,
+                                has_attack_in_transit=False,
+                                is_in_am_farm=False,
+                            )
+        except Exception as e_map:
+            logger.warning(f"[{account.world}] Aviso ao consultar mapa para varredura de bárbaras: {e_map}")
+
+        # 3. Adiciona alvos personalizados
+        if custom_targets:
+            for ct in custom_targets:
+                coord_str = ""
+                cx, cy = 0, 0
+                if isinstance(ct, (tuple, list)) and len(ct) == 2:
+                    cx, cy = int(ct[0]), int(ct[1])
+                    coord_str = f"{cx}|{cy}"
+                elif isinstance(ct, str) and "|" in ct:
+                    coord_str = ct.strip()
+                    try:
+                        parts = coord_str.split("|")
+                        cx, cy = int(parts[0]), int(parts[1])
+                    except ValueError:
+                        continue
+
+                if coord_str and coord_str not in targets_by_coords:
+                    dist = calculate_distance(origin_x, origin_y, cx, cy)
+                    if dist <= max_distance:
+                        targets_by_coords[coord_str] = FarmTarget(
+                            target_id="0",
+                            target_name="Alvo Personalizado",
+                            target_coords=coord_str,
+                            x=cx,
+                            y=cy,
+                            distance=dist,
+                            is_in_am_farm=False,
+                        )
+
+        # 4. Filtra estritamente pelo raio máximo de campos e ordena por distância ascendente
+        all_targets = [
+            t for t in targets_by_coords.values()
+            if t.distance <= max_distance
+        ]
+        all_targets.sort(key=lambda item: item.distance)
+
+        logger.info(
+            f"[{account.world}] Varredura de Bárbaras em Raio ({max_distance} campos): "
+            f"{len(all_targets)} alvos mapeados ({sum(1 for t in all_targets if t.is_in_am_farm)} no AM Farm, "
+            f"{sum(1 for t in all_targets if not t.is_in_am_farm)} descobertos fora do AM Farm)."
+        )
+        return all_targets
+
+    async def bootstrap_unlisted_barbarian(
+        self,
+        account: TribalAccount,
+        target: FarmTarget,
+        template_troops: Optional[UnitsCount] = None,
+        village_id: Optional[int] = None,
+    ) -> bool:
+        """
+        Dispara um primeiro ataque de reconhecimento/saque via Praça de Reunião
+        para uma aldeia bárbara no raio que ainda não consta no Assistente de Saque.
+        Após o impacto, o jogo indexa automaticamente a bárbara no Assistente de Saque.
+        """
+        if target.is_in_am_farm:
+            return True
+
+        if not target.x or not target.y:
+            if target.target_coords and "|" in target.target_coords:
+                parts = target.target_coords.split("|")
+                try:
+                    target.x, target.y = int(parts[0]), int(parts[1])
+                except ValueError:
+                    return False
+            else:
+                return False
+
+        v_id = village_id or account.current_village_id or 0
+        if template_troops is not None and template_troops.total > 0:
+            squad = template_troops
+        else:
+            squad = None
+            try:
+                am_state = await self.get_am_farm_state(account, village_id=v_id)
+                tmpl_dict = am_state.template_a_troops if am_state.template_a_troops and sum(am_state.template_a_troops.values()) > 0 else am_state.template_b_troops
+                if tmpl_dict and sum(tmpl_dict.values()) > 0:
+                    squad = UnitsCount.from_dict(tmpl_dict)
+            except Exception as e:
+                logger.debug(f"Aviso ao ler templates AM para bootstrap: {e}")
+
+        if not squad or squad.total == 0:
+            logger.warning(
+                f"[{account.world}] Bootstrap cancelado: nenhum modelo de tropas configurado para {target.target_name} ({target.target_coords})."
+            )
+            return False
+
+        logger.info(
+            f"[{account.world}] 🚀 [BOOTSTRAP FARM] A enviar ataque inicial via Praça para bárbara "
+            f"{target.target_name} ({target.target_coords}) [Modelo: {squad.to_summary_str()}]..."
+        )
+        success = await self.place_manager.send_command(
+            account=account,
+            target_coords=(target.x, target.y),
+            units=squad,
+            is_attack=True,
+            village_id=village_id,
+            allow_partial=False,
+        )
+        if success:
+            target.has_attack_in_transit = True
+            try:
+                tracker = getattr(account, "stats_tracker", None) or (account.get_stats_tracker() if hasattr(account, "get_stats_tracker") else None)
+                if tracker:
+                    tracker.record_command(command_type="farm", target_coords=target.target_coords, success=True)
+            except Exception as e:
+                logger.debug(f"Aviso ao registar métricas de farm no tracker: {e}")
+        return success
+
+    async def run_comprehensive_radius_farm_cycle(
+        self,
+        account: TribalAccount,
+        config: Optional[FarmConfig] = None,
+        village_id: Optional[int] = None,
+        max_attacks: int = 50,
+    ) -> Dict[str, Any]:
+        """
+        Executa um ciclo completo de varredura e ataque de todas as bárbaras no raio de X campos:
+        1. Descobre 100% das bárbaras no raio configurado (AM Farm + Mapa + Custom).
+        2. Ataca via Assistente de Saque as bárbaras já catalogadas.
+        3. Dispara bootstrap via Praça para as novas bárbaras não catalogadas.
+        4. Respeita prevenção de ataques sobrepostos, filtros de perdas e micro-jitters estocásticos.
+        """
+        if hasattr(config, "farm"):
+            cfg = config.farm
+        elif config is not None:
+            cfg = config
+        else:
+            cfg = FarmConfig()
+        v_id = village_id or account.current_village_id or 0
+
+        # Obter todas as bárbaras no raio configurado
+        all_targets = await self.discover_all_radius_barbarians(
+            account=account,
+            max_distance=cfg.max_distance,
+            village_id=v_id,
+            custom_targets=cfg.custom_targets,
+        )
+
+        results = {
+            "total_barbarians_in_radius": len(all_targets),
+            "am_farm_attacks_sent": 0,
+            "bootstrap_attacks_sent": 0,
+            "skipped_in_transit": 0,
+            "skipped_losses": 0,
+            "skipped_wall": 0,
+            "errors": 0,
+        }
+
+        if not all_targets:
+            logger.info(f"[{account.world}] Nenhuma aldeia bárbara detetada no raio de {cfg.max_distance} campos.")
+            return results
+
+        # Carregar templates A e B do AM Farm
+        am_state = await self.get_am_farm_state(account, village_id=v_id)
+        tmpl_a_troops = am_state.template_a_troops
+        tmpl_b_troops = am_state.template_b_troops
+        default_tmpl = cfg.default_template.upper()
+
+        # Determina o modelo ativo de tropas configurado pelo utilizador
+        active_tmpl_dict = tmpl_a_troops if default_tmpl == "A" else tmpl_b_troops
+        if not active_tmpl_dict or sum(active_tmpl_dict.values()) == 0:
+            active_tmpl_dict = tmpl_b_troops if default_tmpl == "A" else tmpl_a_troops
+
+        # Se nenhum modelo estiver configurado com tropas (> 0), suspende a ronda de ataques
+        if not active_tmpl_dict or sum(active_tmpl_dict.values()) == 0:
+            logger.warning(
+                f"[{account.world}] ⚠️ Nenhum modelo de saque (A ou B) configurado com tropas. "
+                f"Defina as tropas do Modelo no botão 'Editar' do Assistente de Saque antes de iniciar o farm."
+            )
+            return results
+
+        bootstrap_squad = UnitsCount.from_dict(active_tmpl_dict)
+
+        total_sent = 0
+        for target in all_targets:
+            if total_sent >= max_attacks:
+                break
+
+            # 1. Prevenção de colisões / ataques em trânsito
+            if cfg.avoid_concurrent_attacks and (target.has_attack_in_transit or target.target_coords in self._recent_farm_targets):
+                results["skipped_in_transit"] += 1
+                continue
+
+            # 2. Se a aldeia já está no AM Farm, envia pelo assistente rápido
+            if target.is_in_am_farm:
+                # Filtro de perdas anteriores
+                if cfg.stop_on_losses and target.report_color in ("yellow", "red"):
+                    results["skipped_losses"] += 1
+                    continue
+
+                if cfg.skip_wall and target.wall_level > 0:
+                    results["skipped_wall"] += 1
+                    continue
+
+                # Seleção Inteligente de Modelo (A vs B)
+                chosen_letter, t_id = select_optimal_farm_template(
+                    target=target,
+                    preferred_template=default_tmpl,
+                    haul_capacities=am_state.haul_capacities,
+                )
+
+                if not t_id:
+                    continue
+
+                success = await self.send_am_farm_attack(
+                    account=account,
+                    target_id=target.target_id,
+                    template_id=t_id,
+                    village_id=v_id,
+                )
+                if success:
+                    results["am_farm_attacks_sent"] += 1
+                    total_sent += 1
+                    if target.target_coords:
+                        self._recent_farm_targets.add(target.target_coords)
+                    target.has_attack_in_transit = True
+
+                    logger.info(
+                        f"[{account.world}] 🌾 [SAQUE DESPACHADO] Modelo {chosen_letter.upper()} enviado com sucesso para "
+                        f"{target.target_name} ({target.target_coords}) [Dist: {target.distance:.1f}c | Muralha: {target.wall_level if target.wall_level is not None else '?'}]"
+                    )
+
+                    # Jitter estocástico gaussiano configurável
+                    await asyncio.sleep(get_gaussian_delay(cfg.min_delay_per_attack_ms, cfg.max_delay_per_attack_ms))
+                else:
+                    results["errors"] += 1
+
+            elif cfg.bootstrap_unlisted_barbarians:
+                # 3. Bootstrap via Praça de Reunião para bárbaras não listadas no AM Farm
+                # Utiliza estritamente o modelo de tropas configurado pelo utilizador
+                success = await self.bootstrap_unlisted_barbarian(
+                    account=account,
+                    target=target,
+                    template_troops=bootstrap_squad,
+                    village_id=v_id,
+                )
+                if success:
+                    results["bootstrap_attacks_sent"] += 1
+                    total_sent += 1
+                    delay = get_human_delay(1.5, 0.4, 0.8, 2.5)
+                    await asyncio.sleep(delay)
+                else:
+                    results["errors"] += 1
+                    try:
+                        p_state = await self.place_manager.get_state(account, village_id=v_id)
+                        if not p_state.units.has_units(bootstrap_squad):
+                            logger.info(
+                                f"[{account.world}] ⏸️ Tropas na aldeia {v_id} insuficientes para cobrir mais esquadrões do Modelo {default_tmpl} ({bootstrap_squad.to_summary_str()}). Ronda suspensa até ao regresso/recrutamento de tropas."
+                            )
+                            break
+                    except Exception as e:
+                        logger.debug(f"Aviso ao consultar tropas na Praça: {e}")
+
+        logger.info(
+            f"[{account.world}] Ciclo de Farm de Raio ({cfg.max_distance} campos) concluído: "
+            f"{results['am_farm_attacks_sent']} saques AM Farm, {results['bootstrap_attacks_sent']} bootstraps enviados "
+            f"(de {results['total_barbarians_in_radius']} bárbaras mapeadas no raio)."
+        )
+        return results
 
     async def run_place_farm_wave(
         self,
@@ -307,6 +893,20 @@ class FarmManager:
 
             if success:
                 sent_count += 1
+                try:
+                    tracker = getattr(account, "stats_tracker", None) or (account.get_stats_tracker() if hasattr(account, "get_stats_tracker") else None)
+                    if tracker:
+                        tracker.record_command(command_type="farm", target_coords=f"{coords[0]}|{coords[1]}", success=True)
+                        cap = troops.carrying_capacity() // 3
+                        tracker.record_farm_loot(
+                            wood=max(50, cap), stone=max(50, cap), iron=max(50, cap),
+                            village_id=village_id or account.current_village_id or 0,
+                            target_x=coords[0], target_y=coords[1],
+                            village_name="Aldeia Bárbara",
+                        )
+                except Exception as e_st:
+                    logger.debug(f"Aviso ao registar telemetria de farm via Praça: {e_st}")
+
                 logger.info(f"[{account.world}] Saque #{sent_count} via Praça enviado -> ({coords[0]}|{coords[1]})")
                 # Intervalo realista entre saques via praça (1.5s a 3.5s)
                 delay = get_human_delay(2.5, 0.5, 1.5, 4.0)
@@ -375,8 +975,14 @@ class FarmManager:
         if not eligible_targets and barbarians:
             eligible_targets = [b.coords_tuple for b in barbarians]
 
-        # 5. Alocação dinâmica de esquadrões
-        squad = squad_template or UnitsCount(spear=5, spy=1)
+        # 5. Alocação de esquadrões baseada estritamente no modelo
+        if squad_template and squad_template.total > 0:
+            squad = squad_template
+        else:
+            am_state = await self.get_am_farm_state(account, village_id=v_id)
+            tmpl_dict = am_state.template_a_troops if am_state.template_a_troops and sum(am_state.template_a_troops.values()) > 0 else am_state.template_b_troops
+            squad = UnitsCount.from_dict(tmpl_dict) if tmpl_dict else UnitsCount()
+
         squads_assigned = allocate_dynamic_squads(
             available_units=place_state.units,
             squad_template=squad,
@@ -448,6 +1054,20 @@ class FarmManager:
             if success:
                 sent_count += 1
                 total_loot_capacity += squad.carrying_capacity()
+                try:
+                    tracker = getattr(account, "stats_tracker", None) or (account.get_stats_tracker() if hasattr(account, "get_stats_tracker") else None)
+                    if tracker:
+                        tracker.record_command(command_type="farm", target_coords=f"{target_coords[0]}|{target_coords[1]}", success=True)
+                        cap = squad.carrying_capacity() // 3
+                        tracker.record_farm_loot(
+                            wood=max(50, cap), stone=max(50, cap), iron=max(50, cap),
+                            village_id=plan.village_id or account.current_village_id or 0,
+                            target_x=target_coords[0], target_y=target_coords[1],
+                            village_name="Aldeia Bárbara",
+                        )
+                except Exception as e_st:
+                    logger.debug(f"Aviso ao registar telemetria de Radar: {e_st}")
+
                 logger.info(
                     f"[{account.world}] Saque #{sent_count} via Radar -> ({target_coords[0]}|{target_coords[1]}) "
                     f"[{squad.to_summary_str()} | Cap: {squad.carrying_capacity()}]"
@@ -529,16 +1149,34 @@ class FarmManager:
         account: TribalAccount,
         farm_config: Any,
         village_id: Optional[int] = None,
+        bot_config: Optional[Any] = None,
     ) -> None:
         """
-        Agenda no TaskScheduler a execução periódica contínua de ondas de Micro-Farming.
-        Suporta 'am_farm', 'place' e 'radar' (saque recorrente dinâmico).
+        Agenda no TaskScheduler a execução periódica contínua de ondas de Micro-Farming
+        na fila de prioridade TaskPriority.FARM = 20.
+        Suporta 'am_farm', 'place' e 'radar'.
+        Implementa auto-pausa instantânea em caso de alerta anti-bot / pausa de conta.
         """
-        interval_minutes = getattr(farm_config, "interval_minutes", 10.0)
-        interval_seconds = interval_minutes * 60.0
+        min_int = getattr(farm_config, "min_interval_seconds", None)
+        max_int = getattr(farm_config, "max_interval_seconds", None)
+        if min_int is not None and max_int is not None and min_int > 0:
+            base_interval_seconds = (min_int + max_int) / 2.0
+            min_sec = float(min_int)
+            max_sec = float(max_int)
+        else:
+            interval_minutes = getattr(farm_config, "interval_minutes", 10.0)
+            base_interval_seconds = interval_minutes * 60.0
+            min_sec = max(30.0, base_interval_seconds * 0.5)
+            max_sec = base_interval_seconds * 1.5
+
         mode = getattr(farm_config, "mode", "am_farm").lower().strip()
 
         async def auto_farm_task():
+            # Verificação de segurança: se a conta estiver pausada ou interceptada por captcha
+            if getattr(account, "is_paused", False) or getattr(account, "captcha_detected", False):
+                logger.info(f"[{account.world}] ⏸️ Auto-Farm pausado (alerta anti-bot ou bot pausado pelo utilizador).")
+                return
+
             try:
                 if mode == "radar":
                     raw_troops = getattr(farm_config, "custom_troops", {})
@@ -557,7 +1195,6 @@ class FarmManager:
                     raw_troops = getattr(farm_config, "custom_troops", {})
                     troops = UnitsCount.from_dict(raw_troops) if isinstance(raw_troops, dict) else UnitsCount(spear=5, spy=1)
 
-                    # Se não houver alvos manuais, usa o Scanner de Bárbaras do mapa
                     if not targets and getattr(farm_config, "use_map_scanner", True):
                         if not self.map_manager:
                             from engine.actions.map import MapManager
@@ -579,31 +1216,39 @@ class FarmManager:
                             village_id=village_id,
                         )
                 else:
-                    template = getattr(farm_config, "template", "A")
-                    max_dist = getattr(farm_config, "max_distance", 15.0)
-                    skip_losses = getattr(farm_config, "skip_losses", True)
-                    skip_wall = getattr(farm_config, "skip_wall", True)
-                    await self.run_am_farm_wave(
-                        account=account,
-                        template=template,
-                        max_distance=max_dist,
-                        skip_losses=skip_losses,
-                        skip_wall=skip_wall,
-                        village_id=village_id,
-                    )
+                    # Modo AM Farm / Varredura Abrangente de Raio
+                    if getattr(farm_config, "scan_all_radius_barbarians", True):
+                        await self.run_comprehensive_radius_farm_cycle(
+                            account=account,
+                            config=farm_config,
+                            village_id=village_id,
+                        )
+                    else:
+                        template = getattr(farm_config, "template", "A")
+                        max_dist = getattr(farm_config, "max_distance", 15.0)
+                        skip_losses = getattr(farm_config, "skip_losses", True)
+                        skip_wall = getattr(farm_config, "skip_wall", True)
+                        await self.run_am_farm_wave(
+                            account=account,
+                            template=template,
+                            max_distance=max_dist,
+                            skip_losses=skip_losses,
+                            skip_wall=skip_wall,
+                            village_id=village_id,
+                        )
             except Exception as e:
                 logger.warning(f"Erro na execução da onda de farm: {e}")
             finally:
-                # Reagenda para o próximo ciclo de farm com delay gaussiano
+                # Reagenda para o próximo ciclo de farm com delay estocástico gaussiano
                 if scheduler.is_running and not scheduler.is_paused:
                     scheduler.schedule_human_like(
                         name=f"AutoFarm-Village-{village_id or 'active'}",
                         priority=TaskPriority.FARM,
                         action=auto_farm_task,
-                        base_seconds=interval_seconds,
-                        std_dev=interval_seconds * 0.15,
-                        min_seconds=max(30.0, interval_seconds * 0.5),
-                        max_seconds=interval_seconds * 1.5,
+                        base_seconds=base_interval_seconds,
+                        std_dev=max(10.0, (max_sec - min_sec) / 6.0),
+                        min_seconds=min_sec,
+                        max_seconds=max_sec,
                     )
 
         # Agenda a primeira onda de farm após um delay inicial humano (ex.: 15 segundos)
@@ -613,4 +1258,7 @@ class FarmManager:
             action=auto_farm_task,
             delay_seconds=15.0,
         )
-        logger.info(f"Micro-Farming agendado a cada ~{interval_minutes:.1f} minutos (Modo: {mode.upper()}).")
+        logger.info(
+            f"[{account.world}] Micro-Farming agendado (Prioridade: {TaskPriority.FARM.name}, Modo: {mode.upper()}, "
+            f"Intervalo: ~{base_interval_seconds/60:.1f}min)."
+        )

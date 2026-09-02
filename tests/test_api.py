@@ -693,8 +693,63 @@ class TestApiSidecar(unittest.TestCase):
             self.assertEqual(m_del.status_code, 200)
             self.assertEqual(m_del.json()["status"], "success")
 
+    def test_radar_players_radius_and_history_api(self):
+        """Testa GET /api/radar/players-radius e GET /api/radar/player-history/{player_id}."""
+        # 1. Mock do retorno de context.get_radar_players_radius
+        with patch.object(self.context, "get_radar_players_radius", return_value={
+            "status": "success",
+            "world": "pt117",
+            "origin_coords": "450|550",
+            "scan_radius": 25.0,
+            "total_players_found": 1,
+            "counts": {"accelerating": 1, "growing": 0, "stagnant": 0, "regressive": 0, "inactive": 0},
+            "players": [{
+                "player_id": 999,
+                "player_name": "Jogador Teste",
+                "player_points": 2500,
+                "villages_count": 2,
+                "ally_tag": "TOP",
+                "nearest_coords": "451|551",
+                "nearest_distance": 1.4,
+                "delta_24h": 300,
+                "delta_7d": 1200,
+                "trend": "accelerating",
+                "trend_label": "🚀 Crescimento Acelerado",
+            }],
+        }):
+            res = self.client.get(
+                "/api/radar/players-radius?max_distance=25.0",
+                headers={"X-Engine-Token": self.token},
+            )
+            self.assertEqual(res.status_code, 200)
+            data = res.json()
+            self.assertEqual(data["status"], "success")
+            self.assertEqual(data["total_players_found"], 1)
+            self.assertEqual(data["players"][0]["player_name"], "Jogador Teste")
+
+        # 2. Mock do retorno de context.get_player_timeline
+        with patch.object(self.context, "get_player_timeline", return_value={
+            "status": "success",
+            "world": "pt117",
+            "player_id": 999,
+            "timeline": [
+                {"timestamp": 1700000000.0, "date_human": "15/11 12:00", "points": 1300, "delta": 0},
+                {"timestamp": 1700604800.0, "date_human": "22/11 12:00", "points": 2500, "delta": 1200},
+            ],
+        }):
+            h_res = self.client.get(
+                "/api/radar/player-history/999",
+                headers={"X-Engine-Token": self.token},
+            )
+            self.assertEqual(h_res.status_code, 200)
+            h_data = h_res.json()
+            self.assertEqual(h_data["status"], "success")
+            self.assertEqual(len(h_data["timeline"]), 2)
+            self.assertEqual(h_data["timeline"][1]["points"], 2500)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
