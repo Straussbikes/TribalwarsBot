@@ -3227,6 +3227,17 @@ class EngineContext:
         user = await self.user_repo.authenticate(email=email, password=password)
         if not user:
             return {"status": "error", "message": "Email ou password inválidos."}
+        # Se mudou de utilizador da app, limpa a sessão em memória do utilizador anterior
+        if self.current_app_user and self.current_app_user.id != user.id:
+            self.account = None
+            self.active_profile_id = None
+            if hasattr(self, "session_manager"):
+                self.session_manager.active_account_id = None
+                self.session_manager.active_game_username = None
+                try:
+                    await self.session_manager.stop_current_session()
+                except Exception:
+                    pass
         self.current_app_user = user
         return {
             "status": "success",

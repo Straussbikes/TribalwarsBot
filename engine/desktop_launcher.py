@@ -418,11 +418,20 @@ class DesktopApp:
                 try:
                     await self.context.ensure_current_app_user()
                     if self.context.current_app_user and self.context.account:
+                        # Aguarda que a extração do estado do jogador termine
+                        try:
+                            await self.context.account.refresh_state()
+                        except Exception:
+                            pass
                         player_name = (
                             getattr(self.context.account, "player_name", "") or
-                            getattr(self.context.account, "username", "") or
-                            f"Jogador_{self.context.config.world.upper()}"
+                            getattr(self.context.account, "username", "")
                         ).strip()
+                        if not player_name and getattr(self.context.account, "player", None):
+                            player_name = str(self.context.account.player.name).strip()
+                        if not player_name:
+                            return  # Não persistir se ainda não tem identificação válida
+
                         await self.context.add_user_game_account(
                             game_username=player_name,
                             sid=sid,

@@ -477,11 +477,11 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
 
     @router.get("/accounts")
     async def get_accounts():
-        """Lista contas do utilizador Cloud SQL e perfis locais sem duplicação."""
+        """Lista contas do utilizador Cloud SQL com isolamento estrito e sem duplicações."""
         try:
             accounts = []
             active_username = context.session_manager.active_game_username
-            active_id = context.active_profile_id
+            active_id = context.session_manager.active_account_id or context.active_profile_id
 
             # 1. Assegura utilizador autenticado no Cloud SQL
             try:
@@ -490,85 +490,55 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
                 logger.warning(f"Aviso ao verificar utilizador atual: {ue}")
 
             if context.current_app_user:
+                # ISOLAMENTO MULTI-TENANT ESTRITO: Apenas contas pertencentes a este utilizador
                 try:
                     cloud_res = await context.list_user_game_accounts()
                     if cloud_res and isinstance(cloud_res, dict):
-                        accounts.extend(cloud_res.get("accounts", []))
+                        accounts = cloud_res.get("accounts", [])
                 except Exception as e:
                     logger.warning(f"Aviso ao consultar contas Cloud SQL: {e}")
-
-            # 2. Contas locais no ProfileManager (quando utilizador não autenticado no Cloud ou se cofre estiver vazio)
-            if not accounts:
+            else:
+                # Apenas se NENHUM utilizador estiver autenticado é que lista local
                 try:
-                    accounts.extend(context.list_accounts() or [])
+                    accounts = context.list_accounts() or []
                 except Exception as e:
                     logger.warning(f"Aviso ao consultar contas locais: {e}")
 
-            # 3. Conta atualmente ativa em runtime no motor
-            runtime_player = None
-            if context.account:
-                p_val = getattr(context.account, "player_name", None)
-                if not p_val:
-                    p_obj = getattr(context.account, "player", None)
-                    p_val = getattr(p_obj, "name", None) if p_obj else None
-                if not p_val:
-                    p_val = getattr(context.account, "username", None)
-                if p_val:
-                    runtime_player = str(p_val).strip()
-
-            if runtime_player:
-                curr_lower = runtime_player.lower()
-                all_known = {
-                    (a.get("game_username") or a.get("name") or "").strip().lower()
-                    for a in accounts
-                    if isinstance(a, dict)
-                }
-                if curr_lower not in all_known:
-                    accounts.insert(0, {
-                        "id": active_id or "runtime_active_profile",
-                        "name": runtime_player,
-                        "game_username": runtime_player,
-                        "world": context.config.world,
-                        "world_domain": f"{context.config.world}.{context.config.domain}",
-                        "session_cookie": getattr(context.account, "sid", "") or context.config.sid or "",
-                        "is_active_session": True,
-                        "is_active": True,
-                        "last_used": time.time(),
-                    })
-                    # Persiste em segundo plano no Cloud SQL se estiver autenticado
-                    if context.current_app_user:
-                        try:
-                            asyncio.create_task(
-                                context.add_user_game_account(
-                                    game_username=runtime_player,
-                                    sid=getattr(context.account, "sid", "") or context.config.sid or "",
-                                    domain=context.config.domain,
-                                    world=context.config.world,
-                                )
-                            )
-                        except Exception:
-                            pass
-
-            # 4. Assegura marcação de is_active_session correta
+            # 2. Desduplicação estrita por nome de jogo
+            seen_usernames = set()
+            unique_accounts = []
             for a in accounts:
                 if not isinstance(a, dict):
                     continue
+                uname = (a.get("game_username") or a.get("name") or "").strip().lower()
+                if not uname or uname in seen_usernames:
+                    continue
+                seen_usernames.add(uname)
+                unique_accounts.append(a)
+
+            # 3. Assegura marcação de is_active_session estritamente exclusiva (MÁXIMO 1 CONTA ATIVA)
+            active_marked = False
+            for a in unique_accounts:
+                a["is_active_session"] = False
+                a["is_active"] = False
                 u = (a.get("game_username") or a.get("name") or "").strip().lower()
                 a_id = str(a.get("id", ""))
-                is_active = bool(
-                    (active_username and u == active_username.lower()) or
-                    (runtime_player and u == runtime_player.lower()) or
-                    (active_id and a_id == str(active_id))
-                )
-                if is_active:
-                    a["is_active_session"] = True
-                    a["is_active"] = True
+
+                if not active_marked:
+                    if active_id and a_id == str(active_id):
+                        a["is_active_session"] = True
+                        a["is_active"] = True
+                        active_marked = True
+                    elif active_username and u == active_username.lower():
+                        a["is_active_session"] = True
+                        a["is_active"] = True
+                        active_marked = True
 
             return {
                 "status": "success",
-                "accounts": accounts,
-                "active_id": active_id,
-                "active_username": active_username or runtime_player,
+                "accounts": unique_accounts,
+                "active_id": active_id if active_marked else None,
+                "active_username": active_username if active_marked else None,
             }
         except Exception as err:
             logger.error(f"Erro inesperado ao listar contas: {err}", exc_info=True)
@@ -1724,7 +1694,12 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         from engine.storage.token_storage import token_storage
         token_storage.clear_token()
         context.current_app_user = None
-        await context.session_manager.stop_current_session()
+        context.account = None
+        context.active_profile_id = None
+        if hasattr(context, "session_manager"):
+            context.session_manager.active_account_id = None
+            context.session_manager.active_game_username = None
+            await context.session_manager.stop_current_session()
         return {"status": "success", "message": "Sessão terminada."}
 
     @router.post("/worlds")
