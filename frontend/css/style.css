@@ -1627,9 +1627,34 @@ body {
   background: rgba(30, 41, 59, 0.6);
 }
 
-.btn-stats-range.active, .btn-stats-metric.active {
+.btn-stats-range, .btn-stats-metric {
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  border-radius: 0;
+  border: none;
+  background: rgba(30, 41, 59, 0.7);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-stats-range:hover, .btn-stats-metric:hover {
+  background: rgba(51, 65, 85, 0.8);
+  color: #fff;
+}
+
+.btn-stats-range.active {
+  background: rgba(6, 182, 212, 0.25) !important;
+  color: var(--neon-cyan) !important;
   font-weight: 700;
   box-shadow: 0 0 10px rgba(6, 182, 212, 0.3);
+}
+
+.btn-stats-metric.active {
+  background: rgba(16, 185, 129, 0.25) !important;
+  color: var(--neon-emerald) !important;
+  font-weight: 700;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
 }
 
 .stats-status-ok {
@@ -1736,6 +1761,451 @@ body {
   flex-wrap: wrap;
   align-items: center;
 }
+
+/* ==========================================================================
+   Módulo de Defesa, Incomings & Alarme de Ataques (Ponto 2.8)
+   ========================================================================== */
+
+/* Animação Pulsante de Perigo */
+@keyframes dangerPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+    border-color: rgba(239, 68, 68, 0.8);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+    border-color: rgba(239, 68, 68, 1);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    border-color: rgba(239, 68, 68, 0.8);
+  }
+}
+
+@keyframes sirenRotate {
+  0%, 100% { transform: rotate(-8deg) scale(1); }
+  50% { transform: rotate(8deg) scale(1.15); }
+}
+
+.danger-pulse {
+  animation: dangerPulse 1.8s infinite;
+}
+
+.danger-pulse-icon {
+  display: inline-block;
+  animation: sirenRotate 0.8s infinite ease-in-out;
+}
+
+/* Badge de Incomings no Header */
+.badge-incomings {
+  background: rgba(220, 38, 38, 0.25) !important;
+  color: #fca5a5 !important;
+  border: 1px solid rgba(239, 68, 68, 0.6) !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.badge-incomings:hover {
+  background: rgba(220, 38, 38, 0.4) !important;
+  color: #fff !important;
+  transform: translateY(-1px);
+}
+
+/* Banner Flutuante de Emergência */
+.incomings-banner {
+  background: linear-gradient(135deg, rgba(153, 27, 27, 0.95), rgba(88, 28, 28, 0.9));
+  border-bottom: 2px solid #ef4444;
+  box-shadow: 0 8px 32px rgba(239, 68, 68, 0.35);
+  backdrop-filter: blur(12px);
+  position: sticky;
+  top: 60px;
+  z-index: 999;
+  padding: 10px 24px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.incomings-banner-content {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.incomings-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.incomings-banner-left .siren-icon {
+  font-size: 1.6rem;
+}
+
+.incomings-banner-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.92rem;
+  color: #fff;
+  letter-spacing: 0.3px;
+}
+
+.incomings-banner-desc {
+  font-size: 0.76rem;
+  color: #fca5a5;
+  margin-top: 1px;
+}
+
+.incomings-banner-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.banner-impact-timer {
+  font-size: 0.82rem;
+  color: #fecaca;
+}
+
+.countdown-highlight {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.badge-danger-count {
+  background: #dc2626;
+  color: #fff;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+}
+
+.btn-outline-danger {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.7);
+  color: #fff;
+  transition: all 0.2s ease;
+}
+
+.btn-outline-danger:hover {
+  background: #ef4444;
+  color: #fff;
+}
+
+/* Badges da Unidade Mais Lenta */
+.unit-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.unit-badge-snob {
+  background: rgba(236, 72, 153, 0.2);
+  color: #f472b6;
+  border: 1px solid rgba(236, 72, 153, 0.5);
+  box-shadow: 0 0 10px rgba(236, 72, 153, 0.3);
+}
+
+.unit-badge-ram {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+}
+
+.unit-badge-sword {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.5);
+}
+
+.unit-badge-axe {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+}
+
+.unit-badge-heavy {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.5);
+}
+
+.unit-badge-light {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.5);
+}
+
+.unit-badge-spy {
+  background: rgba(6, 182, 212, 0.2);
+  color: #38bdf8;
+  border: 1px solid rgba(6, 182, 212, 0.5);
+}
+
+.defense-alert-status.danger {
+  background: rgba(220, 38, 38, 0.15) !important;
+  border: 1px solid rgba(239, 68, 68, 0.6) !important;
+  animation: dangerPulse 2s infinite;
+}
+
+.defense-alert-status.danger #defense-status-headline {
+  color: #f87171 !important;
+}
+
+.defense-alert-status.danger #defense-count-big {
+  color: #f87171 !important;
+}
+
+/* ==========================================================================
+   Módulo de Táticas de Combate & Sincronização ao Milissegundo (Ponto 2.9)
+   ========================================================================== */
+
+.telemetry-box {
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.telemetry-box:hover {
+  transform: translateY(-2px);
+  border-color: rgba(168, 85, 247, 0.4);
+}
+
+.tactical-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.tactical-badge-train {
+  background: rgba(236, 72, 153, 0.2);
+  color: #f472b6;
+  border: 1px solid rgba(236, 72, 153, 0.4);
+}
+
+.tactical-badge-backtime {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+.tactical-badge-snipe {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.tactical-status-completed {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.tactical-status-executing {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  animation: dangerPulse 1.5s infinite;
+}
+
+.tactical-status-scheduled {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+
+.tactical-status-cancelled {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.snipe-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  transition: all 0.2s ease;
+}
+
+.snipe-card:hover {
+  border-color: rgba(52, 211, 153, 0.5);
+  background: rgba(15, 23, 42, 0.85);
+}
+
+/* =========================================================================
+   Coleta de Recursos / Scavenging (Ponto 2.4 & Fase 4)
+   ========================================================================= */
+
+.scavenge-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  padding: 12px 0;
+}
+
+.scavenge-card {
+  background: var(--surface-hover);
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: all 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.scavenge-card.ready {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: linear-gradient(145deg, rgba(16, 185, 129, 0.05) 0%, var(--surface-hover) 100%);
+}
+
+.scavenge-card.ready:hover {
+  border-color: rgba(16, 185, 129, 0.8);
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.15);
+}
+
+.scavenge-card.active {
+  border-color: rgba(56, 189, 248, 0.5);
+  background: linear-gradient(145deg, rgba(56, 189, 248, 0.06) 0%, var(--surface-hover) 100%);
+}
+
+.scavenge-card.locked {
+  opacity: 0.75;
+  border-style: dashed;
+}
+
+.scavenge-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.scavenge-ratio-badge {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.scavenge-timer-box {
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 6px;
+  padding: 8px 12px;
+  text-align: center;
+  margin: 12px 0;
+  font-family: monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+/* =========================================================================
+   Inventário & Gestão de Itens (Ponto 2.10 & Fase 4)
+   ========================================================================= */
+
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  padding: 12px 0;
+}
+
+.inventory-card {
+  background: var(--surface-hover);
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.inventory-card:hover {
+  border-color: rgba(147, 51, 234, 0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.inventory-thumb-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.inventory-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid var(--border-glass);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  flex-shrink: 0;
+}
+
+.inventory-icon img {
+  max-width: 36px;
+  max-height: 36px;
+  border-radius: 4px;
+}
+
+.inventory-quantity-badge {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.inventory-desc {
+  font-size: 0.83rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-bottom: 14px;
+  flex-grow: 1;
+}
+
+
+
 
 
 

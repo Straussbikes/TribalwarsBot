@@ -241,59 +241,66 @@ class ProfileManager:
 
     def __init__(
         self,
-        profiles_dir: Path = DEFAULT_PROFILES_DIR,
+        profiles_dir: Optional[Path] = None,
         db_path: Optional[Path] = None,
         db: Optional[AccountsDatabase] = None,
     ):
-        self.profiles_dir = Path(profiles_dir)
+        self._custom_dir = profiles_dir is not None
+        self.profiles_dir = Path(profiles_dir) if profiles_dir else DEFAULT_PROFILES_DIR
         self.profiles: Dict[str, AccountProfile] = {}
-        self.profiles_dir.mkdir(parents=True, exist_ok=True)
+        if self._custom_dir:
+            self.profiles_dir.mkdir(parents=True, exist_ok=True)
+            if db is None and db_path is None:
+                db_path = self.profiles_dir / "accounts.db"
+
         if db is not None:
             self.db = db
         else:
-            if db_path is None and self.profiles_dir != DEFAULT_PROFILES_DIR:
-                db_path = self.profiles_dir / "accounts.db"
             self.db = AccountsDatabase(db_path=db_path)
-            # Migração automática inicial de perfis JSON legados para a base de dados SQLite
-            self.db.migrate_from_sources(profiles_dir=self.profiles_dir)
         self.load()
 
     def load(self) -> Dict[str, AccountProfile]:
-        """Carrega os perfis guardados na base de dados SQLite e sincroniza a memória."""
+        """Carrega os perfis guardados e sincroniza a memória."""
         self.profiles.clear()
         db_accounts = self.db.list_accounts()
 
-        # Se a base de dados ainda estiver vazia, tenta ler da pasta JSON
-        if not db_accounts:
-            self.db.migrate_from_sources(profiles_dir=self.profiles_dir)
+        if not db_accounts and self._custom_dir and self.profiles_dir.exists():
+            for f in self.profiles_dir.glob("*.json"):
+                try:
+                    with open(f, "r", encoding="utf-8") as fp:
+                        data = json.load(fp)
+                    prof = AccountProfile.from_dict(data)
+                    self.profiles[prof.id] = prof
+                    self.db.save_account(prof.to_dict())
+                except Exception:
+                    pass
             db_accounts = self.db.list_accounts()
 
         for acc in db_accounts:
             prof = AccountProfile.from_dict(acc)
             self.profiles[prof.id] = prof
 
-        logger.info(f"Carregados {len(self.profiles)} perfis de conta a partir do repositório SQLite.")
+        logger.info(f"Carregados {len(self.profiles)} perfis de conta a partir do repositório.")
         return self.profiles
 
     def save_profile(self, profile: AccountProfile) -> None:
-        """Guarda um perfil na base de dados SQLite e no ficheiro JSON individual."""
-        # 1. Base de dados SQLite
+        """Guarda um perfil em memória e no repositório de compatibilidade."""
         self.db.save_account(profile.to_dict())
+        self.profiles[profile.id] = profile
 
-        # 2. Espelho JSON em profiles/{account_id}.json
-        self.profiles_dir.mkdir(parents=True, exist_ok=True)
-        file_path = self.profiles_dir / f"{profile.id}.json"
-        tmp_file = file_path.with_suffix(".tmp")
-        try:
-            with open(tmp_file, "w", encoding="utf-8") as f:
-                json.dump(profile.to_dict(include_plain_password=False), f, indent=2, ensure_ascii=False)
-            tmp_file.replace(file_path)
-            self.profiles[profile.id] = profile
-            logger.debug(f"Perfil '{profile.name}' ({profile.id}) guardado em SQLite e {file_path}.")
-        except Exception as e:
-            logger.error(f"Falha ao guardar perfil {profile.id} em {file_path}: {e}")
-            if tmp_file.exists():
-                tmp_file.unlink()
+        if self._custom_dir:
+            file_path = self.profiles_dir / f"{profile.id}.json"
+            tmp_file = file_path.with_suffix(".tmp")
+            try:
+                with open(tmp_file, "w", encoding="utf-8") as f:
+                    json.dump(profile.to_dict(include_plain_password=False), f, indent=2, ensure_ascii=False)
+                tmp_file.replace(file_path)
+            except Exception as e:
+                logger.debug(f"Aviso ao gravar perfil em ficheiro: {e}")
+                if tmp_file.exists():
+                    tmp_file.unlink()
+
+        logger.debug(f"Perfil '{profile.name}' ({profile.id}) atualizado.")
 
     def get_profile(self, profile_id: str) -> Optional[AccountProfile]:
         """Obtém um perfil pelo ID."""
@@ -332,17 +339,10 @@ class ProfileManager:
         return target
 
     def deactivate_all(self) -> None:
-        """Desativa todas as contas na base de dados (modo Offline)."""
+        """Desativa todas as contas (modo Offline)."""
         self.db.deactivate_all_accounts()
         for p in self.profiles.values():
             p.is_active = False
-            file_path = self.profiles_dir / f"{p.id}.json"
-            if file_path.exists():
-                try:
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        json.dump(p.to_dict(include_plain_password=False), f, indent=2, ensure_ascii=False)
-                except Exception as e:
-                    logger.debug(f"Aviso ao atualizar espelho JSON de {p.id}: {e}")
         logger.info("Todas as contas foram desativadas (Modo Offline).")
 
     def add_or_update_profile(self, profile: AccountProfile) -> None:

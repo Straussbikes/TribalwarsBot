@@ -10,8 +10,6 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from engine.actions.main_building import DEFAULT_BUILD_PLAN
-
 logger = logging.getLogger(__name__)
 
 
@@ -118,6 +116,7 @@ class RecruitmentConfig:
     )
     min_free_pop: int = 10
     interval_minutes: float = 5.0
+    max_queue_elements: int = 3
 
 
 @dataclass
@@ -180,6 +179,52 @@ class MarketConfig:
 
 
 @dataclass
+class DefenseConfig:
+    """Configurações da rotina de Defesa, Alarme de Ataques e Auto-Dodge (Item 2.8)."""
+    enabled: bool = True               # Monitorização em tempo real de incomings
+    auto_dodge_enabled: bool = False   # Desvio automático de tropas antes do impacto
+    dodge_lead_time_seconds: int = 30  # Antecedência do envio de esquiva (segundos antes do impacto)
+    dodge_cancel_delay_seconds: int = 5 # Atraso pós-impacto para cancelamento (segundos após impacto)
+    escape_coords: Optional[str] = None # Coordenadas de fuga (None = bárbara mais próxima)
+    auto_dodge_all_units: bool = True  # True: todas as tropas; False: apenas ofensivas
+    alarm_sound_enabled: bool = True   # Alarme sonoro em caso de ataque a chegar
+    check_interval_seconds: float = 20.0 # Intervalo do ciclo de verificação de incomings
+
+
+@dataclass
+class CombatConfig:
+    """Configurações de Táticas de Combate & Sincronização ao Milissegundo (Item 2.9)."""
+    noble_train_gap_ms: int = 100         # Intervalo entre ataques no comboio (50ms a 250ms)
+    failsafe_enabled: bool = True          # Cancelamento automático se a dispersão exceder o limiar
+    failsafe_max_spread_ms: int = 400      # Dispersão máxima aceitável entre 1º e último ataque (ms)
+    default_noble_escort: Dict[str, int] = field(default_factory=lambda: {"axe": 50, "light": 20})
+    snipe_tolerance_ms: int = 150          # Tolerância de intercalação de sniper (ms)
+    clock_sync_interval_seconds: float = 60.0 # Intervalo de ressincronização com o servidor
+
+
+@dataclass
+class ScavengeConfig:
+    """Configurações da Coleta de Recursos / Scavenging (Ponto 2.4 & Fase 4)."""
+    enabled: bool = False
+    auto_unlock: bool = True
+    eligible_units: List[str] = field(default_factory=lambda: ["spear", "sword", "axe", "archer", "light"])
+    min_reserved_units: Dict[str, int] = field(default_factory=lambda: {"spear": 10, "sword": 10})
+    check_interval_seconds: float = 300.0
+
+
+@dataclass
+class SnobConfig:
+    """Configurações da Academia & Cunha de Moedas (Ponto 2.6 & Fase 4)."""
+    auto_mint_enabled: bool = False
+    storage_threshold_percent: float = 85.0  # Cunhar moedas se armazém >= 85%
+    reserve_wood: int = 50000
+    reserve_stone: int = 50000
+    reserve_iron: int = 50000
+    auto_recruit_nobles: bool = False
+    max_nobles: int = 4
+
+
+@dataclass
 class BotConfig:
     """Configurações globais consolidadas do Bot."""
     world: str = "pt117"
@@ -193,6 +238,10 @@ class BotConfig:
     arbitrage: ArbitrageConfig = field(default_factory=ArbitrageConfig)
     quest: QuestConfig = field(default_factory=QuestConfig)
     market: MarketConfig = field(default_factory=MarketConfig)
+    defense: DefenseConfig = field(default_factory=DefenseConfig)
+    combat: CombatConfig = field(default_factory=CombatConfig)
+    scavenge: ScavengeConfig = field(default_factory=ScavengeConfig)
+    snob: SnobConfig = field(default_factory=SnobConfig)
     villages: Dict[str, VillageConfig] = field(default_factory=dict)
 
     def get_active_build_plan(
@@ -218,6 +267,7 @@ class BotConfig:
 
         tmpl = tmpl.lower().strip()
         custom_plan = getattr(self.building, "custom_plan", None)
+        from engine.actions.main_building import DEFAULT_BUILD_PLAN
 
         if tmpl in ("custom", "custom_plan") and custom_plan:
             return custom_plan
@@ -319,6 +369,10 @@ class BotConfig:
             "arbitrage": asdict(self.arbitrage) if hasattr(self.arbitrage, "__dataclass_fields__") else self.arbitrage,
             "quest": asdict(self.quest) if hasattr(self.quest, "__dataclass_fields__") else self.quest,
             "market": asdict(self.market) if hasattr(self.market, "__dataclass_fields__") else self.market,
+            "defense": asdict(self.defense) if hasattr(self.defense, "__dataclass_fields__") else self.defense,
+            "combat": asdict(self.combat) if hasattr(self.combat, "__dataclass_fields__") else self.combat,
+            "scavenge": asdict(self.scavenge) if hasattr(self.scavenge, "__dataclass_fields__") else self.scavenge,
+            "snob": asdict(self.snob) if hasattr(self.snob, "__dataclass_fields__") else self.snob,
             "villages": {k: asdict(v) if hasattr(v, "__dataclass_fields__") else v for k, v in self.villages.items()},
         }
 
@@ -413,6 +467,7 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
     r_enabled = bool(r_data.get("enabled", False))
     r_interval = float(r_data.get("interval_minutes", 5.0))
     r_min_pop = int(r_data.get("min_free_pop", 10))
+    r_max_queue = int(r_data.get("max_queue_elements", 3))
 
     models_data = r_data.get("models", {})
     parsed_models = {}
@@ -439,6 +494,7 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
         },
         min_free_pop=r_min_pop,
         interval_minutes=r_interval,
+        max_queue_elements=r_max_queue,
     )
 
     # 5. Carrega configurações de Arbitragem Económica
@@ -501,6 +557,52 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
                     recruitment_targets=vinfo.get("recruitment_targets"),
                 )
 
+    # 10. Carrega configurações de Defesa e Alarme
+    def_data = data.get("defense", {})
+    defense_config = DefenseConfig(
+        enabled=bool(def_data.get("enabled", True)),
+        auto_dodge_enabled=bool(def_data.get("auto_dodge_enabled", False)),
+        dodge_lead_time_seconds=int(def_data.get("dodge_lead_time_seconds", 30)),
+        dodge_cancel_delay_seconds=int(def_data.get("dodge_cancel_delay_seconds", 5)),
+        escape_coords=def_data.get("escape_coords"),
+        auto_dodge_all_units=bool(def_data.get("auto_dodge_all_units", True)),
+        alarm_sound_enabled=bool(def_data.get("alarm_sound_enabled", True)),
+        check_interval_seconds=float(def_data.get("check_interval_seconds", 20.0)),
+    )
+
+    # 8. Configurações de Combate & Sincronização ao Milissegundo (Item 2.9)
+    cmb_data = data.get("combat", {})
+    combat_config = CombatConfig(
+        noble_train_gap_ms=int(cmb_data.get("noble_train_gap_ms", 100)),
+        failsafe_enabled=bool(cmb_data.get("failsafe_enabled", True)),
+        failsafe_max_spread_ms=int(cmb_data.get("failsafe_max_spread_ms", 400)),
+        default_noble_escort=cmb_data.get("default_noble_escort", {"axe": 50, "light": 20}),
+        snipe_tolerance_ms=int(cmb_data.get("snipe_tolerance_ms", 150)),
+        clock_sync_interval_seconds=float(cmb_data.get("clock_sync_interval_seconds", 60.0)),
+    )
+
+    # 9. Configurações de Coleta de Recursos (Scavenging)
+    scv_data = data.get("scavenge", {})
+    scavenge_config = ScavengeConfig(
+        enabled=bool(scv_data.get("enabled", False)),
+        auto_unlock=bool(scv_data.get("auto_unlock", True)),
+        eligible_units=scv_data.get("eligible_units", ["spear", "sword", "axe", "archer", "light"]),
+        min_reserved_units=scv_data.get("min_reserved_units", {"spear": 10, "sword": 10}),
+        check_interval_seconds=float(scv_data.get("check_interval_seconds", 300.0)),
+    )
+
+    # 10. Configurações de Academia & Moedas
+    snb_data = data.get("snob", {})
+    snob_config = SnobConfig(
+        auto_mint_enabled=bool(snb_data.get("auto_mint_enabled", False)),
+        storage_threshold_percent=float(snb_data.get("storage_threshold_percent", 85.0)),
+        reserve_wood=int(snb_data.get("reserve_wood", 50000)),
+        reserve_stone=int(snb_data.get("reserve_stone", 50000)),
+        reserve_iron=int(snb_data.get("reserve_iron", 50000)),
+        auto_recruit_nobles=bool(snb_data.get("auto_recruit_nobles", False)),
+        max_nobles=int(snb_data.get("max_nobles", 4)),
+    )
+
     return BotConfig(
         world=world.strip().lower(),
         sid=sid.strip(),
@@ -513,66 +615,47 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
         arbitrage=arbitrage_config,
         quest=quest_config,
         market=market_config,
+        defense=defense_config,
+        combat=combat_config,
+        scavenge=scavenge_config,
+        snob=snob_config,
         villages=villages_config,
     )
 
 
 def load_config(
-    config_file: Optional[Union[str, Path]] = None,
+    data: Optional[Union[Dict[str, Any], str, Path]] = None,
     account_id: Optional[str] = None,
     db: Optional[Any] = None,
 ) -> BotConfig:
     """
-    Carrega as configurações do bot com prioridade para a base de dados SQLite (data/accounts.db).
-    Se config_file for fornecido (e existir como ficheiro), lê diretamente do ficheiro para compatibilidade e testes.
-    Caso contrário, tenta resolver do SQLite (para account_id ou conta ativa).
+    Carrega as configurações do bot de forma 100% cloud-native e em memória.
+    Elimina qualquer dependência de persistência em disco legada (config.json ou SQLite).
     """
-    # 1. Se config_file for um ficheiro existente no disco
-    if config_file:
-        config_path = Path(config_file)
-        if config_path.exists():
-            data: Dict[str, Any] = {}
+    if isinstance(data, dict):
+        return parse_config_dict(data)
+
+    if data and isinstance(data, (str, Path)):
+        p = Path(data)
+        if p.exists() and p.is_file():
             try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                logger.debug(f"Configuração lida a partir de '{config_path.name}'.")
+                with open(p, "r", encoding="utf-8") as f:
+                    content = json.load(f)
+                return parse_config_dict(content)
             except Exception as e:
-                logger.debug(f"Erro ao ler '{config_path.name}': {e}")
-            return parse_config_dict(data)
+                logger.debug(f"Aviso ao carregar dados: {e}")
 
-    # 2. Tenta carregar a partir do SQLite (data/accounts.db)
-    try:
-        if db is None:
-            from engine.storage.database import AccountsDatabase
-            db = AccountsDatabase()
-        
-        target_acc = None
-        if account_id:
-            target_acc = db.get_account(account_id)
-        elif config_file and not str(config_file).endswith(".json"):
-            target_acc = db.get_account(str(config_file))
+    env_data: Dict[str, Any] = {}
+    if os.environ.get("TW_WORLD"):
+        env_data["world"] = os.environ.get("TW_WORLD")
+    if os.environ.get("TW_SID"):
+        env_data["sid"] = os.environ.get("TW_SID")
+    if os.environ.get("TW_DOMAIN"):
+        env_data["domain"] = os.environ.get("TW_DOMAIN")
+    if os.environ.get("TW_PROXY"):
+        env_data["proxy"] = os.environ.get("TW_PROXY")
 
-        if not target_acc:
-            target_acc = db.get_active_account()
-
-        if target_acc:
-            from engine.core.profile_manager import AccountProfile
-            prof = AccountProfile.from_dict(target_acc)
-            return prof.to_bot_config()
-    except Exception as e:
-        logger.debug(f"Aviso ao consultar configuração no SQLite: {e}")
-
-    # 3. Fallback para config.json padrão se existir
-    default_path = Path("config.json")
-    if default_path.exists():
-        try:
-            with open(default_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return parse_config_dict(data)
-        except Exception as e:
-            logger.debug(f"Aviso ao ler fallback config.json: {e}")
-
-    return parse_config_dict({})
+    return parse_config_dict(env_data)
 
 
 def save_config_sid(
@@ -581,10 +664,7 @@ def save_config_sid(
     config_path: Optional[Path] = None,
     db: Optional[Any] = None,
 ) -> bool:
-    """Atualiza e persiste atomicamente o cookie 'sid' no SQLite da conta ativa e/ou ficheiro de configuração."""
-    saved_any = False
-
-    # 1. Se ficheiro for explicitamente fornecido, atualiza o ficheiro
+    """Atualização em runtime. Se config_path ou db forem explicitamente fornecidos (testes), atualiza o alvo."""
     if config_path and Path(config_path).exists():
         try:
             with open(config_path, "r", encoding="utf-8") as f:
@@ -592,60 +672,20 @@ def save_config_sid(
             data["sid"] = sid.strip()
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            logger.info(f"Cookie 'sid' atualizado no ficheiro '{Path(config_path).name}'.")
-            saved_any = True
-        except Exception as e:
-            logger.error(f"Erro ao persistir sid no ficheiro: {e}")
+            return True
+        except Exception:
+            return False
 
-    # 2. Persiste na base de dados SQLite
-    try:
-        if db is None:
-            from engine.storage.database import AccountsDatabase
-            db = AccountsDatabase()
+    if db is not None:
+        try:
+            target_acc = db.get_account(account_id) if account_id else db.get_active_account()
+            if target_acc:
+                target_acc["session_cookie"] = sid.strip()
+                target_acc["sid"] = sid.strip()
+                db.save_account(target_acc)
+                return True
+        except Exception:
+            return False
 
-        target_acc = db.get_account(account_id) if account_id else db.get_active_account()
-        if target_acc:
-            target_acc["session_cookie"] = sid.strip()
-            target_acc["sid"] = sid.strip()
-            db.save_account(target_acc)
-            logger.info(f"Cookie 'sid' atualizado no SQLite para a conta '{target_acc.get('name')}'.")
-            saved_any = True
-    except Exception as e:
-        logger.debug(f"Aviso ao persistir sid no SQLite: {e}")
+    return True
 
-    return saved_any
-
-
-def _create_default_config_file(target_path: Path) -> None:
-    """Cria um ficheiro config.json inicial documentado."""
-    default_payload = {
-        "world": "pt117",
-        "sid": "",
-        "building": {
-            "_info": "Opções de template: 'default_plan' (padrão oficial) ou 'custom'",
-            "template": "default_plan",
-            "max_queue": 2,
-            "interval_seconds": 75.0,
-            "custom_plan": [
-                ["wood", 1],
-                ["stone", 1],
-                ["iron", 1],
-                ["main", 2],
-                ["main", 3],
-                ["barracks", 1],
-                ["wood", 2],
-                ["stone", 2],
-                ["storage", 2],
-                ["farm", 2],
-                ["wood", 3],
-                ["stone", 3],
-                ["iron", 2]
-            ]
-        }
-    }
-    try:
-        with open(target_path, "w", encoding="utf-8") as f:
-            json.dump(default_payload, f, indent=2, ensure_ascii=False)
-        logger.info(f"Ficheiro de exemplo '{target_path.name}' gerado na raiz do projeto.")
-    except Exception as e:
-        logger.debug(f"Não foi possível criar '{target_path.name}': {e}")

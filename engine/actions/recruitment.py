@@ -170,7 +170,7 @@ class RecruitmentManager:
         Submete o formulário de treino de unidades para 'screen={building}&action=train'.
         Injeta o token CSRF e micro-jitter de toque em ecrã.
         """
-        valid_orders = {u: str(cnt) for u, cnt in orders.items() if cnt > 0}
+        valid_orders = {u: int(cnt) for u, cnt in orders.items() if int(cnt) > 0}
         if not valid_orders:
             return False
 
@@ -227,10 +227,14 @@ class RecruitmentManager:
                 tracker = getattr(account, "stats_tracker", None) or (account.get_stats_tracker() if hasattr(account, "get_stats_tracker") else None)
                 if tracker:
                     for u, cnt in valid_orders.items():
-                        if cnt > 0:
-                            tracker.record_recruitment(village_id=v_id or 0, unit=u, count=cnt)
+                        if int(cnt) > 0:
+                            tracker.record_recruitment(village_id=v_id or 0, unit=u, count=int(cnt))
             except Exception as e_st:
-                logger.debug(f"Aviso ao registar estatísticas de recrutamento: {e_st}")
+                logger.warning(f"Aviso ao registar estatísticas de recrutamento: {e_st}")
+
+            if hasattr(account, "_broadcast_sync") and callable(account._broadcast_sync):
+                account._broadcast_sync("STATS_UPDATED", {"reason": "recruitment", "units": valid_orders})
+                account._broadcast_sync("RECRUITMENT_UPDATED", {"village_id": v_id, "units": valid_orders})
 
             return True
         except Exception as e:
@@ -244,6 +248,7 @@ class RecruitmentManager:
         batch_sizes: Dict[str, int],
         min_free_pop: int = 10,
         village_id: Optional[int] = None,
+        max_queue_elements: int = 3,
     ) -> Dict[str, int]:
         """
         Executa um ciclo inteligente de recrutamento:
@@ -333,6 +338,17 @@ class RecruitmentManager:
                 logger.warning(f"Falha ao consultar {building}: {e}")
                 continue
 
+            # Limite estrito de elementos simultâneos na fila de recrutamento (padrão: 3)
+            current_queue_len = len(b_state.queue)
+            if current_queue_len >= max_queue_elements:
+                logger.info(
+                    f"[{account.world}] ⏳ {building.capitalize()} com fila no limite "
+                    f"({current_queue_len}/{max_queue_elements} ordens ativas). "
+                    f"A aguardar conclusão antes de recrutar mais tropas."
+                )
+                continue
+
+            slots_available = max(0, max_queue_elements - current_queue_len)
             orders_for_building: Dict[str, int] = {}
 
             # Prioriza o recrutamento das unidades com menor custo total de recursos
@@ -441,6 +457,14 @@ class RecruitmentManager:
                         f"Recursos restantes: {avail_wood}M, {avail_stone}A, {avail_iron}F)."
                     )
 
+                    # Interrompe se preencheu o número máximo de vagas restantes na fila
+                    if len(orders_for_building) >= slots_available:
+                        logger.debug(
+                            f"[{account.world}] Limite de vagas na fila preenchido para {building} "
+                            f"({len(orders_for_building)}/{slots_available} vagas preenchidas neste ciclo)."
+                        )
+                        break
+
             if orders_for_building:
                 success = await self.train_units(
                     account=account,
@@ -483,14 +507,19 @@ class RecruitmentManager:
 
                 batch_sizes = getattr(recruit_config, "batch_sizes", {})
                 min_free_pop = getattr(recruit_config, "min_free_pop", 10)
+                max_queue_elements = getattr(recruit_config, "max_queue_elements", 3)
 
-                await self.run_recruitment_cycle(
+                recruited = await self.run_recruitment_cycle(
                     account=account,
                     targets=targets,
                     batch_sizes=batch_sizes,
                     min_free_pop=min_free_pop,
                     village_id=village_id,
+                    max_queue_elements=max_queue_elements,
                 )
+                if recruited and hasattr(account, "_broadcast_sync") and callable(account._broadcast_sync):
+                    account._broadcast_sync("STATS_UPDATED", {"reason": "auto_recruit", "recruited": recruited})
+                    account._broadcast_sync("RECRUITMENT_UPDATED", {"village_id": v_id, "recruited": recruited})
             except Exception as e:
                 logger.warning(f"Erro na rotina de recrutamento: {e}")
             finally:

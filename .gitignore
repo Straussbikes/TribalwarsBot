@@ -36,7 +36,18 @@ ENV/
 # Logs
 *.log
 
-# Sidecar IPC
+# Sidecar IPC & Cloud-Only Auth
 .sidecar_auth.json
 test_config_scratch.json
+auth.dat
+*.dat
+.vault_key
+data/.vault_key
+*.db
+*.sqlite
+*.sqlite3
+.map_cache/
+.stats_cache/
+profiles/*.json
+!profiles/default_main.json
 

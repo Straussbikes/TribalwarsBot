@@ -1078,6 +1078,263 @@ def parse_command_confirmation(html: str) -> Dict[str, Any]:
     return result
 
 
+def parse_timer_to_seconds(timer_str: str) -> int:
+    """
+    Converte uma string de timer ou duração do Tribal Wars (ex.: '0:14:22', '14:22', '1:02:14:22')
+    para o número total correspondente de segundos inteiros.
+    """
+    if not timer_str:
+        return 0
+    clean = re.sub(r'[^\d:]', '', str(timer_str).strip())
+    if not clean:
+        return 0
+    parts = clean.split(':')
+    try:
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        elif len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+        elif len(parts) == 4:
+            return int(parts[0]) * 86400 + int(parts[1]) * 3600 + int(parts[2]) * 60 + int(parts[3])
+        elif len(parts) == 1:
+            return int(parts[0])
+    except ValueError:
+        pass
+    return 0
+
+
+def parse_incomings_count(html: str, game_data: Optional[Dict[str, Any]] = None) -> int:
+    """
+    Determina o número total de ataques a chegar à conta/aldeia.
+    1. Verifica o objeto JavaScript game_data['player']['incomings'].
+    2. Procura em tags HTML (#incomings_amount, #incomings_cell, links com mode=incomings).
+    """
+    gd = game_data or (extract_game_data(html) if html else None)
+    if gd and isinstance(gd, dict):
+        player = gd.get("player")
+        if isinstance(player, dict) and "incomings" in player:
+            try:
+                inc_val = int(player["incomings"])
+                if inc_val >= 0:
+                    return inc_val
+            except (ValueError, TypeError):
+                pass
+
+    if not html:
+        return 0
+
+    normalized = html.replace("&amp;", "&")
+
+    # Procura #incomings_amount ou classe incomings-amount
+    m = re.search(r'<(?:span|a|div)[^>]*id=["\']incomings_amount["\'][^>]*>\s*(\d+)\s*<', normalized, re.IGNORECASE)
+    if m:
+        try:
+            return int(m.group(1))
+        except ValueError:
+            pass
+
+    # Procura na barra de navegação rápida superior
+    m4 = re.search(r'<span[^>]*class=["\'][^"\']*incomings_amount[^"\']*["\'][^>]*>\s*(\d+)\s*<', normalized, re.IGNORECASE)
+    if m4:
+        try:
+            return int(m4.group(1))
+        except ValueError:
+            pass
+
+    # Procura em incomings_cell (sem cruzar tags HTML com dotall)
+    m3 = re.search(r'id=["\']incomings_cell["\'][^>]*>(?:<[^>]+>)*\s*(\d+)\s*(?:<[^>]+>)*<', normalized, re.IGNORECASE)
+    if m3:
+        try:
+            return int(m3.group(1))
+        except ValueError:
+            pass
+
+    # Procura link com mode=incomings contendo contagem sem cruzar múltiplas tags
+    m2 = re.search(r'<a[^>]*href=["\'][^"\']*[?&]mode=incomings[^"\']*["\'][^>]*>(?:<[^>]+>)*\s*(\d+)\s*(?:<[^>]+>)*</a>', normalized, re.IGNORECASE)
+    if m2:
+        try:
+            return int(m2.group(1))
+        except ValueError:
+            pass
+
+    return 0
+
+
+
+def parse_incomings_overview(html: str) -> List[Dict[str, Any]]:
+    """
+    Analisa tabelas e listagens de ataques a chegar (screen=overview_villages&mode=incomings,
+    screen=place com commands_incomings_table, ou screen=overview).
+    Retorna uma lista estruturada de ataques com metadados para cada comando.
+    """
+    incomings: List[Dict[str, Any]] = []
+    if not html:
+        return incomings
+
+    normalized = html.replace("&amp;", "&")
+
+    # Caso 1: Tabela detalhada de comandos recebidos em overview_villages (id="incomings_table")
+    # Ou linhas <tr class="nowrap ..."> com links para info_command
+    rows = re.finditer(r'<tr[^>]*>(.*?)</tr>', normalized, re.DOTALL | re.IGNORECASE)
+    for row_match in rows:
+        row_html = row_match.group(1)
+
+        # Deve conter link para screen=info_command&id=(\d+)
+        cmd_m = re.search(r'href=["\'][^"\']*[?&]screen=info_command[^"\']*[?&]id=(\d+)[^"\']*["\'][^>]*>(.*?)</a>', row_html, re.DOTALL | re.IGNORECASE)
+        if not cmd_m:
+            continue
+
+        cmd_id = cmd_m.group(1)
+        cmd_text = re.sub(r'<[^>]+>', '', cmd_m.group(2)).strip()
+
+        # Determina tipo de comando (ataque vs apoio)
+        cmd_lower = cmd_text.lower()
+        if "apoio" in cmd_lower or "support" in cmd_lower:
+            cmd_type = "support"
+        else:
+            cmd_type = "attack"
+
+        # Extrai aldeia de destino e origem
+        # Procura links screen=info_village&id=(\d+)
+        village_links = list(re.finditer(
+            r'href=["\'][^"\']*[?&]screen=info_village[^"\']*[?&]id=(\d+)[^"\']*["\'][^>]*>(.*?)</a>',
+            row_html,
+            re.DOTALL | re.IGNORECASE,
+        ))
+
+        target_name = ""
+        target_coords = ""
+        target_v_id = 0
+        origin_name = ""
+        origin_coords = ""
+        origin_v_id = 0
+
+        if len(village_links) >= 2:
+            # Padrão: 1º Destino, 2º Origem
+            target_v_id = int(village_links[0].group(1))
+            target_name = re.sub(r'<[^>]+>', '', village_links[0].group(2)).strip()
+            c_target = re.search(r'\((\d{1,3}\|\d{1,3})\)', target_name)
+            if c_target:
+                target_coords = c_target.group(1)
+
+            origin_v_id = int(village_links[1].group(1))
+            origin_name = re.sub(r'<[^>]+>', '', village_links[1].group(2)).strip()
+            c_orig = re.search(r'\((\d{1,3}\|\d{1,3})\)', origin_name)
+            if c_orig:
+                origin_coords = c_orig.group(1)
+        elif len(village_links) == 1:
+            v_id_found = int(village_links[0].group(1))
+            v_text = re.sub(r'<[^>]+>', '', village_links[0].group(2)).strip()
+            c_m = re.search(r'\((\d{1,3}\|\d{1,3})\)', v_text)
+            coords_found = c_m.group(1) if c_m else ""
+
+            # Se no texto do comando tiver "de " ou "from ", trata como origem
+            if "de " in cmd_lower or "from " in cmd_lower:
+                origin_v_id = v_id_found
+                origin_name = v_text
+                origin_coords = coords_found
+            else:
+                target_v_id = v_id_found
+                target_name = v_text
+                target_coords = coords_found
+
+        # Se as coordenadas ainda não foram extraídas, procura em qualquer sítio da linha
+        all_coords = list(re.finditer(r'\((\d{1,3}\|\d{1,3})\)', row_html))
+        if not target_coords and all_coords:
+            target_coords = all_coords[0].group(1)
+        if not origin_coords and len(all_coords) > 1:
+            origin_coords = all_coords[1].group(1)
+        elif not origin_coords:
+            # Procura coordenadas no próprio texto do comando: "Ataque de ... (123|456)"
+            cmd_c = re.search(r'\((\d{1,3}\|\d{1,3})\)', cmd_text)
+            if cmd_c:
+                origin_coords = cmd_c.group(1)
+
+        # Jogador atacante
+        player_m = re.search(
+            r'href=["\'][^"\']*[?&]screen=info_player[^"\']*[?&]id=(\d+)[^"\']*["\'][^>]*>(.*?)</a>',
+            row_html,
+            re.DOTALL | re.IGNORECASE,
+        )
+        attacker_id = int(player_m.group(1)) if player_m else 0
+        attacker_name = re.sub(r'<[^>]+>', '', player_m.group(2)).strip() if player_m else ""
+
+        # Timer e Hora de Chegada
+        timer_m = re.search(r'<span[^>]*class=["\']timer["\'][^>]*>([\d:]+)</span>', row_html, re.IGNORECASE)
+        timer_str = timer_m.group(1) if timer_m else ""
+        time_rem = parse_timer_to_seconds(timer_str)
+
+        arrival_str = ""
+        # Procura texto com "hoje às", "amanhã às" ou padrão de hora
+        arr_m = re.search(r'((?:hoje|amanhã|\d+\.\d+\.)\s*às\s*\d+:\d+:\d+|\d+:\d+:\d+)', row_html, re.IGNORECASE)
+        if arr_m:
+            arrival_str = arr_m.group(1).strip()
+
+        incomings.append({
+            "command_id": cmd_id,
+            "type": cmd_type,
+            "command_name": cmd_text,
+            "target_village_id": target_v_id,
+            "target_name": target_name,
+            "target_coords": target_coords,
+            "origin_village_id": origin_v_id,
+            "origin_name": origin_name,
+            "origin_coords": origin_coords,
+            "attacker_id": attacker_id,
+            "attacker_name": attacker_name,
+            "distance": 0.0,
+            "arrival_time_str": arrival_str,
+            "timer_str": timer_str,
+            "time_remaining_seconds": time_rem,
+        })
+
+    # Caso 2: Se não encontrou por tr mas existem links de comando (ex: listagem mobile ou compacta)
+    if not incomings:
+        cmd_link_matches = list(re.finditer(
+            r'<a[^>]*href=["\'][^"\']*[?&]screen=info_command[^"\']*[?&]id=(\d+)[^"\']*["\'][^>]*>(.*?)</a>',
+            normalized,
+            re.DOTALL | re.IGNORECASE,
+        ))
+        for match in cmd_link_matches:
+            cmd_id = match.group(1)
+            raw_text = re.sub(r'<[^>]+>', '', match.group(2)).strip()
+            raw_lower = raw_text.lower()
+            if "ataque" not in raw_lower and "attack" not in raw_lower:
+                continue
+
+            coords_match = re.search(r'\((\d{1,3}\|\d{1,3})\)', raw_text)
+            orig_coords = coords_match.group(1) if coords_match else ""
+
+            start_idx = match.end()
+            surrounding = normalized[start_idx:start_idx + 400]
+            timer_m = re.search(r'<span[^>]*class=["\']timer["\'][^>]*>([\d:]+)</span>', surrounding, re.IGNORECASE)
+            timer_str = timer_m.group(1) if timer_m else ""
+            time_rem = parse_timer_to_seconds(timer_str)
+
+            arr_m = re.search(r'((?:hoje|amanhã|\d+\.\d+\.)\s*às\s*\d+:\d+:\d+|\d+:\d+:\d+)', surrounding, re.IGNORECASE)
+            arrival_str = arr_m.group(1).strip() if arr_m else ""
+
+            incomings.append({
+                "command_id": cmd_id,
+                "type": "attack",
+                "command_name": raw_text,
+                "target_village_id": 0,
+                "target_name": "",
+                "target_coords": "",
+                "origin_village_id": 0,
+                "origin_name": raw_text,
+                "origin_coords": orig_coords,
+                "attacker_id": 0,
+                "attacker_name": "",
+                "distance": 0.0,
+                "arrival_time_str": arrival_str,
+                "timer_str": timer_str,
+                "time_remaining_seconds": time_rem,
+            })
+
+    return incomings
+
+
 # Regex para Assistente de Farm (screen=am_farm)
 PLUNDER_ROW_REGEX: Pattern[str] = re.compile(
     r'<tr[^>]*id=["\']village_(\d+)["\'][^>]*>(.*?)(?=<tr[^>]*id=["\']village_\d+["\']|</table>|$)',
@@ -1505,13 +1762,27 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
         result["available_units"][unit_key] = max_val
 
     # 2. Extração da fila ativa de recrutamento (#trainqueue_... ou .trainqueue ou linhas de treino)
-    queue_row_regex = re.compile(
-        r'<tr[^>]*>(?:(?!</tr>).)*?</tr>|<div[^>]*class=["\'][^"\']*trainqueue[^"\']*["\'][^>]*>(?:(?!</div>).)*?</div>',
+    # Procura containers específicos de fila de treino (ex: <table id="trainqueue_barracks">)
+    queue_containers = re.findall(
+        r'<table[^>]*id=["\']trainqueue_\w+["\'][^>]*>.*?</table>|<table[^>]*class=["\'][^"\']*trainqueue[^"\']*["\'][^>]*>.*?</table>|<div[^>]*class=["\'][^"\']*trainqueue[^"\']*["\'][^>]*>.*?</div>',
+        normalized,
         re.DOTALL | re.IGNORECASE,
     )
 
-    for row_m in queue_row_regex.finditer(normalized):
-        row_content = row_m.group(0)
+    candidate_rows = []
+    if queue_containers:
+        for container in queue_containers:
+            for r_m in re.finditer(r'<tr[^>]*>(?:(?!</tr>).)*?</tr>', container, re.DOTALL | re.IGNORECASE):
+                candidate_rows.append((r_m.group(0), True))
+    else:
+        queue_row_regex = re.compile(
+            r'<tr[^>]*>(?:(?!</tr>).)*?</tr>|<div[^>]*class=["\'][^"\']*trainqueue[^"\']*["\'][^>]*>(?:(?!</div>).)*?</div>',
+            re.DOTALL | re.IGNORECASE,
+        )
+        for row_m in queue_row_regex.finditer(normalized):
+            candidate_rows.append((row_m.group(0), False))
+
+    for row_content, is_in_trainqueue_table in candidate_rows:
         if not row_content:
             continue
 
@@ -1520,30 +1791,28 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
         if "<th" in lower_content:
             continue
 
-        # Timer
-        timer_match = re.search(r'<span[^>]*class=["\']timer["\'][^>]*>([\d:]+)</span>', row_content, re.IGNORECASE)
+        # Timer (ex.: <span class="timer">0:45:10</span> ou 12:45)
+        timer_match = re.search(r'<span[^>]*class=["\'][^"\']*timer[^"\']*["\'][^>]*>([^<]+)</span>', row_content, re.IGNORECASE)
         if not timer_match:
-            timer_match = re.search(r'\b(\d{1,2}:\d{2}:\d{2})\b', row_content)
-        timer_str = timer_match.group(1) if timer_match else ""
+            timer_match = re.search(r'\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b', row_content)
+        timer_str = timer_match.group(1).strip() if timer_match else ""
 
-        # Conclusão / hora
+        # Conclusão / hora (ex.: hoje às 18:30:15)
         finish_match = re.search(r'(?:hoje|amanhã|today|tomorrow|[0-9]{1,2}\.[0-9]{1,2}\.)\s*(?:às\s*)?[\d:]+', row_content, re.IGNORECASE)
         finish_time = finish_match.group(0).strip() if finish_match else ""
 
-        # Link de cancelamento se existir
+        # Link de cancelamento se existir (action=cancel ou cancel_order)
         cancel_match = re.search(r'href=["\']([^"\']*[?&]action=cancel[^"\']*)["\']', row_content, re.IGNORECASE)
         cancel_url = cancel_match.group(1) if cancel_match else None
 
-        # Se não tem timer nem cancel_url nem trainqueue_ na linha/bloco, não é uma ordem de treino
-        if not (timer_str or cancel_url or "trainqueue" in lower_content):
+        # Se não estiver explicitamente na tabela de treino e não tiver timer/cancel_url, ignora
+        if not is_in_trainqueue_table and not (timer_str or cancel_url or "trainqueue" in lower_content):
             continue
 
         unit_found = None
         count_found = 0
 
         # Método 1: Busca ampla por sprites, classes, imagens ou data attributes
-        # Exemplos no TW: class="unit_sprite_smaller spear", class="unit_sprite spear", class="unit_spear",
-        # class="unit-item spear", data-unit="spear", src=".../unit_spear.png", src=".../spear.png"
         for u in ALL_UNITS:
             pattern = re.compile(
                 rf'(?:class=["\'][^"\']*\b(?:unit_sprite_smaller|unit_sprite_small|unit_sprite|unit_icon|unit_link|unit-item|unit)\b[^"\']*\b{u}\b[^"\']*["\'])|'
@@ -1557,11 +1826,12 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
                 unit_found = u
                 break
 
-        # Texto limpo sem tags HTML para análise contextual de contagem e unidade
-        clean_text = re.sub(r'<[^>]+>', ' ', row_content)
+        # Captura textos em atributos semânticos (title, alt, data-title) antes de remover tags HTML
+        attr_texts = " ".join(re.findall(r'(?:title|alt|data-title|data-unit)=["\']([^"\']+)["\']', row_content, re.IGNORECASE))
+        clean_text = re.sub(r'<[^>]+>', ' ', row_content) + " " + attr_texts
         clean_text = ' '.join(clean_text.split())
 
-        # Método 2: Mapeamento de texto ("25 Lanceiros", "10 Cavalaria Leve", "50 Vikings", etc.)
+        # Método 2: Mapeamento por texto ou atributos semânticos ("25 Lanceiros", "Lanceiro", etc.)
         if not unit_found:
             for name_key, canonic_key in UNIT_NAME_TO_KEY.items():
                 pattern = re.compile(rf'(?:^|\b)(?:(\d+)\s*(?:x\s*)?)?{re.escape(name_key)}(?:\s*\(?(\d+)\)?)?\b', re.IGNORECASE)
@@ -1573,7 +1843,7 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
                         count_found = int(val)
                     break
 
-        # Se a unidade foi identificada por sprite ou texto mas o count ainda não foi capturado:
+        # Se a unidade foi identificada mas o count ainda não foi capturado:
         if unit_found and count_found <= 0:
             for name_key, canonic_key in UNIT_NAME_TO_KEY.items():
                 if canonic_key == unit_found:
@@ -1583,12 +1853,13 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
                         if val_str:
                             count_found = int(val_str)
                             break
+
+            # Fallback inteligente: remove timestamps/datas e captura o primeiro número inteiro
             if count_found <= 0:
-                timer_digits = set(re.findall(r'\d+', timer_str)) if timer_str else set()
-                nums = re.findall(r'\b(\d+)\b', clean_text)
+                text_without_times = re.sub(r'\b\d{1,2}:\d{2}(?::\d{2})?\b', ' ', clean_text)
+                text_without_times = re.sub(r'\b\d{1,2}\.\d{1,2}\.(?:\d{2,4})?\b', ' ', text_without_times)
+                nums = re.findall(r'\b(\d+)\b', text_without_times)
                 for num_str in nums:
-                    if num_str in timer_digits:
-                        continue
                     n_val = int(num_str)
                     if 0 < n_val < 50000:
                         count_found = n_val
@@ -1908,7 +2179,21 @@ def parse_daily_bonus_screen(html: str) -> Dict[str, Any]:
     }
 
 
-def parse_inventory_screen(html: str) -> Dict[str, Any]:
+class InventoryResult(dict):
+    """Permite acesso tanto como dicionário data['items'] quanto lista iterável direta."""
+    def __iter__(self):
+        return iter(self.get("items", []))
+
+    def __len__(self):
+        return len(self.get("items", []))
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self.get("items", [])[key]
+        return super().__getitem__(key)
+
+
+def parse_inventory_screen(html: str) -> InventoryResult:
     """
     Extrai a lista de itens presentes no Inventário do jogador (screen=inventory).
     Identifica itens disponíveis, quantidade, descrição e URL de uso manual.
@@ -1936,7 +2221,7 @@ def parse_inventory_screen(html: str) -> Dict[str, Any]:
             content,
             re.IGNORECASE,
         )
-        use_url = use_m.group(1) if use_m else None
+        use_url = use_m.group(1) if use_m else ""
 
         item_id = id_m.group(1) if id_m else None
         if not item_id and use_url:
@@ -1950,7 +2235,7 @@ def parse_inventory_screen(html: str) -> Dict[str, Any]:
         seen_ids.add(item_id)
 
         name_m = re.search(
-            r'<(?:h\d|b|strong|span)[^>]*class=["\']?[^"\']*(?:item_name|title|name)[^"\']*["\']?[^>]*>(.*?)</(?:h\d|b|strong|span)>',
+            r'<(?:h\d|b|strong|span|div)[^>]*class=["\']?[^"\']*(?:item_name|title|name)[^"\']*["\']?[^>]*>(.*?)</(?:h\d|b|strong|span|div)>',
             content,
             re.IGNORECASE,
         )
@@ -1971,18 +2256,23 @@ def parse_inventory_screen(html: str) -> Dict[str, Any]:
         )
         desc = re.sub(r'<[^>]+>', '', desc_m.group(1)).strip() if desc_m else ""
 
-        can_use = bool(use_url)
+        icon_m = re.search(r'<img[^>]*src=["\']([^"\']+)["\']', content, re.IGNORECASE)
+        icon_url = icon_m.group(1) if icon_m else ""
+
+        can_use = bool(use_url or re.search(r'(?:use_item|action=use|btn-use|Utilizar|Usar)', content, re.IGNORECASE))
 
         items.append({
             "id": item_id,
             "name": name,
+            "title": name,
             "count": count,
             "description": desc,
             "can_use": can_use,
             "use_url": use_url,
+            "icon_url": icon_url,
         })
 
-    return {"items": items}
+    return InventoryResult({"items": items, "total_items": len(items)})
 
 
 def parse_map_response(data: Any) -> List[Dict[str, Any]]:
@@ -2727,6 +3017,73 @@ def parse_scavenge_available_troops(html: str) -> Dict[str, int]:
                 troops[unit] = int(unit_link_m.group(1))
 
     return troops
+
+
+def parse_snob_screen(html: str) -> Dict[str, Any]:
+    """
+    Analisa o ecrã da Academia (screen=snob).
+    Extrai:
+    - moedas cunhadas / pacotes acumulados
+    - moedas necessárias para o próximo nobre
+    - nobres existentes, em produção e limites
+    - custos de cunhagem
+    - capacidade de cunhagem máxima com os recursos atuais
+    """
+    res: Dict[str, Any] = {
+        "coins_minted": 0,
+        "coins_next_noble": 1,
+        "nobles_count": 0,
+        "nobles_in_production": 0,
+        "can_mint": False,
+        "max_mintable": 0,
+        "coin_cost": {"wood": 28000, "stone": 30000, "iron": 25000},
+    }
+    if not html:
+        return res
+
+    # 1. Moedas cunhadas
+    m_coins = re.search(r'id=["\']coins_total["\'][^>]*>(\d+)<', html, re.IGNORECASE)
+    if not m_coins:
+        m_coins = re.search(r'(?:Moedas de ouro cunhadas|Total de moedas|coins_total).*?(\d+)', html, re.DOTALL | re.IGNORECASE)
+    if m_coins:
+        res["coins_minted"] = int(m_coins.group(1))
+
+    # 2. Próximo nobre
+    m_next = re.search(r'(?:próximo nobre|para o próximo nobre).*?(\d+)', html, re.DOTALL | re.IGNORECASE)
+    if m_next:
+        res["coins_next_noble"] = int(m_next.group(1))
+
+    # 3. Nobres disponíveis / existentes
+    m_nobles = re.search(r'(?:Nobres ainda disponíveis|disponíveis).*?(\d+)', html, re.DOTALL | re.IGNORECASE)
+    if m_nobles:
+        res["nobles_count"] = int(m_nobles.group(1))
+
+    # 4. Nobres em produção
+    m_prod = re.search(r'(?:Nobres em produção|em formação).*?(\d+)', html, re.DOTALL | re.IGNORECASE)
+    if m_prod:
+        res["nobles_in_production"] = int(m_prod.group(1))
+
+    # 5. Máximo cunhável agora
+    m_max = re.search(r'name=["\']count["\'][^>]*max=["\']?(\d+)["\']?', html, re.IGNORECASE)
+    if not m_max:
+        m_max = re.search(r'data-max=["\']?(\d+)["\']?', html, re.IGNORECASE)
+    if not m_max:
+        m_max = re.search(r'\(\s*máx\.?\s*(\d+)\s*\)', html, re.IGNORECASE)
+    if m_max:
+        res["max_mintable"] = int(m_max.group(1))
+        res["can_mint"] = res["max_mintable"] > 0
+    else:
+        # Se tem botão cunhar na página
+        if "action=coin" in html or "cunhar" in html.lower():
+            res["can_mint"] = True
+
+    return res
+
+
+
+
+
+
 
 
 

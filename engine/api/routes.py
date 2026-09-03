@@ -83,6 +83,44 @@ class RecruitmentToggleRequest(BaseModel):
     enabled: Optional[bool] = None
     interval_minutes: Optional[float] = None
     min_free_pop: Optional[int] = None
+    max_queue_elements: Optional[int] = None
+
+
+class AppUserRegisterRequest(BaseModel):
+    email: str
+    password: str
+    license_type: Optional[str] = "standard"
+
+
+class AppUserLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class GameAccountCreateRequest(BaseModel):
+    game_username: str
+    sid: Optional[str] = ""
+    domain: Optional[str] = "tribalwars.com.pt"
+    proxy: Optional[str] = None
+    password: Optional[str] = None
+
+
+class GameAccountSwitchRequest(BaseModel):
+    game_username: str
+    account_id: Optional[str] = None
+
+
+class GameWorldCreateRequest(BaseModel):
+    world_code: str
+    is_active: Optional[bool] = True
+
+
+class GameWorldToggleRequest(BaseModel):
+    is_active: bool
+
+
+class VillageUpdateModelRequest(BaseModel):
+    active_build_model_id: str
 
 
 class RecruitmentModelsRequest(BaseModel):
@@ -164,7 +202,8 @@ class SwitchProfileRequest(BaseModel):
 
 
 class AccountCreateRequest(BaseModel):
-    name: str
+    name: Optional[str] = None
+    game_username: Optional[str] = None
     world_domain: Optional[str] = None
     world: Optional[str] = "pt117"
     domain: Optional[str] = "tribalwars.com.pt"
@@ -437,14 +476,118 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
     # --- Gestão de Perfis de Conta & Bloqueio Monousuário (Single-Active Profile Lock) ---
 
     @router.get("/accounts")
-    def get_accounts():
-        """Lista todas as contas registadas no sistema."""
-        return {"accounts": context.list_accounts()}
+    async def get_accounts():
+        """Lista contas do utilizador Cloud SQL e perfis locais sem duplicação."""
+        accounts = []
+        active_username = context.session_manager.active_game_username
+        active_id = context.active_profile_id
+
+        # 1. Contas no Cloud SQL (se utilizador autenticado)
+        if context.current_app_user:
+            try:
+                cloud_res = await context.list_user_game_accounts()
+                accounts.extend(cloud_res.get("accounts", []))
+            except Exception as e:
+                logger.warning(f"Aviso ao consultar contas Cloud SQL: {e}")
+
+        # 2. Contas locais no SQLite / ProfileManager (quando utilizador não autenticado no Cloud ou se cofre estiver vazio)
+        if not accounts:
+            try:
+                accounts.extend(context.list_accounts())
+            except Exception as e:
+                logger.warning(f"Aviso ao consultar contas locais: {e}")
+
+        # 3. Conta atualmente ativa em runtime no motor
+        runtime_player = None
+        if context.account and context.account.player_name:
+            runtime_player = context.account.player_name.strip()
+        elif context.account and hasattr(context.account, "username") and context.account.username:
+            runtime_player = str(context.account.username).strip()
+
+        if runtime_player:
+            curr_lower = runtime_player.lower()
+            all_known = {
+                (a.get("game_username") or a.get("name") or "").strip().lower()
+                for a in accounts
+            }
+            if curr_lower not in all_known:
+                accounts.insert(0, {
+                    "id": active_id or "runtime_active_profile",
+                    "name": runtime_player,
+                    "game_username": runtime_player,
+                    "world": context.config.world,
+                    "world_domain": f"{context.config.world}.{context.config.domain}",
+                    "session_cookie": getattr(context.account, "sid", "") or context.config.sid or "",
+                    "is_active_session": True,
+                    "is_active": True,
+                    "last_used": time.time(),
+                })
+
+        # 4. Assegura marcação de is_active_session correta
+        for a in accounts:
+            u = (a.get("game_username") or a.get("name") or "").strip().lower()
+            a_id = str(a.get("id", ""))
+            is_active = bool(
+                (active_username and u == active_username.lower()) or
+                (runtime_player and u == runtime_player.lower()) or
+                (active_id and a_id == str(active_id))
+            )
+            if is_active:
+                a["is_active_session"] = True
+                a["is_active"] = True
+
+        return {
+            "status": "success",
+            "accounts": accounts,
+            "active_id": active_id,
+            "active_username": active_username or runtime_player,
+        }
 
     @router.post("/accounts")
-    def create_account(payload: AccountCreateRequest):
-        """Cria um novo perfil de conta."""
-        return context.create_account(payload.model_dump(exclude_unset=True))
+    async def create_account(payload: AccountCreateRequest):
+        """Cria uma conta de jogo no Cloud SQL ou um novo perfil de conta local."""
+        username = payload.game_username or payload.name or payload.username
+        if not username:
+            raise HTTPException(status_code=400, detail="Nome ou game_username é obrigatório.")
+
+        if context.current_app_user:
+            res = await context.add_user_game_account(
+                game_username=username,
+                sid=payload.sid or payload.session_cookie or "",
+                domain=payload.domain or "tribalwars.com.pt",
+                proxy=payload.proxy,
+                password=payload.password,
+            )
+            if res.get("status") == "error":
+                raise HTTPException(status_code=400, detail=res.get("message"))
+            return res
+
+        data = payload.model_dump(exclude_unset=True)
+        if "name" not in data or not data["name"]:
+            data["name"] = username
+        return context.create_account(data)
+
+    @router.post("/accounts/switch")
+    async def switch_game_account(payload: GameAccountSwitchRequest):
+        """Troca a conta de jogo ativa com exclusão mútua e paragem graciosa."""
+        try:
+            res = await context.switch_active_game_account(
+                game_username=payload.game_username,
+                account_id=payload.account_id,
+            )
+            if res.get("status") == "error":
+                raise HTTPException(status_code=400, detail=res.get("message"))
+            return res
+        except Exception as e:
+            raise HTTPException(status_code=409, detail=f"Erro ao trocar de conta: {e}")
+
+    @router.get("/accounts/active")
+    def get_active_account_status():
+        """Retorna o estado do singleton AccountSessionManager."""
+        return {
+            "status": "success",
+            "session": context.session_manager.get_status(),
+        }
 
     @router.get("/accounts/{account_id}")
     def get_account(account_id: str):
@@ -683,8 +826,12 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
     # --- Rotas Multi-Mundo Simultâneo ---
 
     @router.get("/worlds")
-    def get_worlds():
-        """Lista todos os mundos sob gestão concorrente do orquestrador."""
+    async def get_worlds(account_id: Optional[str] = None):
+        """Lista mundos da conta ativa Cloud SQL ou do orquestrador local."""
+        if context.session_manager.active_account_id or account_id:
+            res = await context.list_game_worlds(account_id=account_id)
+            if res.get("status") != "error":
+                return res
         return {"worlds": context.list_worlds()}
 
     @router.get("/worlds/discover")
@@ -869,53 +1016,65 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
             enabled=payload.enabled,
             interval_minutes=payload.interval_minutes,
             min_free_pop=payload.min_free_pop,
+            max_queue_elements=payload.max_queue_elements,
         )
         return ActionResponse(status=res["status"], message=res.get("message"))
 
-    # --- Gestão de Modelos de Construção (Building Templates - SQLite) ---
+    # --- Gestão de Modelos de Construção (Building Templates - Cloud SQL / Memória) ---
 
     @router.get("/templates/building")
-    def list_building_templates(account_id: Optional[str] = None):
-        """Lista todos os modelos de construção disponíveis no SQLite."""
-        return {"templates": context.list_building_templates(account_id=account_id)}
+    async def list_building_templates(account_id: Optional[str] = None):
+        """Lista todos os modelos de construção disponíveis no Cloud SQL / Memória."""
+        templates = await context.build_template_repo.list_all()
+        return {"templates": [t.to_dict() for t in templates]}
 
     @router.post("/templates/building")
-    def create_building_template(payload: BuildingTemplateCreateRequest):
-        """Cria um novo modelo de evolução de edifícios no SQLite."""
-        return context.save_building_template(payload.model_dump(exclude_unset=True))
+    async def create_building_template(payload: BuildingTemplateCreateRequest):
+        """Cria um novo modelo de evolução de edifícios."""
+        tmpl = await context.build_template_repo.save(payload.model_dump(exclude_unset=True))
+        return {"status": "success", "template": tmpl.to_dict()}
 
     @router.get("/templates/building/{template_id}")
-    def get_building_template(template_id: str):
+    async def get_building_template(template_id: str):
         """Obtém os detalhes de um modelo de construção específico."""
-        tmpl = context.get_building_template(template_id)
+        tmpl = await context.build_template_repo.get_by_id(template_id)
         if not tmpl:
             raise HTTPException(status_code=404, detail=f"Modelo de construção '{template_id}' não encontrado.")
-        return tmpl
+        return tmpl.to_dict()
 
     @router.put("/templates/building/{template_id}")
-    def update_building_template(template_id: str, payload: BuildingTemplateUpdateRequest):
+    async def update_building_template(template_id: str, payload: BuildingTemplateUpdateRequest):
         """Atualiza a configuração ou lista de prioridades de um modelo de construção."""
         data = payload.model_dump(exclude_unset=True)
         data["id"] = template_id
-        return context.save_building_template(data)
+        tmpl = await context.build_template_repo.save(data)
+        return {"status": "success", "template": tmpl.to_dict()}
 
     @router.post("/templates/building/{template_id}/clone")
-    def clone_building_template(template_id: str, payload: Optional[CloneTemplateRequest] = None):
+    async def clone_building_template(template_id: str, payload: Optional[CloneTemplateRequest] = None):
         """Clona um modelo de construção existente para permitir customização."""
-        new_name = payload.new_name if payload else None
-        account_id = payload.account_id if payload else None
-        res = context.clone_building_template(template_id, new_name=new_name, account_id=account_id)
-        if res.get("status") == "error":
-            raise HTTPException(status_code=404, detail=res.get("message"))
-        return res
+        source = await context.build_template_repo.get_by_id(template_id)
+        if not source:
+            raise HTTPException(status_code=404, detail=f"Modelo original '{template_id}' não encontrado.")
+        new_name = (payload.new_name if payload else None) or f"{source.name} (Cópia)"
+        clone_data = {
+            "name": new_name,
+            "target_levels": dict(source.target_levels),
+            "priority_list": list(source.priority_list),
+        }
+        cloned = await context.build_template_repo.save(clone_data)
+        return {"status": "success", "message": f"Modelo clonado com sucesso: '{cloned.name}'.", "template": cloned.to_dict()}
 
     @router.delete("/templates/building/{template_id}")
-    def delete_building_template(template_id: str):
-        """Remove um modelo de construção personalizado do SQLite."""
-        res = context.delete_building_template(template_id)
-        if res.get("status") == "error":
-            raise HTTPException(status_code=400, detail=res.get("message"))
-        return res
+    async def delete_building_template(template_id: str):
+        """Remove um modelo de construção personalizado."""
+        try:
+            success = await context.build_template_repo.delete(template_id)
+            if not success:
+                raise HTTPException(status_code=404, detail=f"Modelo '{template_id}' não encontrado.")
+            return {"status": "success", "message": "Modelo removido com sucesso."}
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     # --- Gestão de Modelos de Recrutamento (Recruitment Models - SQLite) ---
 
@@ -1187,6 +1346,327 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         """Atualiza ativamente os dados da aldeia ativa, recursos e tropas."""
         return await context.refresh_village_data()
 
+    # --- Endpoints de Defesa, Alarme de Incomings e Auto-Dodge (Item 2.8) ---
+
+    @router.get("/defense/incomings")
+    def get_defense_incomings(world: Optional[str] = None):
+        """Retorna o estado detalhado de defesa, contagem e lista de ataques a chegar."""
+        return context.get_defense_status(world=world)
+
+    @router.post("/defense/check")
+    async def check_defense_incomings(world: Optional[str] = None):
+        """Dispara uma verificação imediata de ataques recebidos (incomings)."""
+        return await context.check_defense_incomings(world=world)
+
+    @router.post("/defense/dodge/toggle", response_model=ActionResponse)
+    def toggle_auto_dodge(payload: Dict[str, Any], world: Optional[str] = None):
+        """Liga/desliga a esquiva automática (Auto-Dodge) ou altera parâmetros de fuga."""
+        res = context.toggle_defense_module(
+            enabled=payload.get("enabled"),
+            auto_dodge_enabled=payload.get("auto_dodge_enabled"),
+            dodge_lead_time_seconds=payload.get("dodge_lead_time_seconds"),
+            dodge_cancel_delay_seconds=payload.get("dodge_cancel_delay_seconds"),
+            escape_coords=payload.get("escape_coords"),
+            auto_dodge_all_units=payload.get("auto_dodge_all_units"),
+            alarm_sound_enabled=payload.get("alarm_sound_enabled"),
+            check_interval_seconds=payload.get("check_interval_seconds"),
+            world=world,
+        )
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    @router.post("/defense/dodge/trigger")
+    async def trigger_manual_dodge(payload: Optional[Dict[str, Any]] = None, world: Optional[str] = None):
+        """Dispara uma manobra imediata de esquiva de tropas (Dodge Manual)."""
+        data = payload or {}
+        return await context.trigger_manual_dodge(
+            village_id=data.get("village_id"),
+            escape_coords=data.get("escape_coords"),
+            offensive_only=bool(data.get("offensive_only", False)),
+            world=world,
+        )
+
+    @router.post("/defense/command/cancel")
+    async def cancel_defense_command(payload: Dict[str, Any], world: Optional[str] = None):
+        """Cancela um comando militar (ex.: cancelamento de esquiva)."""
+        cmd_id = payload.get("command_id")
+        if not cmd_id:
+            raise HTTPException(status_code=400, detail="Parâmetro 'command_id' é obrigatório.")
+        return await context.cancel_defense_command(
+            command_id=cmd_id,
+            village_id=payload.get("village_id"),
+            world=world,
+        )
+
+    @router.post("/defense/config", response_model=ActionResponse)
+    def update_defense_config(payload: Dict[str, Any], world: Optional[str] = None):
+        """Atualiza e persiste as definições gerais de Defesa e Alarme."""
+        res = context.toggle_defense_module(
+            enabled=payload.get("enabled"),
+            auto_dodge_enabled=payload.get("auto_dodge_enabled"),
+            dodge_lead_time_seconds=payload.get("dodge_lead_time_seconds"),
+            dodge_cancel_delay_seconds=payload.get("dodge_cancel_delay_seconds"),
+            escape_coords=payload.get("escape_coords"),
+            auto_dodge_all_units=payload.get("auto_dodge_all_units"),
+            alarm_sound_enabled=payload.get("alarm_sound_enabled"),
+            check_interval_seconds=payload.get("check_interval_seconds"),
+            world=world,
+        )
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    # =========================================================================
+    # Táticas de Combate & Sincronização ao Milissegundo (Item 2.9)
+    # =========================================================================
+
+    @router.get("/combat/status")
+    def get_combat_status(world: Optional[str] = None):
+        """Retorna o status atual de sincronização do relógio, operações e configurações de combate."""
+        stats = context.clock_sync.get_stats().to_dict()
+        ops = context.combat_manager.get_operations()
+        cfg = context.config.combat
+        return {
+            "status": "success",
+            "clock_stats": stats,
+            "operations": ops,
+            "config": {
+                "noble_train_gap_ms": cfg.noble_train_gap_ms,
+                "failsafe_enabled": cfg.failsafe_enabled,
+                "failsafe_max_spread_ms": cfg.failsafe_max_spread_ms,
+                "default_noble_escort": cfg.default_noble_escort,
+                "snipe_tolerance_ms": cfg.snipe_tolerance_ms,
+            },
+        }
+
+    @router.post("/combat/sync/ping")
+    async def ping_clock_sync(world: Optional[str] = None):
+        """Efetua um ping rápido para atualizar a medição de RTT e sincronização do relógio."""
+        return await context.ping_clock_sync(world=world)
+
+    @router.post("/combat/noble-train")
+    async def launch_noble_train(payload: Dict[str, Any], world: Optional[str] = None):
+        """Dispara um Comboio de Nobres (Noble Train) com gaps milimétricos e Fail-Safe."""
+        return await context.launch_noble_train(
+            plan_data=payload,
+            village_id=payload.get("village_id"),
+            world=world,
+        )
+
+    @router.post("/combat/backtime/calculate")
+    def calculate_backtime(payload: Dict[str, Any], world: Optional[str] = None):
+        """Calcula o momento exato de partida para um contra-ataque de Backtime."""
+        return context.calculate_backtime(
+            data=payload,
+            village_id=payload.get("village_id"),
+            world=world,
+        )
+
+    @router.post("/combat/backtime/schedule")
+    async def schedule_backtime(payload: Dict[str, Any], world: Optional[str] = None):
+        """Agenda uma operação militar de Backtime."""
+        return await context.schedule_backtime(
+            data=payload,
+            village_id=payload.get("village_id"),
+            world=world,
+        )
+
+    @router.post("/combat/snipe/analyze")
+    def analyze_snipes(village_id: Optional[int] = None, world: Optional[str] = None):
+        """Analisa incomings para detectar comboios e sugerir janelas de intercalação (snipe)."""
+        return context.analyze_snipes(village_id=village_id, world=world)
+
+    @router.post("/combat/operation/cancel")
+    def cancel_tactical_operation(payload: Dict[str, Any]):
+        """Cancela uma operação tática de combate agendada."""
+        op_id = payload.get("operation_id")
+        if not op_id:
+            raise HTTPException(status_code=400, detail="Parâmetro 'operation_id' é obrigatório.")
+        return context.cancel_tactical_operation(op_id=op_id)
+
+    @router.post("/combat/config")
+    def update_combat_config(payload: Dict[str, Any], world: Optional[str] = None):
+        """Atualiza e persiste as definições de combate e sincronização milissegundo."""
+        return context.update_combat_config(config_data=payload, world=world)
+
+    # =========================================================================
+    # Coleta de Recursos / Scavenging (Ponto 2.4 & Fase 4)
+    # =========================================================================
+
+    @router.get("/scavenge/status")
+    async def get_scavenge_status(village_id: Optional[int] = None, world: Optional[str] = None):
+        """Retorna o estado das 4 categorias de coleta, tropas e contadores."""
+        return await context.get_scavenge_status(village_id=village_id, world=world)
+
+    @router.post("/scavenge/toggle")
+    def toggle_scavenge_module(payload: Dict[str, Any], world: Optional[str] = None):
+        """Ativa ou desativa a automação da Coleta de Recursos."""
+        return context.toggle_scavenge_module(
+            enabled=payload.get("enabled"),
+            auto_unlock=payload.get("auto_unlock"),
+            eligible_units=payload.get("eligible_units"),
+            min_reserved_units=payload.get("min_reserved_units"),
+            check_interval_seconds=payload.get("check_interval_seconds"),
+            world=world,
+        )
+
+    @router.post("/scavenge/trigger")
+    async def trigger_scavenge_cycle(payload: Optional[Dict[str, Any]] = None, world: Optional[str] = None):
+        """Dispara uma ronda imediata de expedições de coleta."""
+        data = payload or {}
+        return await context.trigger_scavenge_cycle(
+            village_id=data.get("village_id"),
+            world=world,
+        )
+
+    @router.post("/scavenge/unlock")
+    async def unlock_scavenge_option(payload: Dict[str, Any], world: Optional[str] = None):
+        """Inicia o desbloqueio manual de uma categoria de coleta (2, 3 ou 4)."""
+        opt_id = payload.get("option_id")
+        if not opt_id:
+            raise HTTPException(status_code=400, detail="Parâmetro 'option_id' é obrigatório.")
+        return await context.unlock_scavenge_option(
+            option_id=int(opt_id),
+            village_id=payload.get("village_id"),
+            world=world,
+        )
+
+    # =========================================================================
+    # Academia & Cunha de Moedas (Ponto 2.6 & Fase 4)
+    # =========================================================================
+
+    @router.get("/snob/status")
+    async def get_snob_status(village_id: Optional[int] = None, world: Optional[str] = None):
+        """Retorna moedas cunhadas, nobres disponíveis e custos da Academia."""
+        return await context.get_snob_status(village_id=village_id, world=world)
+
+    @router.post("/snob/mint")
+    async def mint_snob_coins(payload: Optional[Dict[str, Any]] = None, world: Optional[str] = None):
+        """Cunha uma ou mais moedas de ouro na Academia."""
+        data = payload or {}
+        count = int(data.get("count", 1))
+        return await context.mint_snob_coins(count=count, village_id=data.get("village_id"), world=world)
+
+    @router.post("/snob/recruit")
+    async def recruit_snob_nobleman(payload: Optional[Dict[str, Any]] = None, world: Optional[str] = None):
+        """Inicia o recrutamento de 1 Nobre na Academia."""
+        data = payload or {}
+        return await context.recruit_snob_nobleman(village_id=data.get("village_id"), world=world)
+
+    @router.post("/snob/config")
+    def update_snob_config(payload: Dict[str, Any], world: Optional[str] = None):
+        """Atualiza definições de auto-cunhagem da Academia."""
+        return context.update_snob_config(payload=payload, world=world)
+
+    # =========================================================================
+    # Visualizador de Inventário & Gestão de Itens (Ponto 2.10 & Fase 4)
+    # =========================================================================
+
+    @router.get("/inventory/items")
+    async def get_inventory_items(force_refresh: bool = False, world: Optional[str] = None):
+        """Lista os itens atualmente disponíveis no inventário da conta."""
+        return await context.get_inventory_items(force_refresh=force_refresh, world=world)
+
+    @router.post("/inventory/use")
+    async def use_inventory_item(payload: Dict[str, Any], world: Optional[str] = None):
+        """Consome/ativa um item do inventário sob comando explícito."""
+        item_id = payload.get("item_id")
+        if not item_id:
+            raise HTTPException(status_code=400, detail="Parâmetro 'item_id' é obrigatório.")
+        return await context.use_inventory_item(
+            item_id=str(item_id),
+            village_id=payload.get("village_id"),
+            world=world,
+        )
+
+    # =========================================================================
+    # Autenticação Cloud SQL (AppUser), Gestão de Contas, Mundos e Aldeias
+    # =========================================================================
+
+    @router.post("/auth/register")
+    async def register_user(payload: AppUserRegisterRequest):
+        """Regista um novo utilizador da aplicação no Cloud SQL."""
+        from engine.storage.token_storage import token_storage
+        res = await context.register_app_user(
+            email=payload.email,
+            password=payload.password,
+            license_type=payload.license_type or "standard",
+        )
+        if res.get("status") == "error":
+            raise HTTPException(status_code=400, detail=res.get("message"))
+        if res.get("user"):
+            token_storage.save_token(res["user"]["id"], email=res["user"]["email"])
+        return res
+
+    @router.post("/auth/login")
+    async def login_user(payload: AppUserLoginRequest):
+        """Autentica o utilizador da aplicação."""
+        from engine.storage.token_storage import token_storage
+        res = await context.login_app_user(email=payload.email, password=payload.password)
+        if res.get("status") == "error":
+            raise HTTPException(status_code=401, detail=res.get("message"))
+        if res.get("user"):
+            token_storage.save_token(res["user"]["id"], email=res["user"]["email"])
+        return res
+
+    @router.get("/auth/me")
+    async def get_current_user():
+        """Retorna o utilizador da aplicação atualmente autenticado."""
+        from engine.storage.token_storage import token_storage
+        if not context.current_app_user:
+            saved_token = token_storage.load_token()
+            if saved_token:
+                try:
+                    user = await context.user_repo.get_by_id(saved_token)
+                    if user:
+                        context.current_app_user = user
+                except Exception:
+                    pass
+        res = await context.get_current_app_user()
+        if res.get("status") == "error":
+            return {"status": "unauthenticated", "user": None, "message": res.get("message")}
+        return res
+
+    @router.post("/auth/logout")
+    async def logout_user():
+        """Termina a sessão da aplicação e para os workers ativos."""
+        from engine.storage.token_storage import token_storage
+        token_storage.clear_token()
+        context.current_app_user = None
+        await context.session_manager.stop_current_session()
+        return {"status": "success", "message": "Sessão terminada."}
+
+    @router.post("/worlds")
+    async def add_world(payload: GameWorldCreateRequest):
+        """Adiciona um mundo de jogo à conta ativa e inicia o worker paralelo."""
+        res = await context.add_game_world(world_code=payload.world_code, is_active=payload.is_active is not False)
+        if res.get("status") == "error":
+            raise HTTPException(status_code=400, detail=res.get("message"))
+        return res
+
+    @router.patch("/worlds/{world_code}/toggle")
+    async def toggle_world(world_code: str, payload: GameWorldToggleRequest):
+        """Ativa ou pausa o worker de background para o mundo especificado."""
+        return await context.toggle_game_world_worker(world_code=world_code, is_active=payload.is_active)
+
+    @router.get("/worlds/{world_code}/villages")
+    async def list_world_villages(world_code: str):
+        """Lista as aldeias sincronizadas para o mundo especificado."""
+        res = await context.list_world_villages(world_code=world_code)
+        if res.get("status") == "error":
+            raise HTTPException(status_code=400, detail=res.get("message"))
+        return res
+
+    @router.patch("/villages/{village_id}/model")
+    async def update_village_model(village_id: str, payload: VillageUpdateModelRequest):
+        """Atualiza o modelo de construção ativo atribuído a uma aldeia no Cloud SQL."""
+        res = await context.update_village_build_model(
+            village_id=village_id,
+            active_build_model_id=payload.active_build_model_id,
+        )
+        if res.get("status") == "error":
+            raise HTTPException(status_code=400, detail=res.get("message"))
+        return res
+
     return router
+
+
 
 

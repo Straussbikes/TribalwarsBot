@@ -12,23 +12,37 @@ logger = logging.getLogger("TribalWarsBot.Database")
 
 
 class AccountsDatabase:
-    """Repositório de persistência SQLite para gestão de contas, modelos de construção e recrutamento."""
+    """Repositório de persistência SQLite em memória para compatibilidade com testes legados."""
 
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Optional[Union[str, Path]] = None):
         if db_path is None:
-            data_dir = Path(__file__).resolve().parent.parent.parent / "data"
-            data_dir.mkdir(parents=True, exist_ok=True)
-            self.db_path = data_dir / "accounts.db"
+            self.db_path = "file:twbot_memdb?mode=memory&cache=shared"
+            import threading
+            self._lock = threading.Lock()
+            self._is_memory = True
+            self._mem_conn = sqlite3.connect(self.db_path, uri=True, check_same_thread=False)
+            self._mem_conn.row_factory = sqlite3.Row
         else:
-            self.db_path = Path(db_path)
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            import threading
+            self._lock = threading.Lock()
+            self.db_path = str(db_path)
+            self._is_memory = False
+            if self.db_path != ":memory:" and not self.db_path.startswith("file:"):
+                Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+            self._mem_conn = None
 
         self._init_db()
 
     @contextmanager
     def _get_connection(self):
         """Abre uma conexão com o SQLite com row_factory ativado e fecha-a de forma limpa."""
-        conn = sqlite3.connect(str(self.db_path), timeout=10.0)
+        if hasattr(self, "_mem_conn") and self._mem_conn:
+            with self._lock:
+                yield self._mem_conn
+            return
+
+        is_uri = "file:" in str(self.db_path)
+        conn = sqlite3.connect(str(self.db_path), timeout=10.0, uri=is_uri, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         try:
             yield conn

@@ -11,6 +11,17 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import WebSocket
 
+from engine.actions.combat_sync import ClockSynchronizer
+from engine.actions.combat_tactics import (
+    CombatManager,
+    NobleTrainPlan,
+    BacktimePlan,
+    SnipePlan,
+    TacticalOperation,
+    TacticalOperationType,
+    TacticalOperationStatus,
+)
+from engine.actions.defense import DefenseManager, DodgeOperation, IncomingAttack
 from engine.actions.economic_arbitrage import EconomicArbitrageManager
 from engine.actions.farm import FarmManager
 from engine.actions.inactivity_tracker import InactivityFilterConfig, InactivityTracker
@@ -20,6 +31,10 @@ from engine.actions.market import MarketManager
 from engine.actions.place import PlaceManager, UnitsCount
 from engine.actions.quest import QuestManager
 from engine.actions.recruitment import RecruitmentManager
+from engine.actions.scavenge import ScavengeManager
+from engine.actions.smith import SmithManager
+from engine.actions.snob import SnobManager
+from engine.actions.inventory import InventoryManager
 from engine.actions.village_coordinator import MultiVillageCoordinator
 from engine.actions.world_data import WorldDataWorker
 from engine.config.settings import BotConfig
@@ -74,10 +89,43 @@ class EngineContext:
             farm_manager=self.farm_manager,
             market_manager=self.market_manager,
         )
+        # Gestor de Defesa e Alarme de Ataques (Item 2.8)
+        self.defense_manager = DefenseManager(
+            place_manager=self.place_manager,
+            map_manager=self.map_manager,
+        )
+        self._setup_defense_callbacks()
+
+        # Sincronizador de Relógio e Gestor de Combate Milissegundo (Item 2.9)
+        self.clock_sync = ClockSynchronizer()
+        self.combat_manager = CombatManager(
+            place_manager=self.place_manager,
+            clock_sync=self.clock_sync,
+        )
+
+        # Gestores de Coleta, Academia e Inventário (Fase 4)
+        self.scavenge_manager = ScavengeManager()
+        self.snob_manager = SnobManager()
+        self.inventory_manager = InventoryManager()
+
         # Gestor de Perfis e Base de Dados SQLite (Single-Active Session)
         self.profile_manager = ProfileManager(db=db) if db else ProfileManager()
         self._account_lock = asyncio.Lock()
         self.active_profile_id: Optional[str] = None
+
+        # Cloud SQL PostgreSQL & AccountSessionManager (Singleton de Mutex e Concorrência Multi-Mundo)
+        from engine.storage.cloud_db import get_cloud_db, AppUserRepository, GameAccountRepository, GameWorldRepository, VillageRepository
+        from engine.core.account_session_manager import AccountSessionManager
+        self.cloud_db = get_cloud_db()
+        self.session_manager = AccountSessionManager.get_instance()
+        if self.session_manager.orchestrator:
+            self.session_manager.orchestrator.db = self.cloud_db
+        self.user_repo = AppUserRepository(self.cloud_db)
+        self.game_account_repo = GameAccountRepository(self.cloud_db)
+        self.game_world_repo = GameWorldRepository(self.cloud_db)
+        self.village_repo = VillageRepository(self.cloud_db)
+        self.build_template_repo = self.cloud_db.build_template_repo
+        self.current_app_user: Optional[Any] = None
 
         # Orquestrador Multi-Mundo Concorrente
         self.world_manager = MultiWorldManager(on_captcha_alert=self.notify_captcha_detected)
@@ -104,6 +152,7 @@ class EngineContext:
         self.stats_trackers[self.config.world] = self.stats_tracker
         if self.account:
             self.account.stats_tracker = self.stats_tracker
+            self.account._broadcast_sync = self.broadcast_sync
 
         # Gestor de Dados do Mundo e Radar de Inativos
         self.world_database = WorldDatabase()
@@ -318,6 +367,7 @@ class EngineContext:
                 batch_sizes=self.config.recruitment.batch_sizes,
                 min_free_pop=self.config.recruitment.min_free_pop,
                 village_id=v_id,
+                max_queue_elements=getattr(self.config.recruitment, "max_queue_elements", 3),
             )
             # Atualiza estado da aldeia e emite eventos WebSocket para a interface
             await self.account.refresh_state()
@@ -327,6 +377,7 @@ class EngineContext:
             rec_state = await self.get_recruitment_state(v_id)
             self.broadcast_sync("RECRUITMENT_CYCLE_EXECUTED", rec_state)
             self.broadcast_sync("RECRUITMENT_UPDATED", rec_state)
+            self.broadcast_sync("STATS_UPDATED", {"reason": "manual_recruit", "recruited": res})
             return res
 
         self.scheduler.schedule(
@@ -599,6 +650,42 @@ class EngineContext:
                     "auto_balance_enabled": getattr(self.config.market, "auto_balance", True),
                     "auto_balance": getattr(self.config.market, "auto_balance", True),
                     "interval_minutes": getattr(self.config.market, "interval_minutes", 30.0),
+                },
+                "defense": {
+                    "enabled": getattr(self.config.defense, "enabled", True),
+                    "auto_dodge_enabled": getattr(self.config.defense, "auto_dodge_enabled", False),
+                    "dodge_lead_time_seconds": getattr(self.config.defense, "dodge_lead_time_seconds", 30),
+                    "dodge_cancel_delay_seconds": getattr(self.config.defense, "dodge_cancel_delay_seconds", 5),
+                    "escape_coords": getattr(self.config.defense, "escape_coords", None),
+                    "auto_dodge_all_units": getattr(self.config.defense, "auto_dodge_all_units", True),
+                    "alarm_sound_enabled": getattr(self.config.defense, "alarm_sound_enabled", True),
+                    "check_interval_seconds": getattr(self.config.defense, "check_interval_seconds", 20.0),
+                    "incomings_count": self.defense_manager.last_incomings_count,
+                    "active_incomings": [inc.to_dict() for inc in self.defense_manager.active_incomings.values()],
+                    "active_dodges": [d.to_dict() for d in self.defense_manager.active_dodges.values()],
+                },
+                "combat": {
+                    "clock_stats": self.clock_sync.get_stats().to_dict(),
+                    "operations": self.combat_manager.get_operations(),
+                    "config": {
+                        "noble_train_gap_ms": getattr(getattr(self.config, "combat", None), "noble_train_gap_ms", 100),
+                        "failsafe_enabled": getattr(getattr(self.config, "combat", None), "failsafe_enabled", True),
+                        "failsafe_max_spread_ms": getattr(getattr(self.config, "combat", None), "failsafe_max_spread_ms", 400),
+                        "default_noble_escort": getattr(getattr(self.config, "combat", None), "default_noble_escort", {"axe": 50, "light": 20}),
+                        "snipe_tolerance_ms": getattr(getattr(self.config, "combat", None), "snipe_tolerance_ms", 150),
+                    },
+                },
+                "scavenge": {
+                    "enabled": getattr(getattr(self.config, "scavenge", None), "enabled", False),
+                    "auto_unlock": getattr(getattr(self.config, "scavenge", None), "auto_unlock", True),
+                    "eligible_units": getattr(getattr(self.config, "scavenge", None), "eligible_units", ["spear", "sword", "axe", "archer", "light"]),
+                    "min_reserved_units": getattr(getattr(self.config, "scavenge", None), "min_reserved_units", {"spear": 10, "sword": 10}),
+                    "check_interval_seconds": getattr(getattr(self.config, "scavenge", None), "check_interval_seconds", 300.0),
+                },
+                "snob": {
+                    "auto_mint_enabled": getattr(getattr(self.config, "snob", None), "auto_mint_enabled", False),
+                    "storage_threshold_percent": getattr(getattr(self.config, "snob", None), "storage_threshold_percent", 85.0),
+                    "auto_recruit_nobles": getattr(getattr(self.config, "snob", None), "auto_recruit_nobles", False),
                 },
             },
             "stats": self.get_stats_tracker().get_summary(),
@@ -1125,7 +1212,11 @@ class EngineContext:
         tracker_key = f"{target_acc}_{target_world}"
         if tracker_key not in self.stats_trackers:
             self.stats_trackers[tracker_key] = StatsTracker(world=target_world, account_id=target_acc)
-        return self.stats_trackers[tracker_key]
+        tracker = self.stats_trackers[tracker_key]
+        if self.account and (not world or world == self.account.world):
+            self.account.stats_tracker = tracker
+            self.account._broadcast_sync = self.broadcast_sync
+        return tracker
 
     def get_stats_summary(self, world: Optional[str] = None) -> Dict[str, Any]:
         """Retorna resumo consolidado de estatísticas e KPIs de rendimento."""
@@ -1290,6 +1381,7 @@ class EngineContext:
         enabled: Optional[bool] = None,
         interval_minutes: Optional[float] = None,
         min_free_pop: Optional[int] = None,
+        max_queue_elements: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Ativa/desativa ou ajusta a rotina de auto-recrutamento contínuo."""
         update_data = {}
@@ -1302,6 +1394,9 @@ class EngineContext:
         if min_free_pop is not None:
             update_data["min_free_pop"] = int(min_free_pop)
             self.config.recruitment.min_free_pop = int(min_free_pop)
+        if max_queue_elements is not None:
+            update_data["max_queue_elements"] = int(max_queue_elements)
+            self.config.recruitment.max_queue_elements = int(max_queue_elements)
 
         self.update_config_and_save({"recruitment": update_data})
         if self.config.recruitment.enabled and self.account and self.scheduler:
@@ -1386,6 +1481,7 @@ class EngineContext:
                 "enabled": self.config.recruitment.enabled,
                 "interval_minutes": self.config.recruitment.interval_minutes,
                 "min_free_pop": self.config.recruitment.min_free_pop,
+                "max_queue_elements": getattr(self.config.recruitment, "max_queue_elements", 3),
                 "models": models,
                 "targets": targets,
                 "batch_sizes": batch_sizes,
@@ -1929,6 +2025,13 @@ class EngineContext:
                         farm_config=self.config.farm,
                         bot_config=self.config,
                     )
+                # Defense & Incomings Monitor (Item 2.8)
+                if getattr(self.config, "defense", None) and self.config.defense.enabled:
+                    self.defense_manager.schedule_defense_monitor(
+                        scheduler=self.scheduler,
+                        account=self.account,
+                        config=self.config.defense,
+                    )
                 if not self.scheduler.is_running:
                     self.scheduler.start()
 
@@ -2066,6 +2169,8 @@ class EngineContext:
         )
         total_attacks = res.get("am_farm_attacks_sent", 0) + res.get("bootstrap_attacks_sent", 0)
         self.broadcast_sync("FARM_CYCLE_DONE", res)
+        tracker = self.get_stats_tracker(acc.world)
+        self.broadcast_sync("STATS_UPDATED", tracker.get_summary())
         return {
             "status": "success",
             "message": f"Ciclo de farm concluído: {total_attacks} ataques enviados ({res.get('am_farm_attacks_sent', 0)} AM Farm, {res.get('bootstrap_attacks_sent', 0)} Praça).",
@@ -2485,6 +2590,782 @@ class EngineContext:
             "player_id": player_id,
             "timeline": timeline,
         }
+
+    def _setup_defense_callbacks(self) -> None:
+        """Configura propagação de eventos do DefenseManager para os clientes WebSocket."""
+        async def _on_alert(incomings: List[IncomingAttack]):
+            self.broadcast_sync("INCOMING_ATTACK_ALERT", {
+                "count": len(incomings),
+                "incomings": [inc.to_dict() for inc in incomings],
+                "world": self.config.world,
+            })
+            self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+
+        async def _on_cleared():
+            self.broadcast_sync("INCOMING_ATTACKS_CLEARED", {
+                "count": 0,
+                "world": self.config.world,
+            })
+            self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+
+        async def _on_dodge_exec(op: DodgeOperation):
+            self.broadcast_sync("DODGE_EXECUTED", {
+                "dodge": op.to_dict(),
+                "world": self.config.world,
+            })
+            self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+
+        async def _on_dodge_cancel(op: DodgeOperation):
+            self.broadcast_sync("DODGE_CANCELLED", {
+                "dodge": op.to_dict(),
+                "world": self.config.world,
+            })
+            self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+
+        self.defense_manager.on_incoming_alert(_on_alert)
+        self.defense_manager.on_incomings_cleared(_on_cleared)
+        self.defense_manager.on_dodge_executed(_on_dodge_exec)
+        self.defense_manager.on_dodge_cancelled(_on_dodge_cancel)
+
+    def get_defense_status(self, world: Optional[str] = None) -> Dict[str, Any]:
+        """Retorna o estado detalhado de defesa, incomings e dodges."""
+        inst = self.world_manager.get_instance(world)
+        cfg = inst.config if inst else self.config
+        return {
+            "status": "success",
+            "world": cfg.world,
+            "enabled": getattr(cfg.defense, "enabled", True),
+            "auto_dodge_enabled": getattr(cfg.defense, "auto_dodge_enabled", False),
+            "dodge_lead_time_seconds": getattr(cfg.defense, "dodge_lead_time_seconds", 30),
+            "dodge_cancel_delay_seconds": getattr(cfg.defense, "dodge_cancel_delay_seconds", 5),
+            "escape_coords": getattr(cfg.defense, "escape_coords", None),
+            "auto_dodge_all_units": getattr(cfg.defense, "auto_dodge_all_units", True),
+            "alarm_sound_enabled": getattr(cfg.defense, "alarm_sound_enabled", True),
+            "check_interval_seconds": getattr(cfg.defense, "check_interval_seconds", 20.0),
+            "incomings_count": self.defense_manager.last_incomings_count,
+            "active_incomings": [inc.to_dict() for inc in self.defense_manager.active_incomings.values()],
+            "active_dodges": [d.to_dict() for d in self.defense_manager.active_dodges.values()],
+        }
+
+    async def check_defense_incomings(self, world: Optional[str] = None) -> Dict[str, Any]:
+        """Dispara uma verificação imediata de ataques recebidos."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada."}
+
+        incomings = await self.defense_manager.check_incomings(acc)
+        status_dict = self.get_defense_status(world)
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success",
+            "count": len(incomings),
+            "incomings": [inc.to_dict() for inc in incomings],
+            "defense_state": status_dict,
+        }
+
+    def toggle_defense_module(
+        self,
+        enabled: Optional[bool] = None,
+        auto_dodge_enabled: Optional[bool] = None,
+        dodge_lead_time_seconds: Optional[int] = None,
+        dodge_cancel_delay_seconds: Optional[int] = None,
+        escape_coords: Optional[str] = None,
+        auto_dodge_all_units: Optional[bool] = None,
+        alarm_sound_enabled: Optional[bool] = None,
+        check_interval_seconds: Optional[float] = None,
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Configura ou ativa/desativa os componentes do módulo de Defesa e Auto-Dodge."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        cfg = inst.config if inst else self.config
+        sch = inst.scheduler if inst else self.scheduler
+
+        def_patch: Dict[str, Any] = {}
+        if enabled is not None:
+            cfg.defense.enabled = bool(enabled)
+            def_patch["enabled"] = bool(enabled)
+        if auto_dodge_enabled is not None:
+            cfg.defense.auto_dodge_enabled = bool(auto_dodge_enabled)
+            def_patch["auto_dodge_enabled"] = bool(auto_dodge_enabled)
+        if dodge_lead_time_seconds is not None:
+            cfg.defense.dodge_lead_time_seconds = int(dodge_lead_time_seconds)
+            def_patch["dodge_lead_time_seconds"] = int(dodge_lead_time_seconds)
+        if dodge_cancel_delay_seconds is not None:
+            cfg.defense.dodge_cancel_delay_seconds = int(dodge_cancel_delay_seconds)
+            def_patch["dodge_cancel_delay_seconds"] = int(dodge_cancel_delay_seconds)
+        if escape_coords is not None:
+            clean_coords = escape_coords.strip() if escape_coords else None
+            cfg.defense.escape_coords = clean_coords
+            def_patch["escape_coords"] = clean_coords
+        if auto_dodge_all_units is not None:
+            cfg.defense.auto_dodge_all_units = bool(auto_dodge_all_units)
+            def_patch["auto_dodge_all_units"] = bool(auto_dodge_all_units)
+        if alarm_sound_enabled is not None:
+            cfg.defense.alarm_sound_enabled = bool(alarm_sound_enabled)
+            def_patch["alarm_sound_enabled"] = bool(alarm_sound_enabled)
+        if check_interval_seconds is not None:
+            cfg.defense.check_interval_seconds = float(check_interval_seconds)
+            def_patch["check_interval_seconds"] = float(check_interval_seconds)
+
+        if def_patch:
+            self.update_config_and_save({"defense": def_patch})
+
+        if cfg.defense.enabled and acc and sch:
+            self.defense_manager.schedule_defense_monitor(
+                scheduler=sch,
+                account=acc,
+                config=cfg.defense,
+            )
+
+        self.broadcast_sync("MODULE_TOGGLED", {"module": "defense", "config": def_patch, "world": cfg.world})
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success",
+            "message": "Configurações de defesa atualizadas com sucesso.",
+            "defense": self.get_defense_status(world),
+        }
+
+    async def trigger_manual_dodge(
+        self,
+        village_id: Optional[int] = None,
+        escape_coords: Optional[str] = None,
+        offensive_only: bool = False,
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Dispara uma manobra imediata de esquiva de tropas (Dodge) na aldeia especificada."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        cfg = inst.config if inst else self.config
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada."}
+
+        target_v_id = village_id or acc.current_village_id
+        pref_coords = escape_coords or getattr(cfg.defense, "escape_coords", None)
+        target_coords = await self.defense_manager.find_escape_village(acc, target_v_id, pref_coords)
+
+        res = await self.place_manager.send_dodge_command(
+            account=acc,
+            target_coords=target_coords,
+            village_id=target_v_id,
+            offensive_only=offensive_only,
+        )
+        if not res.get("success"):
+            return {"status": "error", "message": res.get("message", "Falha ao enviar dodge manual.")}
+
+        cmd_id = res.get("command_id") or f"manual_dodge_{int(time.time())}"
+        cancel_delay = getattr(cfg.defense, "dodge_cancel_delay_seconds", 5)
+        impact_ts = time.time() + 60.0
+        cancel_ts = time.time() + cancel_delay + 5.0
+
+        op = DodgeOperation(
+            incoming_command_id=f"manual_{int(time.time())}",
+            village_id=target_v_id,
+            escape_coords=f"{target_coords[0]}|{target_coords[1]}",
+            dodge_command_id=cmd_id,
+            impact_timestamp=impact_ts,
+            dispatched_at=time.time(),
+            cancel_at=cancel_ts,
+            status="dispatched",
+            units=res.get("units", {}),
+            message="Dodge manual disparado com sucesso.",
+        )
+        self.defense_manager.active_dodges[cmd_id] = op
+
+        self.broadcast_sync("DODGE_EXECUTED", {"dodge": op.to_dict(), "world": cfg.world})
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success",
+            "message": f"Dodge manual enviado para ({target_coords[0]}|{target_coords[1]}). Comando: {cmd_id}",
+            "dodge": op.to_dict(),
+        }
+
+    async def cancel_defense_command(
+        self,
+        command_id: str,
+        village_id: Optional[int] = None,
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Cancela um comando militar de esquiva em andamento."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada."}
+
+        target_v_id = village_id or acc.current_village_id
+        ok = await self.defense_manager.cancel_dodge(acc, command_id, village_id=target_v_id)
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success" if ok else "error",
+            "message": "Comando cancelado com sucesso." if ok else "Falha ao cancelar comando.",
+            "command_id": command_id,
+            "cancelled": ok,
+        }
+
+    # =========================================================================
+    # Táticas de Combate & Sincronização ao Milissegundo (Item 2.9)
+    # =========================================================================
+
+    async def ping_clock_sync(self, world: Optional[str] = None) -> Dict[str, Any]:
+        """Efetua uma medição rápida de RTT e sincronização com o servidor do jogo."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada."}
+
+        t_send = time.time()
+        try:
+            html = await acc.get_screen("place", apply_jitter=False)
+            t_recv = time.time()
+            server_ts = self.clock_sync.parse_server_time_from_headers_or_html(html=html, game_data=acc.last_game_data)
+            self.clock_sync.record_sample(t_send, t_recv, server_ts)
+            stats = self.clock_sync.get_stats().to_dict()
+            self.broadcast_sync("COMBAT_CLOCK_SYNCED", stats)
+            self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+            return {"status": "success", "clock_stats": stats}
+        except Exception as e:
+            return {"status": "error", "message": f"Falha na sincronização de relógio: {e}"}
+
+    async def launch_noble_train(
+        self,
+        plan_data: Dict[str, Any],
+        village_id: Optional[int] = None,
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Dispara um Comboio de Nobres (Noble Train) com gaps milimétricos e Fail-Safe."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada."}
+
+        target_coords = plan_data.get("target_coords")
+        if not target_coords or "|" not in target_coords:
+            return {"status": "error", "message": "Coordenadas de alvo inválidas (use formato xxx|yyy)."}
+
+        train_size = int(plan_data.get("train_size", 4))
+        nuke_dict = plan_data.get("nuke_units", {})
+        escort_dict = plan_data.get("escort_units", {"axe": 50, "light": 20})
+        gap_ms = int(plan_data.get("gap_ms", getattr(self.config.combat, "noble_train_gap_ms", 100)))
+        failsafe_enabled = bool(plan_data.get("failsafe_enabled", getattr(self.config.combat, "failsafe_enabled", True)))
+        failsafe_spread = int(plan_data.get("failsafe_max_spread_ms", getattr(self.config.combat, "failsafe_max_spread_ms", 400)))
+
+        plan = NobleTrainPlan(
+            target_coords=target_coords,
+            train_size=train_size,
+            nuke_units=UnitsCount.from_dict(nuke_dict),
+            escort_units=UnitsCount.from_dict(escort_dict),
+            gap_ms=gap_ms,
+            failsafe_enabled=failsafe_enabled,
+            failsafe_max_spread_ms=failsafe_spread,
+            launch_at_server_ts=plan_data.get("launch_at_server_ts"),
+            target_arrival_server_ts=plan_data.get("target_arrival_server_ts"),
+        )
+
+        target_v_id = village_id or acc.current_village_id
+        operation = await self.combat_manager.execute_noble_train(acc, plan, village_id=target_v_id)
+
+        op_dict = operation.to_dict()
+        event_name = "COMBAT_FAILSAFE_TRIGGERED" if operation.status == TacticalOperationStatus.CANCELLED_FAILSAFE else "COMBAT_OPERATION_EXECUTED"
+        self.broadcast_sync(event_name, op_dict)
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success" if operation.status == TacticalOperationStatus.COMPLETED else "warning",
+            "message": f"Noble train processado: status '{operation.status.value}'.",
+            "operation": op_dict,
+        }
+
+    def calculate_backtime(
+        self,
+        data: Dict[str, Any],
+        village_id: Optional[int] = None,
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Calcula o momento exato de partida para um contra-ataque de Backtime."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        v_id = village_id or (acc.current_village_id if acc else 1)
+        v_obj = acc.villages.get(v_id) if acc else None
+        origin_coords = f"{v_obj.x}|{v_obj.y}" if v_obj else data.get("origin_coords", "500|500")
+
+        target_coords = data.get("target_coords", "")
+        enemy_return_ts = float(data.get("enemy_return_server_ts", 0))
+        slowest_unit = data.get("slowest_unit", "light")
+
+        if not target_coords or enemy_return_ts <= 0:
+            return {"status": "error", "message": "Coordenadas ou hora de regresso do inimigo inválidas."}
+
+        res = self.combat_manager.calculate_backtime(
+            origin_coords=origin_coords,
+            target_coords=target_coords,
+            enemy_return_server_ts=enemy_return_ts,
+            slowest_unit=slowest_unit,
+        )
+        return {"status": "success", "calculation": res}
+
+    async def schedule_backtime(
+        self,
+        data: Dict[str, Any],
+        village_id: Optional[int] = None,
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Agenda uma operação militar de Backtime."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada."}
+
+        target_coords = data.get("target_coords", "")
+        enemy_return_ts = float(data.get("enemy_return_server_ts", 0))
+        slowest_unit = data.get("slowest_unit", "light")
+        units_dict = data.get("units", {})
+
+        plan = BacktimePlan(
+            target_coords=target_coords,
+            enemy_return_server_ts=enemy_return_ts,
+            units=UnitsCount.from_dict(units_dict),
+            slowest_unit=slowest_unit,
+        )
+
+        target_v_id = village_id or acc.current_village_id
+        try:
+            op = await self.combat_manager.schedule_backtime(acc, plan, village_id=target_v_id)
+            self.broadcast_sync("COMBAT_OPERATION_SCHEDULED", op.to_dict())
+            self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+            return {"status": "success", "operation": op.to_dict()}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def analyze_snipes(
+        self,
+        village_id: Optional[int] = None,
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Analisa incomings ativos para detectar comboios e sugerir janelas de intercalação (snipe)."""
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst else self.account
+
+        incomings = [inc.to_dict() for inc in self.defense_manager.active_incomings.values()]
+        own_vills = []
+        if acc:
+            for v in acc.villages.values():
+                own_vills.append({"id": v.id, "name": v.name, "x": v.x, "y": v.y})
+
+        suggestions = self.combat_manager.analyze_snipes(incomings, own_vills)
+        return {"status": "success", "suggestions": suggestions, "incomings_count": len(incomings)}
+
+    def cancel_tactical_operation(self, op_id: str) -> Dict[str, Any]:
+        """Cancela uma operação tática de combate agendada."""
+        op = self.combat_manager.operations.get(op_id)
+        if not op:
+            return {"status": "error", "message": f"Operação '{op_id}' não encontrada."}
+
+        op.status = TacticalOperationStatus.CANCELLED_MANUAL
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {"status": "success", "message": f"Operação {op_id} cancelada manualmente.", "operation": op.to_dict()}
+
+    def update_combat_config(
+        self,
+        config_data: Dict[str, Any],
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Atualiza os parâmetros de combate e persistência."""
+        inst = self.world_manager.get_instance(world)
+        cfg = inst.config if inst else self.config
+
+        if "noble_train_gap_ms" in config_data:
+            cfg.combat.noble_train_gap_ms = max(20, min(1000, int(config_data["noble_train_gap_ms"])))
+        if "failsafe_enabled" in config_data:
+            cfg.combat.failsafe_enabled = bool(config_data["failsafe_enabled"])
+        if "failsafe_max_spread_ms" in config_data:
+            cfg.combat.failsafe_max_spread_ms = max(50, min(5000, int(config_data["failsafe_max_spread_ms"])))
+        if "default_noble_escort" in config_data and isinstance(config_data["default_noble_escort"], dict):
+            cfg.combat.default_noble_escort = config_data["default_noble_escort"]
+        if "snipe_tolerance_ms" in config_data:
+            cfg.combat.snipe_tolerance_ms = int(config_data["snipe_tolerance_ms"])
+
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {
+            "status": "success",
+            "message": "Configurações de combate atualizadas com sucesso.",
+            "combat_config": {
+                "noble_train_gap_ms": cfg.combat.noble_train_gap_ms,
+                "failsafe_enabled": cfg.combat.failsafe_enabled,
+                "failsafe_max_spread_ms": cfg.combat.failsafe_max_spread_ms,
+                "default_noble_escort": cfg.combat.default_noble_escort,
+                "snipe_tolerance_ms": cfg.combat.snipe_tolerance_ms,
+            },
+        }
+
+    def _get_world_context(self, world: Optional[str] = None):
+        inst = self.world_manager.get_instance(world)
+        acc = inst.account if inst and inst.account else self.account
+        cfg = inst.config if inst and inst.config else self.config
+        return inst, acc, cfg
+
+    # =========================================================================
+    # Coleta de Recursos / Scavenging (Ponto 2.4 & Fase 4)
+    # =========================================================================
+
+    async def get_scavenge_status(self, village_id: Optional[int] = None, world: Optional[str] = None) -> Dict[str, Any]:
+        inst, acc, cfg = self._get_world_context(world)
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada no mundo especificado."}
+
+        v_id = village_id or acc.current_village_id or 0
+        state = await self.scavenge_manager.get_scavenge_state(acc, village_id=v_id)
+        scv_cfg = getattr(cfg, "scavenge", None)
+        return {
+            "status": "success",
+            "village_id": v_id,
+            "options": [
+                {
+                    "id": opt.id,
+                    "name": opt.name,
+                    "description": opt.description,
+                    "is_unlocked": opt.is_unlocked,
+                    "is_locked": opt.is_locked,
+                    "is_scavenging": opt.is_scavenging,
+                    "time_remaining_seconds": opt.time_remaining_seconds,
+                    "loot_ratio": opt.loot_ratio,
+                    "unlock_cost": opt.unlock_cost,
+                }
+                for opt in state.options
+            ],
+            "available_troops": state.available_troops,
+            "active_expeditions_count": state.active_expeditions_count,
+            "min_return_time_seconds": state.min_return_time_seconds,
+            "config": {
+                "enabled": getattr(scv_cfg, "enabled", False),
+                "auto_unlock": getattr(scv_cfg, "auto_unlock", True),
+                "eligible_units": getattr(scv_cfg, "eligible_units", ["spear", "sword", "axe", "archer", "light"]),
+                "min_reserved_units": getattr(scv_cfg, "min_reserved_units", {}),
+            },
+        }
+
+    def toggle_scavenge_module(
+        self,
+        enabled: Optional[bool] = None,
+        auto_unlock: Optional[bool] = None,
+        eligible_units: Optional[List[str]] = None,
+        min_reserved_units: Optional[Dict[str, int]] = None,
+        check_interval_seconds: Optional[float] = None,
+        world: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        inst, acc, cfg = self._get_world_context(world)
+        scv = getattr(cfg, "scavenge", None)
+        if not scv:
+            return {"status": "error", "message": "Configurações de scavenge não encontradas."}
+
+        if enabled is not None:
+            scv.enabled = bool(enabled)
+        if auto_unlock is not None:
+            scv.auto_unlock = bool(auto_unlock)
+        if eligible_units is not None:
+            scv.eligible_units = eligible_units
+        if min_reserved_units is not None:
+            scv.min_reserved_units = min_reserved_units
+        if check_interval_seconds is not None:
+            scv.check_interval_seconds = float(check_interval_seconds)
+
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {"status": "success", "message": f"Coleta automática {'ligada' if scv.enabled else 'desligada'}."}
+
+    async def trigger_scavenge_cycle(self, village_id: Optional[int] = None, world: Optional[str] = None) -> Dict[str, Any]:
+        inst, acc, cfg = self._get_world_context(world)
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada no mundo especificado."}
+
+        scv_cfg = getattr(cfg, "scavenge", None)
+        res = await self.scavenge_manager.execute_scavenge_cycle(acc, scv_cfg, village_id=village_id)
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return res
+
+    async def unlock_scavenge_option(self, option_id: int, village_id: Optional[int] = None, world: Optional[str] = None) -> Dict[str, Any]:
+        inst, acc, cfg = self._get_world_context(world)
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada no mundo especificado."}
+
+        ok = await self.scavenge_manager.unlock_scavenge_option(acc, option_id, village_id=village_id)
+        return {"status": "success" if ok else "failed", "unlocked": ok}
+
+    # =========================================================================
+    # Academia & Cunha de Moedas (Ponto 2.6 & Fase 4)
+    # =========================================================================
+
+    async def get_snob_status(self, village_id: Optional[int] = None, world: Optional[str] = None) -> Dict[str, Any]:
+        inst, acc, cfg = self._get_world_context(world)
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada no mundo especificado."}
+
+        state = await self.snob_manager.get_snob_state(acc, village_id=village_id)
+        snb_cfg = getattr(cfg, "snob", None)
+        return {
+            "status": "success",
+            "snob_state": state.to_dict(),
+            "config": {
+                "auto_mint_enabled": getattr(snb_cfg, "auto_mint_enabled", False),
+                "storage_threshold_percent": getattr(snb_cfg, "storage_threshold_percent", 85.0),
+                "auto_recruit_nobles": getattr(snb_cfg, "auto_recruit_nobles", False),
+            },
+        }
+
+    async def mint_snob_coins(self, count: int = 1, village_id: Optional[int] = None, world: Optional[str] = None) -> Dict[str, Any]:
+        inst, acc, cfg = self._get_world_context(world)
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada no mundo especificado."}
+
+        ok = await self.snob_manager.mint_coins(acc, count=count, village_id=village_id)
+        return {"status": "success" if ok else "failed", "minted_count": count if ok else 0}
+
+    async def recruit_snob_nobleman(self, village_id: Optional[int] = None, world: Optional[str] = None) -> Dict[str, Any]:
+        inst, acc, cfg = self._get_world_context(world)
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada no mundo especificado."}
+
+        ok = await self.snob_manager.recruit_nobleman(acc, village_id=village_id)
+        return {"status": "success" if ok else "failed"}
+
+    def update_snob_config(self, payload: Dict[str, Any], world: Optional[str] = None) -> Dict[str, Any]:
+        inst, acc, cfg = self._get_world_context(world)
+        snb = getattr(cfg, "snob", None)
+        if not snb:
+            return {"status": "error", "message": "Configurações de snob não encontradas."}
+
+        if "auto_mint_enabled" in payload:
+            snb.auto_mint_enabled = bool(payload["auto_mint_enabled"])
+        if "storage_threshold_percent" in payload:
+            snb.storage_threshold_percent = float(payload["storage_threshold_percent"])
+        if "auto_recruit_nobles" in payload:
+            snb.auto_recruit_nobles = bool(payload["auto_recruit_nobles"])
+
+        self.broadcast_sync("STATUS_UPDATE", self.get_status_dict())
+        return {"status": "success", "message": "Configurações da Academia atualizadas."}
+
+    # =========================================================================
+    # Visualizador de Inventário & Gestão de Itens (Ponto 2.10 & Fase 4)
+    # =========================================================================
+
+    async def get_inventory_items(self, force_refresh: bool = False, world: Optional[str] = None) -> Dict[str, Any]:
+        inst, acc, cfg = self._get_world_context(world)
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada no mundo especificado."}
+
+        items = await self.inventory_manager.get_inventory_items(acc, force_refresh=force_refresh)
+        return {
+            "status": "success",
+            "items_count": len(items),
+            "items": [it.to_dict() for it in items],
+        }
+
+    async def use_inventory_item(self, item_id: str, village_id: Optional[int] = None, world: Optional[str] = None) -> Dict[str, Any]:
+        inst, acc, cfg = self._get_world_context(world)
+        if not acc:
+            return {"status": "error", "message": "Conta não conectada no mundo especificado."}
+
+        ok = await self.inventory_manager.use_item(acc, item_id=item_id, village_id=village_id)
+        return {
+            "status": "success" if ok else "failed",
+            "message": f"Item {item_id} {'ativado com sucesso' if ok else 'falhou ao ser ativado'}."
+        }
+
+    # =========================================================================
+    # Cloud SQL / Multi-Account & Multi-World Concurrency Handlers
+    # =========================================================================
+
+    async def register_app_user(self, email: str, password: str, license_type: str = "standard") -> Dict[str, Any]:
+        """Regista um novo utilizador da aplicação na base de dados Cloud SQL."""
+        existing = await self.user_repo.get_by_email(email)
+        if existing:
+            return {"status": "error", "message": "Já existe um utilizador registado com este email."}
+        user = await self.user_repo.create_user(email=email, password=password, license_type=license_type)
+        self.current_app_user = user
+        return {
+            "status": "success",
+            "user": user.to_dict(),
+            "message": "Utilizador registado com sucesso!",
+        }
+
+    async def login_app_user(self, email: str, password: str) -> Dict[str, Any]:
+        """Autentica o utilizador da aplicação."""
+        user = await self.user_repo.authenticate(email=email, password=password)
+        if not user:
+            return {"status": "error", "message": "Email ou password inválidos."}
+        self.current_app_user = user
+        return {
+            "status": "success",
+            "user": user.to_dict(),
+            "message": f"Sessão iniciada como {user.email}.",
+        }
+
+    async def get_current_app_user(self) -> Dict[str, Any]:
+        """Retorna o utilizador da aplicação atualmente autenticado."""
+        if not self.current_app_user:
+            return {"status": "error", "message": "Nenhum utilizador autenticado."}
+        return {
+            "status": "success",
+            "user": self.current_app_user.to_dict(),
+        }
+
+    async def list_user_game_accounts(self) -> Dict[str, Any]:
+        """Lista todas as contas de jogo do utilizador autenticado."""
+        if not self.current_app_user:
+            return {"status": "error", "message": "Autenticação requerida."}
+        accounts = await self.game_account_repo.list_by_user(self.current_app_user.id)
+        active_user = self.session_manager.active_game_username
+        return {
+            "status": "success",
+            "active_username": active_user,
+            "accounts": [
+                {
+                    **acc.to_dict(),
+                    "is_active_session": bool(active_user and active_user.lower() == acc.game_username.lower()),
+                }
+                for acc in accounts
+            ],
+        }
+
+    async def add_user_game_account(
+        self,
+        game_username: str,
+        sid: str = "",
+        domain: str = "tribalwars.com.pt",
+        proxy: Optional[str] = None,
+        password: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Regista ou atualiza uma conta de jogo encriptando as credenciais no cofre."""
+        if not self.current_app_user:
+            return {"status": "error", "message": "Autenticação requerida."}
+
+        creds = {
+            "sid": sid.strip(),
+            "domain": domain.strip(),
+            "proxy": proxy.strip() if proxy else None,
+            "password": password.strip() if password else None,
+        }
+        acc = await self.game_account_repo.create_or_update(
+            app_user_id=self.current_app_user.id,
+            game_username=game_username.strip(),
+            credentials_data=creds,
+        )
+        return {
+            "status": "success",
+            "account": acc.to_dict(),
+            "message": f"Conta de jogo '{game_username}' gravada com cofre seguro!",
+        }
+
+    async def switch_active_game_account(self, game_username: str, account_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Invoca o singleton AccountSessionManager para realizar a exclusão mútua e troca atómica.
+        """
+        if not self.current_app_user:
+            return {"status": "error", "message": "Autenticação requerida."}
+
+        target_acc = None
+        if account_id:
+            target_acc = await self.game_account_repo.get_by_id(account_id)
+        if not target_acc:
+            target_acc = await self.game_account_repo.get_by_user_and_username(self.current_app_user.id, game_username)
+
+        acc_id = target_acc.id if target_acc else account_id
+
+        session_status = await self.session_manager.switch_account(
+            app_user_id=self.current_app_user.id,
+            game_username=game_username,
+            account_id=acc_id,
+        )
+        self.broadcast_sync("ACCOUNT_SWITCHED", session_status)
+        return {
+            "status": "success",
+            "session": session_status,
+            "message": f"Conta ativa alterada para '{game_username}'.",
+        }
+
+    async def list_game_worlds(self, account_id: Optional[str] = None) -> Dict[str, Any]:
+        """Lista os mundos associados à conta ativa e respetivo status dos workers."""
+        acc_id = account_id or self.session_manager.active_account_id
+        if not acc_id:
+            return {"status": "error", "message": "Nenhuma conta de jogo selecionada."}
+
+        worlds = await self.game_world_repo.list_by_account(acc_id)
+        orch = self.session_manager.orchestrator
+        workers_status = orch.get_status().get("workers", {}) if orch else {}
+
+        result = []
+        for w in worlds:
+            w_dict = w.to_dict()
+            worker_info = workers_status.get(w.world_code, {})
+            w_dict["worker"] = worker_info
+            result.append(w_dict)
+
+        return {
+            "status": "success",
+            "account_id": acc_id,
+            "active_focus_world": orch.active_focus_world if orch else None,
+            "worlds": result,
+        }
+
+    async def add_game_world(self, world_code: str, is_active: bool = True) -> Dict[str, Any]:
+        """Adiciona um mundo à conta de jogo ativa no Cloud SQL."""
+        acc_id = self.session_manager.active_account_id
+        if not acc_id:
+            return {"status": "error", "message": "Nenhuma conta de jogo ativa no momento."}
+
+        gw = await self.game_world_repo.get_or_create(game_account_id=acc_id, world_code=world_code, is_active=is_active)
+        orch = self.session_manager.orchestrator
+        if orch:
+            await orch.register_and_start_worker(
+                world_code=world_code,
+                is_active=is_active,
+                account_id=acc_id,
+            )
+        return {
+            "status": "success",
+            "world": gw.to_dict(),
+            "message": f"Mundo '{world_code}' adicionado e orquestrado!",
+        }
+
+    async def toggle_game_world_worker(self, world_code: str, is_active: bool) -> Dict[str, Any]:
+        """Ativa ou desativa as rotinas de background de um mundo individual."""
+        orch = self.session_manager.orchestrator
+        if orch:
+            await orch.toggle_world_worker(world_code=world_code, is_active=is_active)
+        return {
+            "status": "success",
+            "world_code": world_code,
+            "is_active": is_active,
+            "message": f"Mundo '{world_code}' {'ativado' if is_active else 'pausado'}.",
+        }
+
+    async def list_world_villages(self, world_code: str) -> Dict[str, Any]:
+        """Lista todas as aldeias da tabela 'villages' para o mundo especificado."""
+        acc_id = self.session_manager.active_account_id
+        if not acc_id:
+            return {"status": "error", "message": "Nenhuma conta de jogo ativa."}
+
+        gw = await self.game_world_repo.get_or_create(game_account_id=acc_id, world_code=world_code)
+        villages = await self.village_repo.list_by_world(gw.id)
+        return {
+            "status": "success",
+            "world_code": world_code,
+            "game_world_id": gw.id,
+            "villages": [v.to_dict() for v in villages],
+        }
+
+    async def update_village_build_model(self, village_id: str, active_build_model_id: str) -> Dict[str, Any]:
+        """Define o modelo de construção ativo para uma aldeia na base de dados."""
+        updated = await self.village_repo.update_build_model(
+            village_id=village_id,
+            active_build_model_id=active_build_model_id,
+        )
+        if not updated:
+            return {"status": "error", "message": "Aldeia não encontrada."}
+        return {
+            "status": "success",
+            "village": updated.to_dict(),
+            "message": f"Modelo '{active_build_model_id}' atribuído com sucesso!",
+        }
+
 
 
 

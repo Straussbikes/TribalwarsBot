@@ -21,6 +21,11 @@ if sys.platform == "win32":
 import argparse
 from pathlib import Path
 
+# Garante que a raiz do projeto está no sys.path mesmo ao invocar 'python engine/main.py'
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from engine.actions import MainBuildingManager, QuestManager, RecruitmentManager
 from engine.api import EngineContext, remove_auth_file, start_sidecar_server
 from engine.config import load_config
@@ -45,16 +50,31 @@ async def main():
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host local do servidor API (padrão: 127.0.0.1)")
     args, _ = parser.parse_known_args()
 
-    # Carrega definições a partir do SQLite (data/accounts.db) ou variáveis de ambiente
-    config = load_config()
+    # 0. Bootstrap Gatekeeper: Verificação Obrigatória de Conectividade Cloud SQL
+    from engine.storage.cloud_db import get_cloud_db
+    from engine.storage.token_storage import token_storage
 
+    cloud_db = get_cloud_db()
+    logger.info("[Bootstrap Gatekeeper] A validar conectividade com Cloud SQL (PostgreSQL)...")
+    try:
+        await cloud_db.init_db()
+        logger.info("[Bootstrap Gatekeeper] Conectividade com Cloud SQL estabelecida com sucesso.")
+    except Exception as e:
+        logger.critical(f"❌ [Bootstrap Gatekeeper] FALHA CRÍTICA AO CONECTAR À CLOUD SQL: {e}")
+        logger.critical("A aplicação opera estritamente cloud-native e proíbe qualquer execução offline silenciosa.")
+        sys.exit(1)
+
+    # Carrega definições em memória ou a partir de variáveis de ambiente
+    config = load_config()
     world = config.world
     sid = config.sid
 
     if not sid:
-        logger.info(
-            "Nenhuma sessão ativa encontrada. A inicializar a aplicação com o Hub de Contas (Modo Offline)."
-        )
+        saved_token = token_storage.load_token()
+        if not saved_token and not args.api:
+            logger.critical("❌ [Bootstrap Gatekeeper] Nenhuma sessão ou token Cloud ativo detetado.")
+            logger.critical("Inicie a aplicação com a interface gráfica (--gui) ou autentique-se via API.")
+            sys.exit(1)
 
     # 1. Instanciação do motor de agendamento prioritário
     scheduler = TaskScheduler("MainScheduler")
@@ -271,12 +291,15 @@ async def main():
 if __name__ == "__main__":
     _parser = argparse.ArgumentParser(description="Tribal Wars Mobile Automation Engine")
     _parser.add_argument("--api", action="store_true", help="Ativa o servidor Sidecar IPC (FastAPI + WebSockets)")
-    _parser.add_argument("--desktop", "--gui", action="store_true", help="Abre a aplicação desktop nativa com interface visual Edge WebView2")
+    _parser.add_argument("--desktop", "--gui", dest="desktop", action="store_true", help="Abre a aplicação desktop nativa com interface visual Edge WebView2")
     _parser.add_argument("--port", type=int, default=8000, help="Porta local do servidor API (padrão: 8000)")
     _parser.add_argument("--host", type=str, default="127.0.0.1", help="Host local do servidor API (padrão: 127.0.0.1)")
     _args, _ = _parser.parse_known_args()
 
-    if _args.desktop or _args.gui:
+    is_frozen = getattr(sys, "frozen", False)
+    launch_desktop = getattr(_args, "desktop", False) or (is_frozen and not _args.api)
+
+    if launch_desktop:
         from engine.desktop_launcher import DesktopApp
         app = DesktopApp(host=_args.host, port=_args.port)
         app.run()

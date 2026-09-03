@@ -541,67 +541,172 @@ class StatsTracker:
 
     def _load_from_disk(self) -> None:
         """Carrega estado persistido do disco se existir."""
-        if not self.cache_file.exists():
+        if self.cache_file.exists():
+            try:
+                raw = json.loads(self.cache_file.read_text(encoding="utf-8"))
+                self.created_at = float(raw.get("created_at", self.created_at))
+                self.last_updated = float(raw.get("last_updated", self.last_updated))
+                self.total_wood = int(raw.get("total_wood", 0))
+                self.total_stone = int(raw.get("total_stone", 0))
+                self.total_iron = int(raw.get("total_iron", 0))
+                self.total_attacks_sent = int(raw.get("total_attacks_sent", 0))
+                self.total_attacks_successful = int(raw.get("total_attacks_successful", 0))
+                self.total_villages_farmed = int(raw.get("total_villages_farmed", 0))
+                self.troops_recruited_by_unit = {
+                    str(k): int(v) for k, v in raw.get("troops_recruited_by_unit", {}).items()
+                }
+                self.buildings_constructed_count = int(raw.get("buildings_constructed_count", 0))
+
+                raw_buckets = raw.get("hourly_buckets", {})
+                self.hourly_buckets = {}
+                for k, b in raw_buckets.items():
+                    self.hourly_buckets[k] = HourlyBucket(
+                        hour_key=str(b.get("hour_key", k)),
+                        timestamp=float(b.get("timestamp", 0.0)),
+                        wood=int(b.get("wood", 0)),
+                        stone=int(b.get("stone", 0)),
+                        iron=int(b.get("iron", 0)),
+                        total=int(b.get("total", 0)),
+                        attacks_count=int(b.get("attacks_count", 0)),
+                        villages_farmed=int(b.get("villages_farmed", 0)),
+                        troops_recruited=int(b.get("troops_recruited", 0)),
+                    )
+
+                self.recent_loot_events = [
+                    LootEvent(
+                        timestamp=float(e.get("timestamp", 0.0)),
+                        village_id=int(e.get("village_id", 0)),
+                        target_x=int(e.get("target_x", 0)),
+                        target_y=int(e.get("target_y", 0)),
+                        wood=int(e.get("wood", 0)),
+                        stone=int(e.get("stone", 0)),
+                        iron=int(e.get("iron", 0)),
+                        total=int(e.get("total", 0)),
+                        wall=int(e.get("wall", 0)),
+                        losses=bool(e.get("losses", False)),
+                        village_name=str(e.get("village_name", "")),
+                    )
+                    for e in raw.get("recent_loot_events", [])
+                ]
+
+                self.recent_commands = [
+                    CommandEvent(
+                        timestamp=float(c.get("timestamp", 0.0)),
+                        command_type=str(c.get("command_type", "farm")),
+                        target_coords=str(c.get("target_coords", "")),
+                        units={str(uk): int(uv) for uk, uv in c.get("units", {}).items()},
+                        success=bool(c.get("success", True)),
+                        response_time_ms=int(c.get("response_time_ms", 0)),
+                        details=str(c.get("details", "")),
+                    )
+                    for c in raw.get("recent_commands", [])
+                ]
+                logger.info(f"[{self.world}] Estatísticas carregadas: {self.total_looted:,} recursos farmados no total.")
+            except Exception as e:
+                logger.warning(f"[{self.world}] Falha suave ao carregar estatísticas prévias: {e}")
+        
+        self._maybe_merge_legacy_stats()
+
+    def _maybe_merge_legacy_stats(self) -> None:
+        """
+        Se a instância atual tiver 0 recursos saqueados ou histórico incompleto,
+        verifica se existem ficheiros legados para o mesmo mundo (ex.: stats_default_{world}.json
+        ou stats_{world}.json) e efetua a importação para preservar o histórico do utilizador.
+        """
+        if self.total_looted > 0 and len(self.recent_loot_events) > 0:
             return
-        try:
-            raw = json.loads(self.cache_file.read_text(encoding="utf-8"))
-            self.created_at = float(raw.get("created_at", self.created_at))
-            self.last_updated = float(raw.get("last_updated", self.last_updated))
-            self.total_wood = int(raw.get("total_wood", 0))
-            self.total_stone = int(raw.get("total_stone", 0))
-            self.total_iron = int(raw.get("total_iron", 0))
-            self.total_attacks_sent = int(raw.get("total_attacks_sent", 0))
-            self.total_attacks_successful = int(raw.get("total_attacks_successful", 0))
-            self.total_villages_farmed = int(raw.get("total_villages_farmed", 0))
-            self.troops_recruited_by_unit = {
-                str(k): int(v) for k, v in raw.get("troops_recruited_by_unit", {}).items()
-            }
-            self.buildings_constructed_count = int(raw.get("buildings_constructed_count", 0))
 
-            raw_buckets = raw.get("hourly_buckets", {})
-            self.hourly_buckets = {}
-            for k, b in raw_buckets.items():
-                self.hourly_buckets[k] = HourlyBucket(
-                    hour_key=str(b.get("hour_key", k)),
-                    timestamp=float(b.get("timestamp", 0.0)),
-                    wood=int(b.get("wood", 0)),
-                    stone=int(b.get("stone", 0)),
-                    iron=int(b.get("iron", 0)),
-                    total=int(b.get("total", 0)),
-                    attacks_count=int(b.get("attacks_count", 0)),
-                    villages_farmed=int(b.get("villages_farmed", 0)),
-                    troops_recruited=int(b.get("troops_recruited", 0)),
-                )
+        candidates = [
+            self.cache_dir / f"stats_default_{self.world}.json",
+            self.cache_dir / f"stats_{self.world}.json",
+        ]
+        for cand in candidates:
+            if cand.exists() and cand.resolve() != self.cache_file.resolve():
+                try:
+                    cand_raw = json.loads(cand.read_text(encoding="utf-8"))
+                    cand_wood = int(cand_raw.get("total_wood", 0))
+                    cand_stone = int(cand_raw.get("total_stone", 0))
+                    cand_iron = int(cand_raw.get("total_iron", 0))
+                    cand_looted = cand_wood + cand_stone + cand_iron
+                    if cand_looted > self.total_looted or int(cand_raw.get("total_attacks_sent", 0)) > self.total_attacks_sent:
+                        logger.info(
+                            f"[{self.world}] A migrar/fundir estatísticas legadas de '{cand.name}' "
+                            f"({cand_looted:,} recursos, {cand_raw.get('total_attacks_sent', 0)} ataques)..."
+                        )
+                        # Combina baldes
+                        cand_buckets = cand_raw.get("hourly_buckets", {})
+                        for k, b in cand_buckets.items():
+                            if k not in self.hourly_buckets:
+                                self.hourly_buckets[k] = HourlyBucket(
+                                    hour_key=str(b.get("hour_key", k)),
+                                    timestamp=float(b.get("timestamp", 0.0)),
+                                    wood=int(b.get("wood", 0)),
+                                    stone=int(b.get("stone", 0)),
+                                    iron=int(b.get("iron", 0)),
+                                    total=int(b.get("total", 0)),
+                                    attacks_count=int(b.get("attacks_count", 0)),
+                                    villages_farmed=int(b.get("villages_farmed", 0)),
+                                    troops_recruited=int(b.get("troops_recruited", 0)),
+                                )
+                            else:
+                                curr_b = self.hourly_buckets[k]
+                                curr_b.wood = max(curr_b.wood, int(b.get("wood", 0)))
+                                curr_b.stone = max(curr_b.stone, int(b.get("stone", 0)))
+                                curr_b.iron = max(curr_b.iron, int(b.get("iron", 0)))
+                                curr_b.total = max(curr_b.total, int(b.get("total", 0)))
+                                curr_b.attacks_count = max(curr_b.attacks_count, int(b.get("attacks_count", 0)))
+                                curr_b.villages_farmed = max(curr_b.villages_farmed, int(b.get("villages_farmed", 0)))
+                                curr_b.troops_recruited = max(curr_b.troops_recruited, int(b.get("troops_recruited", 0)))
 
-            self.recent_loot_events = [
-                LootEvent(
-                    timestamp=float(e.get("timestamp", 0.0)),
-                    village_id=int(e.get("village_id", 0)),
-                    target_x=int(e.get("target_x", 0)),
-                    target_y=int(e.get("target_y", 0)),
-                    wood=int(e.get("wood", 0)),
-                    stone=int(e.get("stone", 0)),
-                    iron=int(e.get("iron", 0)),
-                    total=int(e.get("total", 0)),
-                    wall=int(e.get("wall", 0)),
-                    losses=bool(e.get("losses", False)),
-                    village_name=str(e.get("village_name", "")),
-                )
-                for e in raw.get("recent_loot_events", [])
-            ]
+                        # Combina totais
+                        self.total_wood = max(self.total_wood, cand_wood)
+                        self.total_stone = max(self.total_stone, cand_stone)
+                        self.total_iron = max(self.total_iron, cand_iron)
+                        self.total_attacks_sent = max(self.total_attacks_sent, int(cand_raw.get("total_attacks_sent", 0)))
+                        self.total_attacks_successful = max(self.total_attacks_successful, int(cand_raw.get("total_attacks_successful", 0)))
+                        self.total_villages_farmed = max(self.total_villages_farmed, int(cand_raw.get("total_villages_farmed", 0)))
+                        self.buildings_constructed_count = max(self.buildings_constructed_count, int(cand_raw.get("buildings_constructed_count", 0)))
+                        for u_k, u_cnt in cand_raw.get("troops_recruited_by_unit", {}).items():
+                            self.troops_recruited_by_unit[str(u_k)] = max(
+                                self.troops_recruited_by_unit.get(str(u_k), 0), int(u_cnt)
+                            )
 
-            self.recent_commands = [
-                CommandEvent(
-                    timestamp=float(c.get("timestamp", 0.0)),
-                    command_type=str(c.get("command_type", "farm")),
-                    target_coords=str(c.get("target_coords", "")),
-                    units={str(uk): int(uv) for uk, uv in c.get("units", {}).items()},
-                    success=bool(c.get("success", True)),
-                    response_time_ms=int(c.get("response_time_ms", 0)),
-                    details=str(c.get("details", "")),
-                )
-                for c in raw.get("recent_commands", [])
-            ]
-            logger.info(f"[{self.world}] Estatísticas carregadas: {self.total_looted:,} recursos farmados no total.")
-        except Exception as e:
-            logger.warning(f"[{self.world}] Falha suave ao carregar estatísticas prévias: {e}")
+                        # Combina eventos de saque recentes se a lista atual for menor
+                        cand_loot = cand_raw.get("recent_loot_events", [])
+                        if len(cand_loot) > len(self.recent_loot_events):
+                            self.recent_loot_events = [
+                                LootEvent(
+                                    timestamp=float(e.get("timestamp", 0.0)),
+                                    village_id=int(e.get("village_id", 0)),
+                                    target_x=int(e.get("target_x", 0)),
+                                    target_y=int(e.get("target_y", 0)),
+                                    wood=int(e.get("wood", 0)),
+                                    stone=int(e.get("stone", 0)),
+                                    iron=int(e.get("iron", 0)),
+                                    total=int(e.get("total", 0)),
+                                    wall=int(e.get("wall", 0)),
+                                    losses=bool(e.get("losses", False)),
+                                    village_name=str(e.get("village_name", "")),
+                                )
+                                for e in cand_loot
+                            ]
+
+                        cand_cmds = cand_raw.get("recent_commands", [])
+                        if len(cand_cmds) > len(self.recent_commands):
+                            self.recent_commands = [
+                                CommandEvent(
+                                    timestamp=float(c.get("timestamp", 0.0)),
+                                    command_type=str(c.get("command_type", "farm")),
+                                    target_coords=str(c.get("target_coords", "")),
+                                    units={str(uk): int(uv) for uk, uv in c.get("units", {}).items()},
+                                    success=bool(c.get("success", True)),
+                                    response_time_ms=int(c.get("response_time_ms", 0)),
+                                    details=str(c.get("details", "")),
+                                )
+                                for c in cand_cmds
+                            ]
+
+                        self._save_to_disk()
+                except Exception as e:
+                    logger.debug(f"Erro ao verificar fusão de ficheiro legado '{cand}': {e}")
+

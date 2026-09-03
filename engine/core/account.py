@@ -75,6 +75,8 @@ class TribalAccount:
         proxy: Optional[str] = None,
         impersonate: str = "chrome124",
         timeout: float = 20.0,
+        max_network_retries: int = 3,
+        retry_backoff_base: float = 1.0,
     ):
         """
         :param world: Subdomínio do mundo ativo (ex.: 'pt117').
@@ -83,6 +85,8 @@ class TribalAccount:
         :param proxy: URL do proxy residencial/dedicado (ex.: 'http://user:pass@ip:port').
         :param impersonate: Perfil de impersonation TLS do curl_cffi.
         :param timeout: Timeout das requisições em segundos.
+        :param max_network_retries: Número de tentativas em caso de erro de conexão/rede transitório.
+        :param retry_backoff_base: Tempo base em segundos para backoff exponencial entre retentativas.
         """
         self.world = world.strip().lower()
         self.sid = sid.strip()
@@ -90,6 +94,8 @@ class TribalAccount:
         self.proxy = proxy
         self.impersonate = impersonate
         self.timeout = timeout
+        self.max_network_retries = max(1, max_network_retries)
+        self.retry_backoff_base = max(0.1, retry_backoff_base)
 
         # URLs base
         self.host = f"{self.world}.{self.domain}"
@@ -110,6 +116,15 @@ class TribalAccount:
         # Sessão HTTP curl_cffi
         self._session: Optional[AsyncSession] = None
         self._lock = asyncio.Lock()
+
+    @property
+    def game_data(self) -> Dict[str, Any]:
+        """Retorna os dados do jogo mais recentes obtidos via script game_data."""
+        return self.last_game_data or {}
+
+    @game_data.setter
+    def game_data(self, value: Dict[str, Any]) -> None:
+        self.last_game_data = value
 
     def get_stats_tracker(self) -> Any:
         """Retorna ou instancia o rastreador de estatísticas do mundo e conta."""
@@ -207,6 +222,15 @@ class TribalAccount:
         if self.current_village_id and self.current_village_id in self.villages:
             return self.villages[self.current_village_id]
         return None
+
+    def get_stats_tracker(self) -> Any:
+        """Obtém ou instancia o StatsTracker associado a esta conta."""
+        if hasattr(self, "stats_tracker") and self.stats_tracker:
+            return self.stats_tracker
+        from engine.core.stats import StatsTracker
+        account_id = getattr(self, "account_id", None) or getattr(self, "profile_id", "default_main")
+        self.stats_tracker = StatsTracker(world=self.world, account_id=account_id)
+        return self.stats_tracker
 
     def _inspect_response(self, response: Response, html: str) -> None:
         """
@@ -384,6 +408,8 @@ class TribalAccount:
         village_id: Optional[int] = None,
         extra_params: Optional[Dict[str, Any]] = None,
         apply_jitter: bool = True,
+        mode: Optional[str] = None,
+        **kwargs: Any,
     ) -> str:
         """
         Navega até um ecrã do jogo (ex.: 'screen=main', 'screen=place', 'screen=barracks')
@@ -405,6 +431,10 @@ class TribalAccount:
                 "screen": screen,
                 "page": "mobile",
             }
+            if mode:
+                params["mode"] = mode
+            if kwargs:
+                params.update(kwargs)
             if v_id:
                 params["village"] = v_id
             if extra_params:
@@ -424,26 +454,50 @@ class TribalAccount:
                 f"[{self.world}] 🌐 [REQ #{req_id}] GET {self.base_url}?{query_str}"
             )
 
+            attempt = 0
+            response = None
             start_t = time.monotonic()
-            try:
-                response = await self.session.get(
-                    self.base_url,
-                    params=params,
-                )
-            except Exception as e:
-                duration_ms = (time.monotonic() - start_t) * 1000
-                self._record_request(
-                    req_id=req_id,
-                    method="GET",
-                    url=full_url,
-                    params=params,
-                    status_code=0,
-                    duration_ms=duration_ms,
-                    size_bytes=0,
-                    error=str(e),
-                )
-                logger.error(f"[{self.world}] ❌ [REQ #{req_id}] Erro de conexão após {duration_ms:.0f}ms ao obter screen '{screen}': {e}")
-                raise NetworkTimeoutError(f"Falha de conexão com {self.host}: {e}") from e
+
+            while attempt < self.max_network_retries:
+                attempt += 1
+                req_start_t = time.monotonic()
+                try:
+                    response = await self.session.get(
+                        self.base_url,
+                        params=params,
+                    )
+                    break
+                except Exception as e:
+                    duration_ms = (time.monotonic() - req_start_t) * 1000
+                    if attempt < self.max_network_retries:
+                        backoff = self.retry_backoff_base * (1.5 ** (attempt - 1))
+                        logger.warning(
+                            f"[{self.world}] ⚠️ [REDE] Falha de conexão ao obter screen '{screen}' ({e}). "
+                            f"Tentativa {attempt}/{self.max_network_retries}. A restabelecer sessão e retentar em {backoff:.1f}s..."
+                        )
+                        try:
+                            if self._session is not None:
+                                await self._session.close()
+                        except Exception:
+                            pass
+                        self._session = None
+                        await self.init_session()
+                        await asyncio.sleep(backoff)
+                    else:
+                        self._record_request(
+                            req_id=req_id,
+                            method="GET",
+                            url=full_url,
+                            params=params,
+                            status_code=0,
+                            duration_ms=duration_ms,
+                            size_bytes=0,
+                            error=str(e),
+                        )
+                        logger.error(
+                            f"[{self.world}] ❌ [REQ #{req_id}] Erro de conexão após {self.max_network_retries} tentativas ao obter screen '{screen}': {e}"
+                        )
+                        raise NetworkTimeoutError(f"Falha de conexão persistente com {self.host}: {e}") from e
 
             duration_ms = (time.monotonic() - start_t) * 1000
             html = response.text
@@ -476,6 +530,8 @@ class TribalAccount:
         village_id: Optional[int] = None,
         extra_params: Optional[Dict[str, Any]] = None,
         apply_jitter: bool = True,
+        mode: Optional[str] = None,
+        **kwargs: Any,
     ) -> str:
         """
         Executa uma ação HTTP POST (ex.: enviar ataque, colocar edifício na fila),
@@ -503,6 +559,10 @@ class TribalAccount:
             }
             if action:
                 params["action"] = action
+            if mode:
+                params["mode"] = mode
+            if kwargs:
+                params.update(kwargs)
             if self.csrf_token:
                 params["h"] = self.csrf_token
             if v_id:
@@ -526,28 +586,52 @@ class TribalAccount:
                 f"[{self.world}] 🌐 [REQ #{req_id}] POST {self.base_url}?{query_str} | Data: {post_data}"
             )
 
+            attempt = 0
+            response = None
             start_t = time.monotonic()
-            try:
-                response = await self.session.post(
-                    self.base_url,
-                    params=params,
-                    data=post_data,
-                    headers=headers,
-                )
-            except Exception as e:
-                duration_ms = (time.monotonic() - start_t) * 1000
-                self._record_request(
-                    req_id=req_id,
-                    method="POST",
-                    url=full_url,
-                    params=params,
-                    status_code=0,
-                    duration_ms=duration_ms,
-                    size_bytes=0,
-                    error=str(e),
-                )
-                logger.error(f"[{self.world}] ❌ [REQ #{req_id}] Erro de conexão após {duration_ms:.0f}ms ao executar action '{action}': {e}")
-                raise NetworkTimeoutError(f"Falha de rede ao enviar ação {action}: {e}") from e
+
+            while attempt < self.max_network_retries:
+                attempt += 1
+                req_start_t = time.monotonic()
+                try:
+                    response = await self.session.post(
+                        self.base_url,
+                        params=params,
+                        data=post_data,
+                        headers=headers,
+                    )
+                    break
+                except Exception as e:
+                    duration_ms = (time.monotonic() - req_start_t) * 1000
+                    if attempt < self.max_network_retries:
+                        backoff = self.retry_backoff_base * (1.5 ** (attempt - 1))
+                        logger.warning(
+                            f"[{self.world}] ⚠️ [REDE] Falha de conexão na ação '{action}' ({e}). "
+                            f"Tentativa {attempt}/{self.max_network_retries}. A restabelecer sessão e retentar em {backoff:.1f}s..."
+                        )
+                        try:
+                            if self._session is not None:
+                                await self._session.close()
+                        except Exception:
+                            pass
+                        self._session = None
+                        await self.init_session()
+                        await asyncio.sleep(backoff)
+                    else:
+                        self._record_request(
+                            req_id=req_id,
+                            method="POST",
+                            url=full_url,
+                            params=params,
+                            status_code=0,
+                            duration_ms=duration_ms,
+                            size_bytes=0,
+                            error=str(e),
+                        )
+                        logger.error(
+                            f"[{self.world}] ❌ [REQ #{req_id}] Erro de conexão após {self.max_network_retries} tentativas na ação '{action}': {e}"
+                        )
+                        raise NetworkTimeoutError(f"Falha de rede persistente ao enviar ação {action}: {e}") from e
 
             duration_ms = (time.monotonic() - start_t) * 1000
             html = response.text

@@ -57,7 +57,12 @@ class WorldDatabase:
 
     def __init__(self, db_path: Optional[Path] = None):
         if db_path is None:
-            data_dir = Path(__file__).resolve().parent.parent.parent / "data"
+            import sys
+            if getattr(sys, "frozen", False):
+                base_dir = Path(sys.executable).resolve().parent
+            else:
+                base_dir = Path(__file__).resolve().parent.parent.parent
+            data_dir = base_dir / "data"
             data_dir.mkdir(parents=True, exist_ok=True)
             self.db_path = data_dir / "world_data.db"
         else:

@@ -140,6 +140,42 @@ class TestRecruitmentParsers(unittest.TestCase):
         self.assertEqual(avail["light"], 10)
         self.assertEqual(len(data["queue"]), 0)
 
+    def test_parse_modern_tw_trainqueue(self):
+        modern_html = """
+        <table id="trainqueue_barracks" class="vis">
+            <tr>
+                <th colspan="2">Treinando</th>
+                <th>Duração</th>
+                <th>Conclusão</th>
+                <th>Cancelamento *</th>
+            </tr>
+            <tr class="lit">
+                <td><span class="unit_sprite_smaller spear" title="Lanceiro"></span></td>
+                <td>5 Lanceiros</td>
+                <td><span class="timer">12:45</span></td>
+                <td>hoje às 13:45:00</td>
+                <td><a href="/game.php?village=45497&amp;screen=barracks&amp;action=cancel&amp;id=123">cancelar</a></td>
+            </tr>
+            <tr>
+                <td><span class="unit_sprite_smaller sword" title="Espadachim"></span></td>
+                <td>10</td>
+                <td><span class="timer">0:45:10</span></td>
+                <td>hoje às 14:30:10</td>
+                <td><a href="/game.php?village=45497&amp;screen=barracks&amp;action=cancel&amp;id=124">cancelar</a></td>
+            </tr>
+        </table>
+        """
+        data = parse_recruitment_page(modern_html)
+        queue = data["queue"]
+        self.assertEqual(len(queue), 2)
+        self.assertEqual(queue[0]["unit"], "spear")
+        self.assertEqual(queue[0]["count"], 5)
+        self.assertEqual(queue[0]["timer_str"], "12:45")
+        self.assertEqual(queue[1]["unit"], "sword")
+        self.assertEqual(queue[1]["count"], 10)
+        self.assertEqual(data["total_in_queue"]["spear"], 5)
+        self.assertEqual(data["total_in_queue"]["sword"], 10)
+
 
 class TestRecruitmentActions(unittest.IsolatedAsyncioTestCase):
     async def test_run_recruitment_cycle_deficit_and_batching(self):
@@ -181,6 +217,7 @@ class TestRecruitmentActions(unittest.IsolatedAsyncioTestCase):
             targets=targets,
             batch_sizes=batch_sizes,
             min_free_pop=10,
+            max_queue_elements=5,
         )
 
         self.assertEqual(recruited.get("spear"), 15)
@@ -224,6 +261,35 @@ class TestRecruitmentActions(unittest.IsolatedAsyncioTestCase):
         # Nenhuma tropa recrutada para não quebrar a evolução da Fazenda
         self.assertEqual(len(recruited), 0)
         account.post_action.assert_not_called()
+
+    async def test_train_units_records_stats_telemetry(self):
+        import tempfile
+        from pathlib import Path
+        from engine.core.account import TribalAccount
+        from engine.core.stats import StatsTracker
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.current_village_id = 12345
+        account.csrf_token = "token_h"
+        account.post_action = AsyncMock(return_value="<div>Sucesso</div>")
+
+        temp_dir = tempfile.mkdtemp()
+        tracker = StatsTracker(world="pt117", account_id="test_stats_acc", cache_dir=Path(temp_dir))
+        account.stats_tracker = tracker
+
+        manager = RecruitmentManager()
+        success = await manager.train_units(
+            account=account,
+            building="barracks",
+            orders={"spear": 20, "sword": 15},
+            village_id=12345,
+        )
+
+        self.assertTrue(success)
+        summary = tracker.get_summary()
+        self.assertEqual(summary["totals_all_time"]["troops_recruited"], 35)
+        self.assertEqual(summary["recruitment_by_unit"]["spear"], 20)
+        self.assertEqual(summary["recruitment_by_unit"]["sword"], 15)
 
     async def test_run_recruitment_skips_unbuilt_buildings_and_unresearched_units(self):
         from engine.core.account import TribalAccount
@@ -322,6 +388,80 @@ class TestRecruitmentActions(unittest.IsolatedAsyncioTestCase):
         account.post_action.assert_called_once()
         call_kwargs = account.post_action.call_args.kwargs
         self.assertEqual(call_kwargs["data"]["spear"], "5")
+
+    async def test_max_queue_elements_limit(self):
+        from engine.core.account import TribalAccount
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.current_village_id = 12345
+        account.refresh_state = AsyncMock(return_value=VillageData(
+            id=12345,
+            name="Aldeia Teste",
+            x=450,
+            y=550,
+            resources=Resources(wood=50000, stone=50000, iron=50000, storage_max=100000, pop=50, pop_max=1000),
+        ))
+
+        manager = RecruitmentManager()
+        manager.place_manager.get_state = AsyncMock(return_value=PlaceState(
+            village_id=12345,
+            units=UnitsCount(spear=0, sword=0, axe=0),
+        ))
+
+        # Caso 1: Quartel já tem 3 ordens ativas na fila
+        mock_b_state = RecruitmentState(
+            building="barracks",
+            available_units={"spear": 100, "sword": 100, "axe": 100},
+            queue=[
+                TrainingOrder(unit="spear", count=10),
+                TrainingOrder(unit="sword", count=10),
+                TrainingOrder(unit="axe", count=10),
+            ],
+            total_in_queue={"spear": 10, "sword": 10, "axe": 10},
+        )
+        manager.get_building_state = AsyncMock(return_value=mock_b_state)
+        account.post_action = AsyncMock(return_value=SAMPLE_BARRACKS_HTML)
+
+        targets = {"spear": 500, "sword": 500, "axe": 500}
+        batch_sizes = {"spear": 10, "sword": 10, "axe": 10}
+
+        recruited = await manager.run_recruitment_cycle(
+            account=account,
+            targets=targets,
+            batch_sizes=batch_sizes,
+            min_free_pop=10,
+            max_queue_elements=3,
+        )
+
+        # Fila já tinha 3 elementos -> nenhuma nova ordem deve ser submetida!
+        self.assertEqual(len(recruited), 0)
+        account.post_action.assert_not_called()
+
+        # Caso 2: Quartel tem 2 ordens ativas -> só pode adicionar 1 ordem (slots_available = 1)
+        mock_b_state_2 = RecruitmentState(
+            building="barracks",
+            available_units={"spear": 100, "sword": 100, "axe": 100},
+            queue=[
+                TrainingOrder(unit="spear", count=10),
+                TrainingOrder(unit="sword", count=10),
+            ],
+            total_in_queue={"spear": 10, "sword": 10},
+        )
+        manager.get_building_state = AsyncMock(return_value=mock_b_state_2)
+        account.post_action = AsyncMock(return_value=SAMPLE_BARRACKS_HTML)
+
+        recruited_2 = await manager.run_recruitment_cycle(
+            account=account,
+            targets=targets,
+            batch_sizes=batch_sizes,
+            min_free_pop=10,
+            max_queue_elements=3,
+        )
+
+        # Apenas 1 nova ordem (spear, menor custo total) deve ser recrutada!
+        self.assertEqual(len(recruited_2), 1)
+        self.assertIn("spear", recruited_2)
+        account.post_action.assert_called_once()
 
 
 class TestRecruitmentConfig(unittest.TestCase):
@@ -425,6 +565,15 @@ class TestRecruitmentModelsApi(unittest.TestCase):
             del_attack = ctx.delete_recruitment_model("attack")
             self.assertEqual(del_attack["status"], "error")
 
+    def test_recruitment_config_max_queue_elements(self):
+        from engine.config.settings import parse_config_dict
+        cfg = BotConfig()
+        self.assertEqual(cfg.recruitment.max_queue_elements, 3)
+
+        parsed = parse_config_dict({"recruitment": {"max_queue_elements": 2}})
+        self.assertEqual(parsed.recruitment.max_queue_elements, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
+

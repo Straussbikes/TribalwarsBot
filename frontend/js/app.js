@@ -31,6 +31,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     badgeStatus: document.getElementById("badge-status"),
     statusText: document.getElementById("status-text"),
     btnToggleScheduler: document.getElementById("btn-toggle-scheduler"),
+    btnLogout: document.getElementById("btn-logout"),
     btnRenewSession: document.getElementById("btn-renew-session"),
     btnBuildNow: document.getElementById("btn-build-now"),
     btnFarmNow: document.getElementById("btn-farm-now"),
@@ -404,6 +405,16 @@ document.addEventListener("DOMContentLoaded", async () => {
         refreshFarmAssistantTab();
       } else if (targetId === "tab-stats") {
         loadAndRenderStats();
+      } else if (targetId === "tab-defense") {
+        loadDefenseData();
+      } else if (targetId === "tab-combat") {
+        loadCombatData();
+      } else if (targetId === "tab-scavenge") {
+        loadScavengeData();
+      } else if (targetId === "tab-snob") {
+        loadSnobData();
+      } else if (targetId === "tab-inventory") {
+        loadInventoryData();
       }
     });
   });
@@ -511,7 +522,56 @@ document.addEventListener("DOMContentLoaded", async () => {
       loadBuildingData();
     } else if (data.module === "recruitment") {
       loadRecruitmentData();
+    } else if (data.module === "defense") {
+      loadDefenseData();
     }
+  });
+
+  window.wsClient.on("incoming_attack_alert", (alertData) => {
+    addLogEntry("CRITICAL", "defense", `🚨 ALERTA DE ATAQUES RECEBIDOS! ${alertData.count} ataque(s) a caminho!`);
+    updateDefenseIncomings(alertData.incomings || [], alertData.count || 0);
+  });
+
+  window.wsClient.on("incoming_attacks_cleared", () => {
+    addLogEntry("SUCCESS", "defense", `🛡️ Todos os ataques terminaram ou foram cancelados. Aldeias seguras!`);
+    updateDefenseIncomings([], 0);
+  });
+
+  window.wsClient.on("dodge_executed", (data) => {
+    const dodge = data.dodge || {};
+    addLogEntry("WARN", "defense", `⚡ AUTO-DODGE: Tropas desviadas para ${dodge.escape_coords}! Cancelamento agendado.`);
+    loadDefenseData();
+  });
+
+  window.wsClient.on("dodge_cancelled", (data) => {
+    const dodge = data.dodge || {};
+    addLogEntry("SUCCESS", "defense", `🔙 AUTO-DODGE CANCELADO: Comando ${dodge.dodge_command_id} cancelado. Tropas a regressar em segurança!`);
+    loadDefenseData();
+  });
+
+  // Eventos de Táticas de Combate & Milissegundo (Item 2.9)
+  window.wsClient.on("combat_operation_scheduled", (data) => {
+    const op = data.operation || {};
+    addLogEntry("INFO", "combat", `⏱️ Operação de combate agendada: ${op.operation_id} (${op.operation_type}) para ${op.target_coords}.`);
+    loadCombatData();
+  });
+
+  window.wsClient.on("combat_operation_executed", (data) => {
+    const op = data.operation || {};
+    addLogEntry("SUCCESS", "combat", `🚀 Operação de combate ${op.operation_id} executada com sucesso!`);
+    loadCombatData();
+  });
+
+  window.wsClient.on("combat_failsafe_triggered", (data) => {
+    const op = data.operation || {};
+    addLogEntry("CRITICAL", "combat", `🚨 FAIL-SAFE ACIONADO no Noble Train ${op.operation_id}! Comandos cancelados.`);
+    loadCombatData();
+  });
+
+  window.wsClient.on("combat_clock_synced", (data) => {
+    const stats = data.stats || {};
+    addLogEntry("INFO", "combat", `Relógio sincronizado via WS. RTT: ${stats.rtt_ms}ms.`);
+    updateCombatState({ clock_stats: stats });
   });
 
   window.wsClient.on("BUILDING_CYCLE_EXECUTED", () => {
@@ -756,6 +816,16 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
 
+    // Módulo de Defesa e Alarme (Item 2.8)
+    if (data.modules && data.modules.defense) {
+      updateDefenseState(data.modules.defense);
+    }
+
+    // Módulo de Táticas de Combate & Milissegundo (Item 2.9)
+    if (data.modules && data.modules.combat) {
+      updateCombatState(data.modules.combat);
+    }
+
     // Coordenadas padrão para o Mapa Tático
     const villObj = data.account?.village || {};
     if (villObj.x && villObj.y) {
@@ -797,6 +867,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Atualiza mini-widget de estatísticas no dashboard
     if (data.stats) {
       updateDashboardStats(data.stats);
+    }
+
+    // Sincroniza tabela de aldeias e modelos de construção Cloud SQL
+    const cloudVillagesSection = document.getElementById("section-cloud-villages");
+    if (cloudVillagesSection && (!state._lastVillagesWorld || state._lastVillagesWorld !== (state.account && state.account.world))) {
+      state._lastVillagesWorld = state.account && state.account.world;
+      if (typeof loadAndRenderCloudVillages === "function") {
+        loadAndRenderCloudVillages(state._lastVillagesWorld);
+      }
     }
   }
 
@@ -1367,13 +1446,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (hubView) hubView.style.display = "block";
     if (mainWorkspace) mainWorkspace.style.display = "none";
 
-    // Oculta controlos in-game na Topbar
-    if (elements.btnLogout) elements.btnLogout.style.display = "none";
-    if (elements.btnRefreshData) elements.btnRefreshData.style.display = "none";
-    if (elements.btnClaimQuests) elements.btnClaimQuests.style.display = "none";
-    if (elements.btnToggleScheduler) elements.btnToggleScheduler.style.display = "none";
-    if (elements.btnFarmNow) elements.btnFarmNow.style.display = "none";
-    if (elements.worldTabsContainer) elements.worldTabsContainer.style.display = "none";
+    // Oculta rigorosamente mundos, relógio e botões de ação na Topbar quando no Hub
+    if (typeof updateTopNavVisibility === "function") {
+      updateTopNavVisibility(false);
+    }
 
     await loadAndRenderAccounts();
   }
@@ -1384,13 +1460,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (hubView) hubView.style.display = "none";
     if (mainWorkspace) mainWorkspace.style.display = "flex";
 
-    // Mostra controlos in-game na Topbar
-    if (elements.btnLogout) elements.btnLogout.style.display = "inline-flex";
-    if (elements.btnRefreshData) elements.btnRefreshData.style.display = "inline-flex";
-    if (elements.btnClaimQuests) elements.btnClaimQuests.style.display = "inline-flex";
-    if (elements.btnToggleScheduler) elements.btnToggleScheduler.style.display = "inline-flex";
-    if (elements.btnFarmNow) elements.btnFarmNow.style.display = "inline-flex";
-    if (elements.worldTabsContainer) elements.worldTabsContainer.style.display = "inline-flex";
+    // Mostra controlos na Topbar apenas se existir utilizador autenticado e conta ativa
+    const isReady = Boolean(state.appUser && (state.activeGameUsername || state.activeProfileId));
+    if (typeof updateTopNavVisibility === "function") {
+      updateTopNavVisibility(isReady);
+    }
   }
 
   function openAddAccountModal() {
@@ -1459,6 +1533,7 @@ document.addEventListener("DOMContentLoaded", async () => {
               btnLoginDirect.disabled = true;
               btnLoginDirect.innerHTML = "<span>⏳</span> A abrir Tribal Wars...";
               addLogEntry("INFO", "account", "A abrir ecrã de autenticação do Tribal Wars...");
+              sessionStorage.setItem("goto_tab", "tab-dashboard");
               await window.api.renewSession();
             } catch (err) {
               alert(`Erro ao abrir login: ${err.message}`);
@@ -1479,35 +1554,54 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (elements.hubHeaderActions) elements.hubHeaderActions.style.display = "flex";
       if (elements.btnHubAddAccount) elements.btnHubAddAccount.style.display = "inline-flex";
 
+      const btnBackCockpit = document.getElementById("btn-hub-back-to-cockpit");
+      const hasAnyActiveSession = accounts.some(a => a.is_active_session || a.id === activeId) || Boolean(state.activeProfileId || state.account?.player_name);
+      if (btnBackCockpit) {
+        btnBackCockpit.style.display = hasAnyActiveSession ? "inline-flex" : "none";
+        btnBackCockpit.onclick = () => hideAccountHub();
+      }
+
       grid.innerHTML = accounts.map(acc => {
-        const isActive = acc.id === activeId && Boolean(state.activeProfileId);
-        const hasSid = Boolean(acc.session_cookie || acc.sid);
-        const lastUsedStr = acc.last_used ? new Date(acc.last_used * 1000).toLocaleString("pt-PT") : "Nunca";
+        const username = acc.game_username || acc.name || 'Conta sem nome';
+        const isCloudVault = Boolean(acc.game_username);
+        const isActive = Boolean(
+          acc.is_active_session ||
+          acc.id === activeId ||
+          (state.activeProfileId && acc.id === state.activeProfileId) ||
+          (state.activeGameUsername && username.toLowerCase() === state.activeGameUsername.toLowerCase()) ||
+          (state.account && (
+            (state.account.player_name && state.account.player_name.toLowerCase() === username.toLowerCase()) ||
+            (state.account.username && state.account.username.toLowerCase() === username.toLowerCase())
+          ))
+        );
+        const hasSid = Boolean(acc.session_cookie || acc.sid || isCloudVault);
+        const lastUsedStr = acc.last_used ? new Date(acc.last_used * 1000).toLocaleString("pt-PT") : (acc.created_at ? new Date(acc.created_at).toLocaleString("pt-PT") : "Recentemente");
         return `
           <div class="account-card" style="background: rgba(30, 41, 59, 0.7); border: 1px solid ${isActive ? 'var(--neon-cyan)' : 'var(--border-glass)'}; border-radius: 12px; padding: 18px; position: relative; box-shadow: ${isActive ? '0 0 20px rgba(6,182,212,0.2)' : 'none'}; display: flex; flex-direction: column; justify-content: space-between; gap: 14px;">
             <div>
               <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
                 <div>
-                  <h4 style="color: #fff; font-family: var(--font-title); font-size: 1.05rem; margin: 0; font-weight: 700;">${acc.name || 'Conta sem nome'}</h4>
-                  <span style="font-size: 0.72rem; color: var(--neon-cyan); font-weight: 600; font-family: var(--font-mono);">🌐 ${(acc.world || acc.world_domain || 'PT117').toUpperCase()}</span>
+                  <h4 style="color: #fff; font-family: var(--font-title); font-size: 1.05rem; margin: 0; font-weight: 700; display: flex; align-items: center; gap: 6px;">
+                    ${username}
+                    ${isCloudVault ? '<span title="Cofre Criptográfico AES-256-GCM" style="font-size: 0.75rem;">🔐</span>' : ''}
+                  </h4>
+                  <span style="font-size: 0.72rem; color: var(--neon-cyan); font-weight: 600; font-family: var(--font-mono);">🌐 ${(acc.world || acc.world_domain || 'Multi-Mundo').toUpperCase()}</span>
                 </div>
                 ${isActive 
-                  ? `<span style="background: rgba(16,185,129,0.2); color: var(--neon-emerald); border: 1px solid var(--neon-emerald); border-radius: 6px; padding: 2px 8px; font-size: 0.68rem; font-weight: 700;">🟢 ONLINE</span>`
-                  : `<span style="background: rgba(100,116,139,0.2); color: #94a3b8; border: 1px solid rgba(148,163,184,0.3); border-radius: 6px; padding: 2px 8px; font-size: 0.68rem; font-weight: 600;">⚪ OFFLINE</span>`
+                  ? `<span style="background: rgba(16,185,129,0.2); color: var(--neon-emerald); border: 1px solid var(--neon-emerald); border-radius: 6px; padding: 2px 8px; font-size: 0.68rem; font-weight: 700;">🟢 SESSÃO ATIVA</span>`
+                  : `<span style="background: rgba(100,116,139,0.2); color: #94a3b8; border: 1px solid rgba(148,163,184,0.3); border-radius: 6px; padding: 2px 8px; font-size: 0.68rem; font-weight: 600;">⚪ STANDBY</span>`
                 }
               </div>
               <div style="font-size: 0.75rem; color: var(--text-muted); display: flex; flex-direction: column; gap: 4px;">
-                <div><strong>Sessão:</strong> ${hasSid ? '<span style="color:var(--neon-emerald)">🟢 Guardada</span>' : '<span style="color:var(--neon-amber)">🟡 Sem SID</span>'}</div>
-                <div><strong>Aldeia:</strong> ${acc.village_id || 'Automática'}</div>
-                <div><strong>Estratégia:</strong> ${acc.build_order_strategy || 'default_plan'}</div>
-                <div><strong>Último Acesso:</strong> ${lastUsedStr}</div>
+                <div><strong>Cofre Criptográfico:</strong> ${isCloudVault ? '<span style="color:var(--neon-emerald)">🟢 AES-256-GCM Ativo</span>' : (hasSid ? '<span style="color:var(--neon-cyan)">Local</span>' : '<span style="color:var(--neon-amber)">Pendente</span>')}</div>
+                <div><strong>Registo / Uso:</strong> ${lastUsedStr}</div>
               </div>
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border-glass); padding-top: 12px;">
-              <button class="btn btn-primary btn-sm btn-activate-acc" data-id="${acc.id}" style="flex: 1; min-width: 110px; background: var(--gradient-primary); font-weight: 600;">
-                <span>▶</span> ${isActive ? 'Focar Painel' : 'Conectar'}
+              <button class="btn btn-primary btn-sm btn-activate-acc" data-id="${acc.id}" data-username="${username}" data-is-active="${isActive}" style="flex: 1; min-width: 110px; background: var(--gradient-primary); font-weight: 600;">
+                <span>▶</span> ${isActive ? 'Focar Painel' : 'Ativar Sessão (Lock)'}
               </button>
-              <button class="btn btn-secondary btn-sm btn-login-acc" data-id="${acc.id}" title="Abrir ecrã do jogo para autenticar" style="padding: 4px 8px;">
+              <button class="btn btn-secondary btn-sm btn-login-acc" data-id="${acc.id}" data-username="${username}" title="Abrir ecrã do jogo para autenticar" style="padding: 4px 8px;">
                 <span>🔑</span> Login
               </button>
               <button class="btn btn-secondary btn-sm btn-edit-acc" data-id="${acc.id}" title="Editar Definições" style="padding: 4px 8px;">
@@ -1525,25 +1619,42 @@ document.addEventListener("DOMContentLoaded", async () => {
       grid.querySelectorAll(".btn-activate-acc").forEach(btn => {
         btn.addEventListener("click", async () => {
           const accId = btn.getAttribute("data-id");
+          const targetUsername = btn.getAttribute("data-username");
+          const isCurrentlyActive = btn.getAttribute("data-is-active") === "true";
+
+          if (isCurrentlyActive) {
+            hideAccountHub();
+            return;
+          }
           try {
             btn.disabled = true;
-            btn.innerHTML = "<span>⏳</span> A iniciar...";
-            addLogEntry("INFO", "account", `A ativar perfil de conta ${accId}...`);
-            const res = await window.api.activateAccount(accId);
-            if (res && res.status === "success") {
-              state.activeProfileId = accId;
-              addLogEntry("SUCCESS", "account", `Conta ativada com sucesso: ${res.account?.name || accId}`);
-              hideAccountHub();
-              const status = await window.api.getStatus();
-              updateDashboard(status);
-            } else {
-              alert(res?.message || "Falha ao ativar conta.");
+            btn.innerHTML = "<span>⏳</span> A trocar com exclusão mútua...";
+            addLogEntry("INFO", "account", `A solicitar lock exclusivo e paragem graciosa da conta anterior para '${targetUsername}'...`);
+            
+            // Troca atómica com o singleton AccountSessionManager
+            try {
+              await window.api.switchGameAccount(targetUsername, accId);
+            } catch (e) {
+              console.warn("Aviso na chamada switchGameAccount:", e);
             }
+
+            const res = await window.api.activateAccount(accId);
+            state.activeProfileId = accId;
+            state.activeGameUsername = targetUsername;
+            addLogEntry("SUCCESS", "account", `Lock exclusivo adquirido com sucesso: ${targetUsername}`);
+            hideAccountHub();
+            
+            // Carrega mundos e aldeias do Cloud SQL
+            if (typeof loadAndRenderWorlds === "function") await loadAndRenderWorlds();
+            if (typeof loadAndRenderCloudVillages === "function") await loadAndRenderCloudVillages();
+
+            const status = await window.api.getStatus();
+            updateDashboard(status);
           } catch (err) {
             alert(`Erro ao ativar conta: ${err.message}`);
           } finally {
             btn.disabled = false;
-            btn.innerHTML = "<span>▶</span> Conectar";
+            btn.innerHTML = "<span>▶</span> Ativar Sessão (Lock)";
           }
         });
       });
@@ -1555,6 +1666,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             await window.api.activateAccount(accId);
             state.activeProfileId = accId;
             hideAccountHub();
+            sessionStorage.setItem("goto_tab", "tab-dashboard");
             await window.api.renewSession();
           } catch (err) {
             alert(`Erro ao abrir login: ${err.message}`);
@@ -3136,6 +3248,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       addLogEntry("INFO", "auth", "A abrir ecrã do Tribal Wars para login manual...");
       elements.btnRenewSession.disabled = true;
       elements.btnRenewSession.textContent = "A abrir...";
+      sessionStorage.setItem("goto_tab", "tab-dashboard");
       const res = await window.api.renewSession();
       if (res.status === "success" || res.status === "ok") {
         addLogEntry("SUCCESS", "auth", res.message || "A navegar para a página de login...");
@@ -4393,11 +4506,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       switchRecModelTab(state.activeRecModelTab);
 
       // Carrega estado de recrutamento e filas ativas da aldeia
-      if (vId) {
-        const res = await window.api.getRecruitmentState(vId);
-        if (res && res.status === "success") {
-          renderRecruitmentData(res);
-        }
+      const res = await window.api.getRecruitmentState(vId || undefined);
+      if (res && res.status === "success") {
+        renderRecruitmentData(res);
       }
     } catch (e) {
       console.warn("Falha ao carregar dados de recrutamento:", e);
@@ -4462,6 +4573,13 @@ document.addEventListener("DOMContentLoaded", async () => {
             </div>
           `;
         }).join("");
+      }
+    }
+
+    if (data.max_queue_elements !== undefined) {
+      const qInput = document.getElementById("rec-max-queue");
+      if (qInput && document.activeElement !== qInput) {
+        qInput.value = data.max_queue_elements;
       }
     }
 
@@ -4604,6 +4722,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       addLogEntry("INFO", "recruitment", "A ler filas de produção militar da aldeia ativa...");
       await window.api.refreshVillage();
       await loadRecruitmentData();
+      await loadAndRenderStats();
       addLogEntry("SUCCESS", "recruitment", "Filas militares e tropas atualizadas!");
     } catch (err) {
       addLogEntry("WARNING", "recruitment", `Falha ao atualizar filas militares: ${err.message}`);
@@ -4620,6 +4739,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const res = await window.api.triggerRecruit();
       addLogEntry("SUCCESS", "recruitment", res.message || "Ciclo de recrutamento despachado com sucesso!");
       await loadRecruitmentData();
+      await loadAndRenderStats();
     } catch (err) {
       addLogEntry("ERROR", "recruitment", `Erro ao recrutar: ${err.message}`);
       alert(`Falha ao disparar recrutamento: ${err.message}`);
@@ -4633,6 +4753,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const recBadgeStatus = document.getElementById("rec-badge-status");
   const recIntervalInput = document.getElementById("rec-interval-minutes");
   const recMinPopInput = document.getElementById("rec-min-free-pop");
+  const recMaxQueueInput = document.getElementById("rec-max-queue");
 
   async function syncRecruitmentSettings() {
     if (!recAutoToggle) return;
@@ -4644,9 +4765,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     const intervalMin = recIntervalInput ? parseFloat(recIntervalInput.value) : 1.5;
     const minPop = recMinPopInput ? parseInt(recMinPopInput.value, 10) : 5;
+    const maxQueue = recMaxQueueInput ? parseInt(recMaxQueueInput.value, 10) : 3;
     try {
-      await window.api.toggleRecruitment(isEn, intervalMin, minPop);
-      addLogEntry("INFO", "recruitment", `Configuração de auto-recrutamento atualizada: ${isEn ? 'Ativo' : 'Pausado'} (${intervalMin} min, pop min: ${minPop}).`);
+      await window.api.toggleRecruitment(isEn, intervalMin, minPop, maxQueue);
+      addLogEntry("INFO", "recruitment", `Configuração de auto-recrutamento atualizada: ${isEn ? 'Ativo' : 'Pausado'} (${intervalMin} min, pop min: ${minPop}, fila máx: ${maxQueue}).`);
     } catch (err) {
       console.warn("Falha ao sincronizar toggle de recrutamento:", err);
     }
@@ -4655,6 +4777,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   recAutoToggle?.addEventListener("change", syncRecruitmentSettings);
   recIntervalInput?.addEventListener("change", syncRecruitmentSettings);
   recMinPopInput?.addEventListener("change", syncRecruitmentSettings);
+  recMaxQueueInput?.addEventListener("change", syncRecruitmentSettings);
 
   // Listeners de WebSocket para templates em tempo real
   if (window.wsClient) {
@@ -4763,37 +4886,51 @@ document.addEventListener("DOMContentLoaded", async () => {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    const parent = canvas.parentElement;
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width > 0 ? rect.width : (parent && parent.clientWidth > 0 ? parent.clientWidth - 20 : 650);
+    const h = rect.height > 0 ? rect.height : (parent && parent.clientHeight > 0 ? parent.clientHeight - 20 : 240);
+
+    if (w <= 50 || h <= 50) {
+      setTimeout(() => {
+        if (state.statsHistoryData) renderStatsChart(state.statsHistoryData);
+      }, 50);
+      return;
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+
     const isDaily = state.statsRange === "168";
     const series = isDaily ? (history.daily || []) : (history.hourly || []);
     if (!series || series.length === 0) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, w, h);
+      if (elements.statsChartSummaryText) {
+        elements.statsChartSummaryText.textContent = "Sem dados disponíveis para o intervalo selecionado";
+      }
       return;
     }
 
     const metric = state.statsMetric || "total";
-    const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
-
-    const w = rect.width;
-    const h = rect.height;
-    const paddingLeft = 50;
+    const paddingLeft = 55;
     const paddingRight = 20;
-    const paddingTop = 20;
-    const paddingBottom = 30;
-    const chartW = w - paddingLeft - paddingRight;
-    const chartH = h - paddingTop - paddingBottom;
+    const paddingTop = 22;
+    const paddingBottom = 32;
+    const chartW = Math.max(10, w - paddingLeft - paddingRight);
+    const chartH = Math.max(10, h - paddingTop - paddingBottom);
 
     ctx.clearRect(0, 0, w, h);
 
     const values = series.map((item) => item[metric] || 0);
-    const maxVal = Math.max(...values, 100);
+    const totalSum = values.reduce((a, b) => a + b, 0);
+    const maxVal = Math.max(...values, 50);
     const gridMax = Math.ceil(maxVal * 1.15);
 
     // Linhas horizontais de grade
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.07)";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
     ctx.lineWidth = 1;
     ctx.font = "10px Inter, sans-serif";
     ctx.fillStyle = "#64748b";
@@ -4810,27 +4947,46 @@ document.addEventListener("DOMContentLoaded", async () => {
       ctx.fillText(v >= 1000 ? `${Math.round(v / 1000)}k` : String(v), paddingLeft - 8, y + 3);
     }
 
+    // Linha de base do gráfico
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+    ctx.beginPath();
+    ctx.moveTo(paddingLeft, paddingTop + chartH);
+    ctx.lineTo(w - paddingRight, paddingTop + chartH);
+    ctx.stroke();
+
+    // Mensagem amigável de empty-state se não existirem saques registados
+    if (totalSum === 0) {
+      ctx.textAlign = "center";
+      ctx.font = "600 12px Inter, sans-serif";
+      ctx.fillStyle = "rgba(148, 163, 184, 0.9)";
+      ctx.fillText("🌾 A aguardar registos de saque no período selecionado", paddingLeft + chartW / 2, paddingTop + chartH / 2 - 6);
+      ctx.font = "10px Inter, sans-serif";
+      ctx.fillStyle = "#64748b";
+      ctx.fillText("Os gráficos serão construídos em tempo real assim que os saques forem despachados", paddingLeft + chartW / 2, paddingTop + chartH / 2 + 14);
+    }
+
     // Cores conforme a métrica
-    let barColor = "rgba(139, 92, 246, 0.9)";
-    let gradTop = "rgba(139, 92, 246, 0.5)";
-    let gradBot = "rgba(139, 92, 246, 0.05)";
+    let barColor = "rgba(139, 92, 246, 0.95)";
+    let gradTop = "rgba(139, 92, 246, 0.65)";
+    let gradBot = "rgba(139, 92, 246, 0.08)";
 
     if (metric === "wood") {
       barColor = "#10b981";
-      gradTop = "rgba(16, 185, 129, 0.5)";
-      gradBot = "rgba(16, 185, 129, 0.05)";
+      gradTop = "rgba(16, 185, 129, 0.65)";
+      gradBot = "rgba(16, 185, 129, 0.08)";
     } else if (metric === "stone") {
       barColor = "#06b6d4";
-      gradTop = "rgba(6, 182, 212, 0.5)";
-      gradBot = "rgba(6, 182, 212, 0.05)";
+      gradTop = "rgba(6, 182, 212, 0.65)";
+      gradBot = "rgba(6, 182, 212, 0.08)";
     } else if (metric === "iron") {
       barColor = "#cbd5e1";
-      gradTop = "rgba(203, 213, 225, 0.4)";
-      gradBot = "rgba(203, 213, 225, 0.05)";
+      gradTop = "rgba(203, 213, 225, 0.65)";
+      gradBot = "rgba(203, 213, 225, 0.08)";
     }
 
+    state._statsBars = [];
     const n = series.length;
-    const barWidth = Math.max(4, (chartW / n) * 0.65);
+    const barWidth = Math.max(3, (chartW / n) * 0.65);
     const stepX = chartW / n;
 
     ctx.textAlign = "center";
@@ -4843,42 +4999,55 @@ document.addEventListener("DOMContentLoaded", async () => {
       const x = paddingLeft + (idx * stepX) + (stepX - barWidth) / 2;
       const y = paddingTop + chartH - barH;
 
-      // Gradiente da barra
-      const grad = ctx.createLinearGradient(0, y, 0, paddingTop + chartH);
-      grad.addColorStop(0, gradTop);
-      grad.addColorStop(1, gradBot);
+      state._statsBars.push({
+        x,
+        y: val > 0 ? y : paddingTop + chartH - 4,
+        w: barWidth,
+        h: Math.max(4, barH),
+        item,
+        idx,
+      });
 
-      ctx.fillStyle = grad;
-      ctx.fillRect(x, y, barWidth, barH);
+      if (val > 0) {
+        // Gradiente da barra
+        const grad = ctx.createLinearGradient(0, y, 0, paddingTop + chartH);
+        grad.addColorStop(0, gradTop);
+        grad.addColorStop(1, gradBot);
 
-      // Borda superior da barra
-      ctx.fillStyle = barColor;
-      ctx.fillRect(x, y, barWidth, Math.min(2, barH));
+        ctx.fillStyle = grad;
+        ctx.fillRect(x, y, barWidth, barH);
+
+        // Borda superior de destaque
+        ctx.fillStyle = barColor;
+        ctx.fillRect(x, y, barWidth, Math.min(2.5, barH));
+      }
 
       // Labels no eixo X
       if (isDaily || idx % 3 === 0 || idx === n - 1) {
         const labelText = isDaily ? (item.label || item.date) : (item.hour || "");
         ctx.fillStyle = "#64748b";
+        ctx.font = "10px Inter, sans-serif";
         ctx.fillText(labelText, x + barWidth / 2, paddingTop + chartH + 18);
       }
     });
 
     // Linha de Média Móvel
-    const totalSum = values.reduce((a, b) => a + b, 0);
     const avgVal = totalSum / n;
-    const avgY = paddingTop + chartH - (avgVal / gridMax) * chartH;
-
-    ctx.strokeStyle = "rgba(6, 182, 212, 0.7)";
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(paddingLeft, avgY);
-    ctx.lineTo(w - paddingRight, avgY);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    if (avgVal > 0) {
+      const avgY = paddingTop + chartH - (avgVal / gridMax) * chartH;
+      ctx.strokeStyle = "rgba(6, 182, 212, 0.8)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(paddingLeft, avgY);
+      ctx.lineTo(w - paddingRight, avgY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
     if (elements.statsChartSummaryText) {
-      elements.statsChartSummaryText.textContent = `Total no Período: ${totalSum.toLocaleString("pt-PT")} | Média: ${Math.round(avgVal).toLocaleString("pt-PT")} / balde`;
+      const periodUnit = isDaily ? "dia" : "hora";
+      elements.statsChartSummaryText.textContent = `Total no Período: ${totalSum.toLocaleString("pt-PT")} | Média: ${Math.round(avgVal).toLocaleString("pt-PT")} / ${periodUnit}`;
     }
   }
 
@@ -5001,11 +5170,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   // Toggle de Intervalo (24h / 7d)
-  function setStatsRange(range) {
+  async function setStatsRange(range) {
     state.statsRange = range;
     if (elements.btnStatsRange24h) elements.btnStatsRange24h.className = range === "24" ? "btn btn-sm btn-stats-range active" : "btn btn-sm btn-stats-range";
     if (elements.btnStatsRange7d) elements.btnStatsRange7d.className = range === "168" ? "btn btn-sm btn-stats-range active" : "btn btn-sm btn-stats-range";
-    if (state.statsHistoryData) renderStatsChart(state.statsHistoryData);
+    await loadAndRenderStats();
   }
 
   elements.btnStatsRange24h?.addEventListener("click", () => setStatsRange("24"));
@@ -5030,6 +5199,74 @@ document.addEventListener("DOMContentLoaded", async () => {
   elements.btnMetricWood?.addEventListener("click", () => setStatsMetric("wood"));
   elements.btnMetricStone?.addEventListener("click", () => setStatsMetric("stone"));
   elements.btnMetricIron?.addEventListener("click", () => setStatsMetric("iron"));
+
+  // Tooltip Interativo do Gráfico de Saque
+  if (elements.statsLootCanvas && elements.statsChartTooltip) {
+    const canvas = elements.statsLootCanvas;
+    const tooltip = elements.statsChartTooltip;
+
+    canvas.addEventListener("mousemove", (e) => {
+      if (!state._statsBars || state._statsBars.length === 0) {
+        tooltip.style.display = "none";
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const hovered = state._statsBars.find((b) => mouseX >= b.x - 3 && mouseX <= b.x + b.w + 3);
+      if (!hovered) {
+        tooltip.style.display = "none";
+        return;
+      }
+
+      const item = hovered.item;
+      const metric = state.statsMetric || "total";
+      const isDaily = state.statsRange === "168";
+      const timeLabel = isDaily ? (item.date || item.label) : (item.label || item.hour);
+      const metricNames = { total: "Total", wood: "Madeira", stone: "Argila", iron: "Ferro" };
+      const currentVal = item[metric] || 0;
+
+      tooltip.innerHTML = `
+        <div style="font-weight: 700; color: var(--neon-cyan); margin-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 3px;">
+          📅 ${timeLabel}
+        </div>
+        <div style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 2px;">
+          <span style="color: var(--text-muted);">${metricNames[metric] || "Saque"}:</span>
+          <strong style="color: #fff; font-family: var(--font-mono);">${currentVal.toLocaleString("pt-PT")}</strong>
+        </div>
+        <div style="display: flex; gap: 8px; font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">
+          <span>🌲 ${(item.wood || 0).toLocaleString("pt-PT")}</span>
+          <span>🧱 ${(item.stone || 0).toLocaleString("pt-PT")}</span>
+          <span>⛏ ${(item.iron || 0).toLocaleString("pt-PT")}</span>
+        </div>
+        <div style="margin-top: 5px; font-size: 0.7rem; color: var(--neon-emerald);">
+          ⚔️ Ataques: ${item.attacks || 0} | 🌾 Aldeias: ${item.villages || 0}
+        </div>
+      `;
+
+      tooltip.style.display = "block";
+      const tooltipX = Math.min(rect.width - 170, Math.max(10, mouseX + 15));
+      const tooltipY = Math.max(10, mouseY - 70);
+      tooltip.style.left = `${tooltipX}px`;
+      tooltip.style.top = `${tooltipY}px`;
+    });
+
+    canvas.addEventListener("mouseleave", () => {
+      tooltip.style.display = "none";
+    });
+  }
+
+  // Redimensionamento reativo do Canvas com ResizeObserver
+  if (elements.statsLootCanvas && elements.statsLootCanvas.parentElement) {
+    const statsObserver = new ResizeObserver(() => {
+      const statsTab = document.getElementById("tab-stats");
+      if (statsTab && statsTab.classList.contains("active") && state.statsHistoryData) {
+        renderStatsChart(state.statsHistoryData);
+      }
+    });
+    statsObserver.observe(elements.statsLootCanvas.parentElement);
+  }
 
   // =========================================================================
   // --- MÓDULO 4: ASSISTENTE DE SAQUE & FARM + RADAR DE INATIVOS (Fase 4) ---
@@ -5758,6 +5995,1688 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-tab-farm-tmpl-b")?.addEventListener("click", () => selectFarmModalTemplate("B"));
   document.getElementById("btn-save-farm-template-to-game")?.addEventListener("click", saveFarmTemplateToGame);
 
+  // =========================================================================
+  // Módulo de Defesa & Alarme de Ataques (Ponto 2.8)
+  // =========================================================================
+
+  let defenseTimerInterval = null;
+  let cachedDefenseIncomings = [];
+
+  function formatTimeRemaining(seconds) {
+    if (seconds <= 0) return "00:00:00";
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  function getUnitBadgeHtml(unitKey, unitName) {
+    const key = (unitKey || "unknown").toLowerCase();
+    let badgeClass = "unit-badge-unknown";
+    if (key.includes("snob")) badgeClass = "unit-badge-snob";
+    else if (key.includes("ram") || key.includes("catapult")) badgeClass = "unit-badge-ram";
+    else if (key.includes("sword")) badgeClass = "unit-badge-sword";
+    else if (key.includes("axe") || key.includes("spear")) badgeClass = "unit-badge-axe";
+    else if (key.includes("heavy")) badgeClass = "unit-badge-heavy";
+    else if (key.includes("light")) badgeClass = "unit-badge-light";
+    else if (key.includes("spy")) badgeClass = "unit-badge-spy";
+
+    return `<span class="unit-badge ${badgeClass}">${escapeHtml(unitName || unitKey || "Desconhecido")}</span>`;
+  }
+
+  function updateDefenseState(defenseData) {
+    if (!defenseData) return;
+
+    const autoDodgeSwitch = document.getElementById("switch-auto-dodge");
+    if (autoDodgeSwitch && document.activeElement !== autoDodgeSwitch) {
+      autoDodgeSwitch.checked = !!defenseData.auto_dodge_enabled;
+    }
+
+    const leadTimeInput = document.getElementById("input-dodge-lead-time");
+    if (leadTimeInput && document.activeElement !== leadTimeInput && defenseData.dodge_lead_time_seconds) {
+      leadTimeInput.value = defenseData.dodge_lead_time_seconds;
+    }
+
+    const cancelDelayInput = document.getElementById("input-dodge-cancel-delay");
+    if (cancelDelayInput && document.activeElement !== cancelDelayInput && defenseData.dodge_cancel_delay_seconds) {
+      cancelDelayInput.value = defenseData.dodge_cancel_delay_seconds;
+    }
+
+    const escapeCoordsInput = document.getElementById("input-dodge-escape-coords");
+    if (escapeCoordsInput && document.activeElement !== escapeCoordsInput && defenseData.escape_coords !== undefined) {
+      escapeCoordsInput.value = defenseData.escape_coords || "";
+    }
+
+    const incomings = defenseData.active_incomings || [];
+    const count = defenseData.incomings_count !== undefined ? defenseData.incomings_count : incomings.length;
+    updateDefenseIncomings(incomings, count);
+
+    renderDodgesTable(defenseData.active_dodges || []);
+  }
+
+  function updateDefenseIncomings(incomings, count) {
+    cachedDefenseIncomings = (incomings || []).map(inc => ({
+      ...inc,
+      localCachedAt: Date.now(),
+      initialRemaining: inc.time_remaining_seconds || 0,
+    }));
+
+    const totalCount = Math.max(count || 0, cachedDefenseIncomings.length);
+
+    // 1. Badge no Header
+    const badge = document.getElementById("badge-incomings");
+    const badgeCount = document.getElementById("badge-incomings-count");
+    if (badge && badgeCount) {
+      badgeCount.textContent = totalCount;
+      badge.style.display = totalCount > 0 ? "inline-flex" : "none";
+    }
+
+    // 2. Badge na Tab Sidebar
+    const tabBadge = document.getElementById("tab-defense-badge");
+    if (tabBadge) {
+      tabBadge.textContent = totalCount;
+      if (totalCount > 0) {
+        tabBadge.classList.remove("hidden");
+      } else {
+        tabBadge.classList.add("hidden");
+      }
+    }
+
+    // 3. Floating Emergency Banner
+    const banner = document.getElementById("incomings-banner");
+    const bannerCount = document.getElementById("banner-incomings-count");
+    if (banner && bannerCount) {
+      bannerCount.textContent = `${totalCount} comando${totalCount === 1 ? '' : 's'}`;
+      banner.style.display = totalCount > 0 ? "block" : "none";
+    }
+
+    // 4. Painel Geral de Defesa
+    const statusBanner = document.getElementById("defense-status-banner");
+    const statusIcon = document.getElementById("defense-status-icon");
+    const statusHeadline = document.getElementById("defense-status-headline");
+    const statusSubline = document.getElementById("defense-status-subline");
+    const countBig = document.getElementById("defense-count-big");
+    const tableCount = document.getElementById("defense-table-count");
+    const imminentBox = document.getElementById("defense-imminent-box");
+
+    if (countBig) countBig.textContent = totalCount;
+    if (tableCount) tableCount.textContent = totalCount;
+
+    if (totalCount > 0) {
+      if (statusBanner) {
+        statusBanner.className = "defense-alert-status danger";
+      }
+      if (statusIcon) statusIcon.textContent = "🚨";
+      if (statusHeadline) statusHeadline.textContent = "PERIGO IMINENTE: ATAQUES DETETADOS!";
+      if (statusSubline) statusSubline.textContent = "Ataques inimigos detectados a caminho da aldeia. Monitorização ativa.";
+      if (imminentBox) imminentBox.style.display = "block";
+    } else {
+      if (statusBanner) {
+        statusBanner.className = "defense-alert-status safe";
+      }
+      if (statusIcon) statusIcon.textContent = "🟢";
+      if (statusHeadline) statusHeadline.textContent = "ALDEIAS SEGURAS";
+      if (statusSubline) statusSubline.textContent = "Nenhum ataque inimigo detectado a caminho.";
+      if (imminentBox) imminentBox.style.display = "none";
+    }
+
+    renderIncomingsTable();
+    updateImminentBox();
+
+    // Inicia cronómetro dinâmico se ainda não ativo
+    if (!defenseTimerInterval) {
+      defenseTimerInterval = setInterval(() => {
+        updateIncomingsTick();
+      }, 1000);
+    }
+  }
+
+  function updateIncomingsTick() {
+    if (!cachedDefenseIncomings || cachedDefenseIncomings.length === 0) return;
+
+    const now = Date.now();
+    for (const inc of cachedDefenseIncomings) {
+      const elapsed = (now - inc.localCachedAt) / 1000;
+      inc.currentRemaining = Math.max(0, inc.initialRemaining - elapsed);
+    }
+
+    updateImminentBox();
+
+    // Atualiza timers visíveis na tabela
+    for (const inc of cachedDefenseIncomings) {
+      const timerEl = document.getElementById(`timer-inc-${inc.command_id}`);
+      if (timerEl) {
+        timerEl.textContent = formatTimeRemaining(inc.currentRemaining || 0);
+      }
+    }
+  }
+
+  function updateImminentBox() {
+    if (!cachedDefenseIncomings || cachedDefenseIncomings.length === 0) {
+      const bannerCountdown = document.getElementById("banner-countdown");
+      if (bannerCountdown) bannerCountdown.textContent = "--:--:--";
+      return;
+    }
+
+    let minRemaining = Infinity;
+    let mostThreatening = null;
+
+    for (const inc of cachedDefenseIncomings) {
+      const rem = inc.currentRemaining !== undefined ? inc.currentRemaining : (inc.time_remaining_seconds || 0);
+      if (rem < minRemaining) {
+        minRemaining = rem;
+        mostThreatening = inc;
+      }
+    }
+
+    const timeStr = formatTimeRemaining(minRemaining);
+    const bannerCountdown = document.getElementById("banner-countdown");
+    if (bannerCountdown) bannerCountdown.textContent = timeStr;
+
+    const immCountdown = document.getElementById("imminent-countdown");
+    if (immCountdown) immCountdown.textContent = timeStr;
+
+    const immSlowUnit = document.getElementById("imminent-slowest-unit");
+    if (immSlowUnit && mostThreatening) {
+      immSlowUnit.textContent = mostThreatening.slowest_unit_name || mostThreatening.slowest_unit || "Desconhecido";
+    }
+  }
+
+  function renderIncomingsTable() {
+    const tbody = document.getElementById("incomings-table-body");
+    if (!tbody) return;
+
+    if (!cachedDefenseIncomings || cachedDefenseIncomings.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" style="padding: 30px; text-align: center; color: var(--text-muted);">
+            🟢 Nenhuma ameaça a caminho. Aldeias totalmente seguras!
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = cachedDefenseIncomings.map((inc) => {
+      const rem = inc.currentRemaining !== undefined ? inc.currentRemaining : (inc.time_remaining_seconds || 0);
+      const unitBadge = getUnitBadgeHtml(inc.slowest_unit, inc.slowest_unit_name);
+      return `
+        <tr style="border-bottom: 1px solid var(--border-glass);">
+          <td style="padding: 10px 14px; font-weight: 700; color: #f87171;">
+            <span style="font-size: 0.9rem;">⚔️</span> ${escapeHtml(inc.command_id)}
+          </td>
+          <td style="padding: 10px 14px;">
+            <div><strong>${escapeHtml(inc.origin_name || 'Desconhecida')}</strong></div>
+            <span style="font-family: var(--font-mono); color: var(--neon-cyan); font-size: 0.75rem;">${escapeHtml(inc.origin_coords || '')}</span>
+          </td>
+          <td style="padding: 10px 14px;">
+            <div><strong>${escapeHtml(inc.target_name || 'Minha Aldeia')}</strong></div>
+            <span style="font-family: var(--font-mono); color: var(--neon-purple); font-size: 0.75rem;">${escapeHtml(inc.target_coords || '')}</span>
+          </td>
+          <td style="padding: 10px 14px; font-weight: 600; color: #fff;">
+            ${escapeHtml(inc.attacker_name || 'Desconhecido')}
+          </td>
+          <td style="padding: 10px 14px; font-family: var(--font-mono);">
+            ${inc.distance ? inc.distance.toFixed(1) + ' campos' : 'N/A'}
+          </td>
+          <td style="padding: 10px 14px; color: var(--text-muted);">
+            ${escapeHtml(inc.arrival_time_str || 'N/A')}
+          </td>
+          <td style="padding: 10px 14px; font-family: var(--font-mono); font-weight: 700; color: #f87171;" id="timer-inc-${inc.command_id}">
+            ${formatTimeRemaining(rem)}
+          </td>
+          <td style="padding: 10px 14px;">
+            ${unitBadge}
+          </td>
+        </tr>
+      `;
+    }).join("");
+  }
+
+  function renderDodgesTable(dodges) {
+    const tbody = document.getElementById("dodges-table-body");
+    if (!tbody) return;
+
+    const list = dodges || [];
+    if (list.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="7" style="padding: 24px; text-align: center; color: var(--text-muted);">
+            Nenhum comando de esquiva ativo no momento.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = list.map((d) => {
+      const isCancelled = d.status === "cancelled" || d.cancelled;
+      const statusBadge = isCancelled
+        ? '<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399;">Cancelado (Regresso)</span>'
+        : '<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;">Em Trânsito</span>';
+
+      return `
+        <tr style="border-bottom: 1px solid var(--border-glass);">
+          <td style="padding: 10px 14px; font-family: var(--font-mono); font-weight: 700; color: #60a5fa;">
+            ${escapeHtml(d.dodge_command_id || 'N/A')}
+          </td>
+          <td style="padding: 10px 14px;">Aldeia ${escapeHtml(String(d.village_id))}</td>
+          <td style="padding: 10px 14px; font-family: var(--font-mono); color: var(--neon-cyan);">
+            ${escapeHtml(d.escape_coords || 'N/A')}
+          </td>
+          <td style="padding: 10px 14px;">${statusBadge}</td>
+          <td style="padding: 10px 14px; font-family: var(--font-mono); font-size: 0.78rem;">
+            ${escapeHtml(d.incoming_command_id || 'N/A')}
+          </td>
+          <td style="padding: 10px 14px; color: var(--text-muted);">
+            ${d.cancel_at ? new Date(d.cancel_at * 1000).toLocaleTimeString() : 'Pós-impacto (+5s)'}
+          </td>
+          <td style="padding: 10px 14px;">
+            ${!isCancelled && d.dodge_command_id ? `
+              <button class="btn btn-warning btn-sm btn-cancel-dodge" data-cmd="${escapeHtml(d.dodge_command_id)}" data-vid="${d.village_id}" style="padding: 3px 8px; font-size: 0.72rem;">
+                🔙 Cancelar
+              </button>
+            ` : '<span style="color: var(--text-muted); font-size: 0.75rem;">Concluído</span>'}
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    tbody.querySelectorAll(".btn-cancel-dodge").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const cmdId = btn.getAttribute("data-cmd");
+        const vid = parseInt(btn.getAttribute("data-vid"), 10) || null;
+        btn.disabled = true;
+        btn.textContent = "A cancelar...";
+        try {
+          const res = await window.api.cancelDefenseCommand(cmdId, vid);
+          if (res.status === "success") {
+            addLogEntry("SUCCESS", "defense", `Comando de esquiva ${cmdId} cancelado com sucesso.`);
+            loadDefenseData();
+          } else {
+            addLogEntry("CRITICAL", "defense", `Erro ao cancelar esquiva ${cmdId}: ${res.message}`);
+            btn.disabled = false;
+            btn.textContent = "🔙 Cancelar";
+          }
+        } catch (e) {
+          addLogEntry("CRITICAL", "defense", `Erro na requisição de cancelamento: ${e.message}`);
+          btn.disabled = false;
+          btn.textContent = "🔙 Cancelar";
+        }
+      });
+    });
+  }
+
+  async function loadDefenseData() {
+    try {
+      const res = await window.api.getDefenseStatus();
+      if (res && res.status === "success") {
+        updateDefenseState(res);
+      }
+    } catch (e) {
+      console.warn("Falha ao carregar estado de defesa:", e);
+    }
+  }
+
+  function setupDefenseEventListeners() {
+    const btnBannerView = document.getElementById("btn-banner-view-defense");
+    if (btnBannerView) {
+      btnBannerView.addEventListener("click", () => {
+        const tabBtn = document.getElementById("tab-btn-defense");
+        if (tabBtn) tabBtn.click();
+      });
+    }
+
+    const badgeInc = document.getElementById("badge-incomings");
+    if (badgeInc) {
+      badgeInc.addEventListener("click", () => {
+        const tabBtn = document.getElementById("tab-btn-defense");
+        if (tabBtn) tabBtn.click();
+      });
+    }
+
+    const btnToggleSound = document.getElementById("btn-toggle-alarm-sound");
+    if (btnToggleSound) {
+      btnToggleSound.addEventListener("click", () => {
+        window.emergencyAlarmMuted = !window.emergencyAlarmMuted;
+        const iconEl = document.getElementById("alarm-sound-icon");
+        if (iconEl) iconEl.textContent = window.emergencyAlarmMuted ? "🔇" : "🔊";
+        btnToggleSound.title = window.emergencyAlarmMuted ? "Som do alarme mutado" : "Som do alarme ativo";
+      });
+    }
+
+    const btnTestAlarm = document.getElementById("btn-test-alarm-sound");
+    if (btnTestAlarm) {
+      btnTestAlarm.addEventListener("click", () => {
+        window.wsClient?.playEmergencyAlarm();
+        addLogEntry("INFO", "defense", "Alarme sonoro de emergência disparado para teste.");
+      });
+    }
+
+    const btnCheckNow = document.getElementById("btn-check-incomings-now");
+    if (btnCheckNow) {
+      btnCheckNow.addEventListener("click", async () => {
+        btnCheckNow.disabled = true;
+        btnCheckNow.innerHTML = "<span>🔄</span> A verificar...";
+        try {
+          const res = await window.api.checkDefenseIncomings();
+          if (res && res.status === "success") {
+            addLogEntry("INFO", "defense", `Varredura concluída: ${res.count} ataque(s) detectados.`);
+            updateDefenseIncomings(res.incomings || [], res.count || 0);
+          } else {
+            addLogEntry("CRITICAL", "defense", `Falha na verificação de incomings: ${res.message}`);
+          }
+        } catch (e) {
+          addLogEntry("CRITICAL", "defense", `Erro ao verificar incomings: ${e.message}`);
+        } finally {
+          btnCheckNow.disabled = false;
+          btnCheckNow.innerHTML = "<span>🔄</span> Verificar Agora";
+        }
+      });
+    }
+
+    const switchAutoDodge = document.getElementById("switch-auto-dodge");
+    if (switchAutoDodge) {
+      switchAutoDodge.addEventListener("change", async () => {
+        const enabled = switchAutoDodge.checked;
+        try {
+          await window.api.toggleAutoDodge({ auto_dodge_enabled: enabled });
+          addLogEntry("INFO", "defense", `Auto-Dodge ${enabled ? 'ATIVADO' : 'DESATIVADO'}.`);
+        } catch (e) {
+          addLogEntry("CRITICAL", "defense", `Erro ao alterar Auto-Dodge: ${e.message}`);
+        }
+      });
+    }
+
+    const btnSaveDodge = document.getElementById("btn-save-dodge-config");
+    if (btnSaveDodge) {
+      btnSaveDodge.addEventListener("click", async () => {
+        const lead = parseInt(document.getElementById("input-dodge-lead-time")?.value, 10) || 30;
+        const cancelDelay = parseInt(document.getElementById("input-dodge-cancel-delay")?.value, 10) || 5;
+        const escapeCoords = document.getElementById("input-dodge-escape-coords")?.value || "";
+
+        btnSaveDodge.disabled = true;
+        btnSaveDodge.textContent = "A guardar...";
+        try {
+          await window.api.updateDefenseConfig({
+            dodge_lead_time_seconds: lead,
+            dodge_cancel_delay_seconds: cancelDelay,
+            escape_coords: escapeCoords,
+          });
+          addLogEntry("SUCCESS", "defense", `Parâmetros de Auto-Dodge guardados: antecedência ${lead}s, cancelamento ${cancelDelay}s.`);
+        } catch (e) {
+          addLogEntry("CRITICAL", "defense", `Erro ao guardar parâmetros de dodge: ${e.message}`);
+        } finally {
+          btnSaveDodge.disabled = false;
+          btnSaveDodge.textContent = "💾 Guardar Parâmetros";
+        }
+      });
+    }
+
+    const btnManualDodge = document.getElementById("btn-trigger-manual-dodge");
+    if (btnManualDodge) {
+      btnManualDodge.addEventListener("click", async () => {
+        if (!confirm("Tem a certeza que deseja desviar todas as tropas da aldeia ativa agora?")) {
+          return;
+        }
+        btnManualDodge.disabled = true;
+        btnManualDodge.textContent = "A desviar...";
+        try {
+          const res = await window.api.triggerManualDodge();
+          if (res.status === "success") {
+            addLogEntry("SUCCESS", "defense", `⚡ ${res.message}`);
+            loadDefenseData();
+          } else {
+            addLogEntry("CRITICAL", "defense", `Falha no desvio manual: ${res.message}`);
+          }
+        } catch (e) {
+          addLogEntry("CRITICAL", "defense", `Erro ao disparar desvio manual: ${e.message}`);
+        } finally {
+          btnManualDodge.disabled = false;
+          btnManualDodge.textContent = "⚡ Desviar Tropas Agora";
+        }
+      });
+    }
+  }
+
+  // Inicializa listeners de Defesa
+  setupDefenseEventListeners();
+
+  // =========================================================================
+  // Módulo de Táticas de Combate & Sincronização ao Milissegundo (Ponto 2.9)
+  // =========================================================================
+
+  function updateCombatState(combatData) {
+    if (!combatData) return;
+
+    // 1. Telemetria do Relógio
+    const stats = combatData.clock_stats || {};
+    const rttVal = document.getElementById("combat-rtt-val");
+    const rttStatus = document.getElementById("combat-rtt-status");
+    const offsetVal = document.getElementById("combat-offset-val");
+    const samplesVal = document.getElementById("combat-samples-val");
+    const syncBadge = document.getElementById("combat-sync-state-badge");
+
+    if (rttVal && stats.rtt_ms !== undefined) {
+      rttVal.textContent = stats.rtt_ms.toFixed(1);
+      if (stats.rtt_ms < 60) {
+        rttVal.style.color = "var(--neon-cyan)";
+        if (rttStatus) {
+          rttStatus.textContent = "● Conexão Excelente";
+          rttStatus.style.color = "#34d399";
+        }
+      } else if (stats.rtt_ms < 150) {
+        rttVal.style.color = "#fbbf24";
+        if (rttStatus) {
+          rttStatus.textContent = "● Conexão Razoável";
+          rttStatus.style.color = "#fbbf24";
+        }
+      } else {
+        rttVal.style.color = "#f87171";
+        if (rttStatus) {
+          rttStatus.textContent = "● Latência Alta";
+          rttStatus.style.color = "#f87171";
+        }
+      }
+    }
+
+    if (offsetVal && stats.clock_offset_seconds !== undefined) {
+      const sign = stats.clock_offset_seconds >= 0 ? "+" : "";
+      offsetVal.textContent = `${sign}${stats.clock_offset_seconds.toFixed(3)}`;
+    }
+
+    if (samplesVal && stats.samples_count !== undefined) {
+      samplesVal.textContent = stats.samples_count;
+    }
+
+    if (syncBadge) {
+      syncBadge.textContent = stats.is_synchronized ? "● Sincronizado" : "○ Não Sincronizado";
+      syncBadge.style.color = stats.is_synchronized ? "#34d399" : "var(--text-muted)";
+    }
+
+    // 2. Parâmetros de Configuração
+    const cfg = combatData.config || {};
+    const gapInput = document.getElementById("input-noble-train-gap");
+    if (gapInput && document.activeElement !== gapInput && cfg.noble_train_gap_ms) {
+      gapInput.value = cfg.noble_train_gap_ms;
+    }
+    const failsafeInput = document.getElementById("input-noble-train-failsafe");
+    if (failsafeInput && document.activeElement !== failsafeInput && cfg.failsafe_max_spread_ms) {
+      failsafeInput.value = cfg.failsafe_max_spread_ms;
+    }
+
+    // 3. Fila de Operações Táticas
+    renderTacticalOperationsTable(combatData.operations || []);
+  }
+
+  function renderTacticalOperationsTable(operations) {
+    const tbody = document.getElementById("tactical-operations-tbody");
+    if (!tbody) return;
+
+    const list = operations || [];
+    const badge = document.getElementById("tab-combat-badge");
+    const activeCount = list.filter(op => op.status === "scheduled" || op.status === "executing").length;
+    if (badge) {
+      badge.textContent = activeCount;
+      if (activeCount > 0) badge.classList.remove("hidden");
+      else badge.classList.add("hidden");
+    }
+
+    if (list.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" style="padding: 24px; text-align: center; color: var(--text-muted);">
+            Nenhuma operação tática agendada no momento.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = list.map((op) => {
+      let typeBadge = `<span class="tactical-badge tactical-badge-train">🚀 Noble Train</span>`;
+      if (op.operation_type === "backtime") {
+        typeBadge = `<span class="tactical-badge tactical-badge-backtime">⏱️ Backtime</span>`;
+      } else if (op.operation_type.includes("snipe")) {
+        typeBadge = `<span class="tactical-badge tactical-badge-snipe">🎯 Sniper</span>`;
+      }
+
+      let statusBadge = `<span class="tactical-badge tactical-status-scheduled">Agendado</span>`;
+      if (op.status === "completed") {
+        statusBadge = `<span class="tactical-badge tactical-status-completed">✓ Concluído</span>`;
+      } else if (op.status === "executing") {
+        statusBadge = `<span class="tactical-badge tactical-status-executing">⚡ A Disparar</span>`;
+      } else if (op.status.includes("cancelled")) {
+        statusBadge = `<span class="tactical-badge tactical-status-cancelled">Cancelado</span>`;
+      } else if (op.status === "failed") {
+        statusBadge = `<span class="tactical-badge tactical-status-cancelled">Falha</span>`;
+      }
+
+      const driftText = op.details?.actual_spread_ms !== undefined
+        ? `Spread: ${op.details.actual_spread_ms}ms`
+        : (op.sub_commands?.[0]?.drift_ms !== undefined ? `Drift: ${op.sub_commands[0].drift_ms}ms` : "--");
+
+      const timeStr = op.scheduled_launch_time
+        ? new Date(op.scheduled_launch_time * 1000).toLocaleTimeString()
+        : "Imediato";
+
+      const canCancel = op.status === "scheduled" || op.status === "preparing";
+
+      return `
+        <tr style="border-bottom: 1px solid var(--border-glass);">
+          <td style="padding: 10px 14px; font-family: var(--font-mono); font-weight: 700; color: #fff;">
+            ${escapeHtml(op.operation_id)}
+          </td>
+          <td style="padding: 10px 14px;">${typeBadge}</td>
+          <td style="padding: 10px 14px;">Aldeia ${escapeHtml(String(op.village_id))}</td>
+          <td style="padding: 10px 14px; font-family: var(--font-mono); color: var(--neon-cyan);">
+            ${escapeHtml(op.target_coords)}
+          </td>
+          <td style="padding: 10px 14px; color: var(--text-muted); font-family: var(--font-mono);">
+            ${timeStr}
+          </td>
+          <td style="padding: 10px 14px; font-family: var(--font-mono); font-weight: 700; color: #34d399;">
+            ${escapeHtml(driftText)}
+          </td>
+          <td style="padding: 10px 14px;">${statusBadge}</td>
+          <td style="padding: 10px 14px;">
+            ${canCancel ? `
+              <button class="btn btn-warning btn-sm btn-cancel-operation" data-opid="${escapeHtml(op.operation_id)}" style="padding: 3px 8px; font-size: 0.72rem;">
+                Cancelar
+              </button>
+            ` : '<span style="color: var(--text-muted); font-size: 0.75rem;">--</span>'}
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    tbody.querySelectorAll(".btn-cancel-operation").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const opId = btn.getAttribute("data-opid");
+        btn.disabled = true;
+        try {
+          const res = await window.api.cancelTacticalOperation(opId);
+          if (res.status === "success") {
+            addLogEntry("INFO", "combat", `Operação ${opId} cancelada.`);
+            loadCombatData();
+          } else {
+            addLogEntry("CRITICAL", "combat", `Erro ao cancelar operação: ${res.message}`);
+          }
+        } catch (e) {
+          addLogEntry("CRITICAL", "combat", `Erro na requisição: ${e.message}`);
+        }
+      });
+    });
+  }
+
+  function renderSnipeSuggestions(suggestions) {
+    const listEl = document.getElementById("snipes-list");
+    const emptyEl = document.getElementById("snipes-empty-msg");
+    if (!listEl || !emptyEl) return;
+
+    if (!suggestions || suggestions.length === 0) {
+      emptyEl.style.display = "block";
+      listEl.style.display = "none";
+      return;
+    }
+
+    emptyEl.style.display = "none";
+    listEl.style.display = "grid";
+
+    listEl.innerHTML = suggestions.map((s) => {
+      const isSupport = s.snipe_type === "support";
+      const typeLabel = isSupport ? "🛡️ Support Snipe (Aldeia Vizinha)" : "🔙 Return Snipe (Cancelamento Local)";
+      const gapHighlight = `<strong style="color: #f87171; font-family: var(--font-mono);">${s.window_gap_ms} ms</strong>`;
+
+      return `
+        <div class="snipe-card">
+          <div>
+            <div style="font-weight: 700; color: #fff; font-size: 0.88rem; display: flex; align-items: center; gap: 8px;">
+              <span>${typeLabel}</span>
+              <span class="badge" style="background: rgba(239,68,68,0.2); color: #fca5a5;">Janela: ${gapHighlight}</span>
+            </div>
+            <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 4px;">
+              Alvo: <strong style="color: var(--neon-cyan);">${escapeHtml(s.target_coords)}</strong> | 
+              Origem: <strong>${escapeHtml(s.source_village_coords)}</strong> | 
+              ${isSupport ? `Unidade: <strong>${escapeHtml(s.slowest_unit)}</strong> | Disparo em: <strong style="color: #34d399;">${s.time_until_launch_seconds}s</strong>` : escapeHtml(s.explanation || "")}
+            </div>
+          </div>
+          <div>
+            <button class="btn btn-primary btn-sm btn-arm-snipe" style="padding: 6px 12px; font-weight: 600;">
+              🎯 Armar Intercalação
+            </button>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  async function loadCombatData() {
+    try {
+      const res = await window.api.getCombatStatus();
+      if (res && res.status === "success") {
+        updateCombatState(res);
+      }
+    } catch (e) {
+      console.warn("Falha ao carregar status de combate:", e);
+    }
+  }
+
+  function setupCombatEventListeners() {
+    // 1. Ping de Sincronização
+    const btnSyncClock = document.getElementById("btn-sync-clock-now");
+    if (btnSyncClock) {
+      btnSyncClock.addEventListener("click", async () => {
+        btnSyncClock.disabled = true;
+        btnSyncClock.innerHTML = "<span>🔄</span> A sincronizar...";
+        try {
+          const res = await window.api.pingClockSync();
+          if (res.status === "success") {
+            addLogEntry("SUCCESS", "combat", `Relógio sincronizado! RTT: ${res.clock_stats.rtt_ms}ms, Offset: ${res.clock_stats.clock_offset_seconds}s.`);
+            updateCombatState({ clock_stats: res.clock_stats });
+          } else {
+            addLogEntry("CRITICAL", "combat", `Falha ao sincronizar relógio: ${res.message}`);
+          }
+        } catch (e) {
+          addLogEntry("CRITICAL", "combat", `Erro na sincronização: ${e.message}`);
+        } finally {
+          btnSyncClock.disabled = false;
+          btnSyncClock.innerHTML = "<span>🔄</span> Sincronizar Relógio (Ping)";
+        }
+      });
+    }
+
+    // 2. Disparar Noble Train
+    const btnLaunchTrain = document.getElementById("btn-launch-noble-train");
+    if (btnLaunchTrain) {
+      btnLaunchTrain.addEventListener("click", async () => {
+        const targetCoords = document.getElementById("input-noble-train-target")?.value.trim();
+        if (!targetCoords || !targetCoords.includes("|")) {
+          alert("Por favor informe as coordenadas do alvo no formato xxx|yyy.");
+          return;
+        }
+
+        const trainSize = parseInt(document.getElementById("select-noble-train-size")?.value, 10) || 4;
+        const gap = parseInt(document.getElementById("input-noble-train-gap")?.value, 10) || 100;
+        const failsafeSpread = parseInt(document.getElementById("input-noble-train-failsafe")?.value, 10) || 400;
+
+        if (!confirm(`Confirma o disparo de um Comboio de ${trainSize} Nobres para (${targetCoords}) com gap de ${gap}ms e Fail-Safe em ${failsafeSpread}ms?`)) {
+          return;
+        }
+
+        btnLaunchTrain.disabled = true;
+        btnLaunchTrain.textContent = "🚀 A preparar e disparar...";
+        try {
+          const res = await window.api.launchNobleTrain({
+            target_coords: targetCoords,
+            train_size: trainSize,
+            gap_ms: gap,
+            failsafe_enabled: true,
+            failsafe_max_spread_ms: failsafeSpread,
+          });
+
+          if (res.status === "success") {
+            addLogEntry("SUCCESS", "combat", `🚀 Noble Train executado com sucesso para (${targetCoords})!`);
+          } else {
+            addLogEntry("WARN", "combat", `⚠️ Noble Train: ${res.message}`);
+          }
+          loadCombatData();
+        } catch (e) {
+          addLogEntry("CRITICAL", "combat", `Erro no disparo do Noble Train: ${e.message}`);
+        } finally {
+          btnLaunchTrain.disabled = false;
+          btnLaunchTrain.textContent = "🚀 Disparar Noble Train Agora";
+        }
+      });
+    }
+
+    // 3. Calcular Backtime
+    const btnCalcBacktime = document.getElementById("btn-calc-backtime");
+    if (btnCalcBacktime) {
+      btnCalcBacktime.addEventListener("click", async () => {
+        const targetCoords = document.getElementById("input-backtime-target")?.value.trim();
+        const timeVal = document.getElementById("input-backtime-time")?.value;
+        const slowest = document.getElementById("select-backtime-slowest-unit")?.value || "light";
+
+        if (!targetCoords || !timeVal) {
+          alert("Por favor preencha o alvo e a hora de regresso do inimigo.");
+          return;
+        }
+
+        const parts = timeVal.split(":");
+        const now = new Date();
+        const targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parseInt(parts[0], 10), parseInt(parts[1], 10), parseInt(parts[2] || "0", 10));
+        let enemyReturnTs = targetDate.getTime() / 1000;
+        if (enemyReturnTs < Date.now() / 1000) {
+          enemyReturnTs += 86400; // Amanhã se hora já passou hoje
+        }
+
+        try {
+          const res = await window.api.calculateBacktime({
+            target_coords: targetCoords,
+            enemy_return_server_ts: enemyReturnTs,
+            slowest_unit: slowest,
+          });
+
+          if (res.status === "success" && res.calculation) {
+            const calc = res.calculation;
+            document.getElementById("backtime-dist").textContent = `${calc.distance_fields} campos`;
+            const h = Math.floor(calc.travel_duration_seconds / 3600);
+            const m = Math.floor((calc.travel_duration_seconds % 3600) / 60);
+            const s = Math.floor(calc.travel_duration_seconds % 60);
+            document.getElementById("backtime-dur").textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+            document.getElementById("backtime-launch").textContent = new Date(calc.launch_local_ts * 1000).toLocaleTimeString();
+            addLogEntry("INFO", "combat", `Backtime calculado: partida às ${new Date(calc.launch_local_ts * 1000).toLocaleTimeString()} (em ${calc.time_until_launch_seconds}s).`);
+          } else {
+            alert(res.message || "Erro no cálculo de backtime.");
+          }
+        } catch (e) {
+          alert(`Erro: ${e.message}`);
+        }
+      });
+    }
+
+    // 4. Agendar Backtime
+    const btnScheduleBacktime = document.getElementById("btn-schedule-backtime");
+    if (btnScheduleBacktime) {
+      btnScheduleBacktime.addEventListener("click", async () => {
+        const targetCoords = document.getElementById("input-backtime-target")?.value.trim();
+        const timeVal = document.getElementById("input-backtime-time")?.value;
+        const slowest = document.getElementById("select-backtime-slowest-unit")?.value || "light";
+
+        if (!targetCoords || !timeVal) {
+          alert("Por favor calcule primeiro os parâmetros de backtime.");
+          return;
+        }
+
+        const parts = timeVal.split(":");
+        const now = new Date();
+        const targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parseInt(parts[0], 10), parseInt(parts[1], 10), parseInt(parts[2] || "0", 10));
+        let enemyReturnTs = targetDate.getTime() / 1000;
+        if (enemyReturnTs < Date.now() / 1000) {
+          enemyReturnTs += 86400;
+        }
+
+        try {
+          const res = await window.api.scheduleBacktime({
+            target_coords: targetCoords,
+            enemy_return_server_ts: enemyReturnTs,
+            slowest_unit: slowest,
+          });
+          if (res.status === "success") {
+            addLogEntry("SUCCESS", "combat", `⏱️ Backtime agendado com sucesso! Operação: ${res.operation.operation_id}.`);
+            loadCombatData();
+          } else {
+            alert(res.message || "Falha ao agendar backtime.");
+          }
+        } catch (e) {
+          alert(`Erro: ${e.message}`);
+        }
+      });
+    }
+
+    // 5. Analisar Incomings para Sniper
+    const btnAnalyzeSnipes = document.getElementById("btn-analyze-snipes-now");
+    if (btnAnalyzeSnipes) {
+      btnAnalyzeSnipes.addEventListener("click", async () => {
+        btnAnalyzeSnipes.disabled = true;
+        btnAnalyzeSnipes.innerHTML = "<span>🔄</span> A analisar...";
+        try {
+          const res = await window.api.analyzeSnipes();
+          if (res.status === "success") {
+            renderSnipeSuggestions(res.suggestions || []);
+            addLogEntry("INFO", "combat", `Análise concluída: ${res.suggestions?.length || 0} oportunidade(s) de sniper identificadas.`);
+          }
+        } catch (e) {
+          addLogEntry("CRITICAL", "combat", `Erro ao analisar snipes: ${e.message}`);
+        } finally {
+          btnAnalyzeSnipes.disabled = false;
+          btnAnalyzeSnipes.innerHTML = "<span>🔄</span> Analisar Incomings para Sniper";
+        }
+      });
+    }
+
+    // 6. Guardar Padrões de Combate
+    const btnSaveCombatConfig = document.getElementById("btn-save-combat-config");
+    if (btnSaveCombatConfig) {
+      btnSaveCombatConfig.addEventListener("click", async () => {
+        const gap = parseInt(document.getElementById("input-noble-train-gap")?.value, 10) || 100;
+        const failsafeSpread = parseInt(document.getElementById("input-noble-train-failsafe")?.value, 10) || 400;
+
+        try {
+          const res = await window.api.updateCombatConfig({
+            noble_train_gap_ms: gap,
+            failsafe_enabled: true,
+            failsafe_max_spread_ms: failsafeSpread,
+          });
+          if (res.status === "success") {
+            addLogEntry("SUCCESS", "combat", `Configurações de combate gravadas: gap ${gap}ms, fail-safe ${failsafeSpread}ms.`);
+          }
+        } catch (e) {
+          addLogEntry("CRITICAL", "combat", `Erro ao gravar configurações: ${e.message}`);
+        }
+      });
+    }
+  }
+
+  // Inicializa listeners de Combate
+  setupCombatEventListeners();
+
+  // =========================================================================
+  // Coleta de Recursos / Scavenging (Ponto 2.4 & Fase 4)
+  // =========================================================================
+
+  let scavengeCountdownInterval = null;
+  let scavengeStateCache = null;
+
+  async function loadScavengeData() {
+    try {
+      const res = await window.api.getScavengeStatus();
+      if (res && res.status === "success") {
+        scavengeStateCache = res;
+        renderScavengeCards(res.options || [], res.available_troops || {});
+        updateScavengeConfigUI(res.config || {});
+        updateScavengeTroopsUI(res.available_troops || {});
+      }
+    } catch (e) {
+      console.error("Erro ao carregar dados de Coleta:", e);
+    }
+  }
+
+  function renderScavengeCards(options, availableTroops) {
+    const container = document.getElementById("scavenge-options-container");
+    if (!container) return;
+
+    if (!options.length) {
+      container.innerHTML = `<div style="grid-column: 1 / -1; text-align: center; padding: 24px; color: var(--text-muted);">Nenhuma categoria de coleta encontrada na aldeia ativa.</div>`;
+      return;
+    }
+
+    const summaryText = document.getElementById("scavenge-summary-text");
+    const activeCount = options.filter(o => o.is_scavenging).length;
+    if (summaryText) {
+      summaryText.textContent = `${activeCount} de ${options.length} expedições ativas no momento`;
+    }
+
+    let html = "";
+    options.forEach(opt => {
+      let cardClass = "scavenge-card";
+      let statusBadge = "";
+      let actionArea = "";
+
+      if (opt.is_locked) {
+        cardClass += " locked";
+        statusBadge = `<span class="badge" style="background: rgba(148, 163, 184, 0.2); color: #94a3b8;">🔒 Bloqueado</span>`;
+        actionArea = `
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin: 10px 0;">
+            Custo: 🪵 ${opt.unlock_cost?.wood || 0} 🧱 ${opt.unlock_cost?.stone || 0} ⛏️ ${opt.unlock_cost?.iron || 0}
+          </div>
+          <button class="btn btn-secondary btn-scavenge-unlock" data-option-id="${opt.id}" style="width: 100%;">
+            🔓 Desbloquear Categoria
+          </button>
+        `;
+      } else if (opt.is_scavenging) {
+        cardClass += " active";
+        statusBadge = `<span class="badge info">⏳ Em Expedição</span>`;
+        const mins = Math.floor(opt.time_remaining_seconds / 60);
+        const secs = opt.time_remaining_seconds % 60;
+        const timeFormatted = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        actionArea = `
+          <div class="scavenge-timer-box" data-seconds="${opt.time_remaining_seconds}">
+            Retorno em: <span class="scav-timer-display">${timeFormatted}</span>
+          </div>
+        `;
+      } else {
+        cardClass += " ready";
+        statusBadge = `<span class="badge success">✅ Pronta</span>`;
+        actionArea = `
+          <div style="font-size: 0.82rem; color: var(--text-muted); margin: 12px 0;">
+            Aguardando próximo ciclo ou disparo manual para cálculo ótimo de envio simultâneo.
+          </div>
+        `;
+      }
+
+      html += `
+        <div class="${cardClass}" id="scav-opt-${opt.id}">
+          <div>
+            <div class="scavenge-card-header">
+              <span style="font-weight: 700; font-size: 1rem;">${opt.name}</span>
+              <span class="scavenge-ratio-badge">${Math.round(opt.loot_ratio * 100)}% Saque</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 0.8rem; color: var(--text-muted);">${opt.description || 'Expedição'}</span>
+              ${statusBadge}
+            </div>
+          </div>
+          <div>
+            ${actionArea}
+          </div>
+        </div>
+      `;
+    });
+
+    container.innerHTML = html;
+
+    // Attach unlock listeners
+    container.querySelectorAll(".btn-scavenge-unlock").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const optId = e.currentTarget.getAttribute("data-option-id");
+        btn.disabled = true;
+        btn.textContent = "A desbloquear...";
+        try {
+          const res = await window.api.unlockScavengeOption(optId);
+          if (res && res.status === "success") {
+            addLogEntry("INFO", "scavenge", `Categoria ${optId} desbloqueada com sucesso!`);
+            await loadScavengeData();
+          } else {
+            addLogEntry("WARNING", "scavenge", `Não foi possível desbloquear a categoria ${optId}.`);
+            btn.disabled = false;
+            btn.textContent = "🔓 Desbloquear Categoria";
+          }
+        } catch (err) {
+          addLogEntry("CRITICAL", "scavenge", `Erro ao desbloquear categoria: ${err.message}`);
+          btn.disabled = false;
+        }
+      });
+    });
+
+    // Start countdown if not already running
+    if (!scavengeCountdownInterval) {
+      scavengeCountdownInterval = setInterval(() => {
+        const timerDisplays = document.querySelectorAll(".scavenge-timer-box");
+        timerDisplays.forEach(box => {
+          let secs = parseInt(box.getAttribute("data-seconds"), 10);
+          if (secs > 0) {
+            secs--;
+            box.setAttribute("data-seconds", secs);
+            const mins = Math.floor(secs / 60);
+            const remSecs = secs % 60;
+            const displaySpan = box.querySelector(".scav-timer-display");
+            if (displaySpan) {
+              displaySpan.textContent = `${String(mins).padStart(2, '0')}:${String(remSecs).padStart(2, '0')}`;
+            }
+          }
+        });
+      }, 1000);
+    }
+  }
+
+  function updateScavengeConfigUI(cfg) {
+    const autoToggle = document.getElementById("toggle-scavenge-auto");
+    const autoUnlock = document.getElementById("scav-auto-unlock");
+    const minSpear = document.getElementById("scav-min-spear");
+    const minSword = document.getElementById("scav-min-sword");
+    const globalStatus = document.getElementById("scavenge-global-status");
+
+    if (autoToggle) autoToggle.checked = Boolean(cfg.enabled);
+    if (autoUnlock) autoUnlock.checked = Boolean(cfg.auto_unlock);
+    if (minSpear) minSpear.value = cfg.min_reserved_units?.spear || 10;
+    if (minSword) minSword.value = cfg.min_reserved_units?.sword || 10;
+
+    if (globalStatus) {
+      if (cfg.enabled) {
+        globalStatus.textContent = "Ativo";
+        globalStatus.className = "badge success";
+      } else {
+        globalStatus.textContent = "Inativo";
+        globalStatus.className = "badge";
+      }
+    }
+  }
+
+  function updateScavengeTroopsUI(troops) {
+    const container = document.getElementById("scavenge-troops-summary");
+    if (!container) return;
+    const names = { spear: "Lança", sword: "Espada", axe: "Machado", archer: "Arqueiro", light: "Cav. Leve" };
+    let html = "";
+    for (const [u, count] of Object.entries(troops)) {
+      if (names[u]) {
+        html += `
+          <div style="background: var(--surface-hover); border: 1px solid var(--border-glass); border-radius: 6px; padding: 8px 14px; min-width: 90px; text-align: center;">
+            <div style="font-size: 0.75rem; color: var(--text-muted);">${names[u]}</div>
+            <div style="font-weight: 700; font-size: 1.1rem; color: var(--text);">${count}</div>
+          </div>
+        `;
+      }
+    }
+    container.innerHTML = html || `<span style="color: var(--text-muted);">Nenhuma tropa disponível no momento.</span>`;
+  }
+
+  function setupScavengeEventListeners() {
+    const autoToggle = document.getElementById("toggle-scavenge-auto");
+    if (autoToggle) {
+      autoToggle.addEventListener("change", async (e) => {
+        try {
+          await window.api.toggleScavengeModule({ enabled: e.target.checked });
+          addLogEntry("INFO", "scavenge", `Auto-Coleta ${e.target.checked ? 'ativada' : 'desativada'}.`);
+          await loadScavengeData();
+        } catch (err) {
+          addLogEntry("CRITICAL", "scavenge", `Erro ao alterar auto-coleta: ${err.message}`);
+        }
+      });
+    }
+
+    const btnTrigger = document.getElementById("btn-scavenge-trigger-now");
+    if (btnTrigger) {
+      btnTrigger.addEventListener("click", async () => {
+        btnTrigger.disabled = true;
+        btnTrigger.textContent = "A despachar...";
+        try {
+          const res = await window.api.triggerScavengeCycle();
+          if (res && res.status === "success") {
+            const count = res.sent_expeditions?.length || 0;
+            addLogEntry("INFO", "scavenge", `⚡ Ronda de coleta disparada: ${count} expedição(ões) enviada(s)!`);
+          } else {
+            addLogEntry("WARNING", "scavenge", `Nenhuma expedição enviada: ${res.reason || 'sem tropas ou categorias prontas'}.`);
+          }
+          await loadScavengeData();
+        } catch (err) {
+          addLogEntry("CRITICAL", "scavenge", `Falha ao disparar coleta: ${err.message}`);
+        } finally {
+          btnTrigger.disabled = false;
+          btnTrigger.textContent = "⚡ Disparar Ronda Imediata";
+        }
+      });
+    }
+
+    const btnRefresh = document.getElementById("btn-scavenge-refresh");
+    if (btnRefresh) {
+      btnRefresh.addEventListener("click", () => loadScavengeData());
+    }
+
+    const btnSave = document.getElementById("btn-scavenge-save-config");
+    if (btnSave) {
+      btnSave.addEventListener("click", async () => {
+        const eligible = [];
+        if (document.getElementById("scav-unit-spear")?.checked) eligible.push("spear");
+        if (document.getElementById("scav-unit-sword")?.checked) eligible.push("sword");
+        if (document.getElementById("scav-unit-axe")?.checked) eligible.push("axe");
+        if (document.getElementById("scav-unit-archer")?.checked) eligible.push("archer");
+        if (document.getElementById("scav-unit-light")?.checked) eligible.push("light");
+
+        const minSpear = parseInt(document.getElementById("scav-min-spear")?.value || "10", 10);
+        const minSword = parseInt(document.getElementById("scav-min-sword")?.value || "10", 10);
+        const autoUnlock = Boolean(document.getElementById("scav-auto-unlock")?.checked);
+
+        try {
+          await window.api.toggleScavengeModule({
+            eligible_units: eligible,
+            min_reserved_units: { spear: minSpear, sword: minSword },
+            auto_unlock: autoUnlock,
+          });
+          addLogEntry("INFO", "scavenge", "Definições de coleta guardadas com sucesso.");
+          await loadScavengeData();
+        } catch (err) {
+          addLogEntry("CRITICAL", "scavenge", `Erro ao guardar definições de coleta: ${err.message}`);
+        }
+      });
+    }
+  }
+
+  // =========================================================================
+  // Academia & Cunha de Moedas (Ponto 2.6 & Fase 4)
+  // =========================================================================
+
+  let snobStateCache = null;
+
+  async function loadSnobData() {
+    try {
+      const res = await window.api.getSnobStatus();
+      if (res && res.status === "success") {
+        snobStateCache = res;
+        updateSnobUI(res.snob_state || {}, res.config || {});
+      }
+    } catch (e) {
+      console.error("Erro ao carregar dados da Academia:", e);
+    }
+  }
+
+  function updateSnobUI(state, cfg) {
+    const elMinted = document.getElementById("snob-coins-minted");
+    const elNext = document.getElementById("snob-coins-next");
+    const elNobles = document.getElementById("snob-nobles-count");
+    const elProd = document.getElementById("snob-nobles-prod");
+    const mintInput = document.getElementById("snob-mint-count");
+
+    if (elMinted) elMinted.textContent = state.coins_minted ?? "--";
+    if (elNext) elNext.textContent = state.coins_next_noble ?? "--";
+    if (elNobles) elNobles.textContent = state.nobles_count ?? "--";
+    if (elProd) elProd.textContent = state.nobles_in_production ?? "--";
+
+    if (mintInput && state.max_mintable > 0) {
+      mintInput.max = state.max_mintable;
+    }
+
+    const autoMintToggle = document.getElementById("toggle-snob-auto-mint");
+    const autoRecruitToggle = document.getElementById("toggle-snob-auto-recruit");
+    const thresholdSlider = document.getElementById("snob-storage-threshold");
+    const thresholdLabel = document.getElementById("snob-storage-pct-label");
+
+    if (autoMintToggle) autoMintToggle.checked = Boolean(cfg.auto_mint_enabled);
+    if (autoRecruitToggle) autoRecruitToggle.checked = Boolean(cfg.auto_recruit_nobles);
+    if (thresholdSlider) thresholdSlider.value = cfg.storage_threshold_percent || 85;
+    if (thresholdLabel) thresholdLabel.textContent = `${cfg.storage_threshold_percent || 85}%`;
+  }
+
+  function setupSnobEventListeners() {
+    const thresholdSlider = document.getElementById("snob-storage-threshold");
+    const thresholdLabel = document.getElementById("snob-storage-pct-label");
+    if (thresholdSlider && thresholdLabel) {
+      thresholdSlider.addEventListener("input", (e) => {
+        thresholdLabel.textContent = `${e.target.value}%`;
+      });
+    }
+
+    const btnMintNow = document.getElementById("btn-snob-mint-now");
+    if (btnMintNow) {
+      btnMintNow.addEventListener("click", async () => {
+        const count = parseInt(document.getElementById("snob-mint-count")?.value || "1", 10);
+        btnMintNow.disabled = true;
+        try {
+          const res = await window.api.mintSnobCoins(count);
+          if (res && res.status === "success") {
+            addLogEntry("INFO", "snob", `👑 ${count} moeda(s) de ouro cunhada(s) com sucesso!`);
+          } else {
+            addLogEntry("WARNING", "snob", `Falha ao cunhar moedas.`);
+          }
+          await loadSnobData();
+        } catch (err) {
+          addLogEntry("CRITICAL", "snob", `Erro ao cunhar moedas: ${err.message}`);
+        } finally {
+          btnMintNow.disabled = false;
+        }
+      });
+    }
+
+    const btnRecruitNow = document.getElementById("btn-snob-recruit-now");
+    if (btnRecruitNow) {
+      btnRecruitNow.addEventListener("click", async () => {
+        btnRecruitNow.disabled = true;
+        try {
+          const res = await window.api.recruitSnobNobleman();
+          if (res && res.status === "success") {
+            addLogEntry("INFO", "snob", "🏰 Recrutamento de 1 Nobre iniciado com sucesso!");
+          } else {
+            addLogEntry("WARNING", "snob", "Falha ao recrutar Nobre.");
+          }
+          await loadSnobData();
+        } catch (err) {
+          addLogEntry("CRITICAL", "snob", `Erro ao recrutar Nobre: ${err.message}`);
+        } finally {
+          btnRecruitNow.disabled = false;
+        }
+      });
+    }
+
+    document.getElementById("btn-snob-mint-quick-1")?.addEventListener("click", () => {
+      const el = document.getElementById("snob-mint-count");
+      if (el) el.value = 1;
+    });
+    document.getElementById("btn-snob-mint-quick-5")?.addEventListener("click", () => {
+      const el = document.getElementById("snob-mint-count");
+      if (el) el.value = 5;
+    });
+    document.getElementById("btn-snob-mint-quick-max")?.addEventListener("click", () => {
+      const el = document.getElementById("snob-mint-count");
+      if (el && snobStateCache?.snob_state?.max_mintable) {
+        el.value = snobStateCache.snob_state.max_mintable;
+      }
+    });
+
+    const btnSaveSnob = document.getElementById("btn-snob-save-config");
+    if (btnSaveSnob) {
+      btnSaveSnob.addEventListener("click", async () => {
+        const autoMint = Boolean(document.getElementById("toggle-snob-auto-mint")?.checked);
+        const autoRecruit = Boolean(document.getElementById("toggle-snob-auto-recruit")?.checked);
+        const threshold = parseFloat(document.getElementById("snob-storage-threshold")?.value || "85");
+        try {
+          await window.api.updateSnobConfig({
+            auto_mint_enabled: autoMint,
+            auto_recruit_nobles: autoRecruit,
+            storage_threshold_percent: threshold,
+          });
+          addLogEntry("INFO", "snob", "Definições da Academia guardadas com sucesso.");
+          await loadSnobData();
+        } catch (err) {
+          addLogEntry("CRITICAL", "snob", `Erro ao gravar definições da Academia: ${err.message}`);
+        }
+      });
+    }
+
+    document.getElementById("btn-snob-refresh")?.addEventListener("click", () => loadSnobData());
+  }
+
+  // =========================================================================
+  // Visualizador de Inventário & Gestão de Itens (Ponto 2.10 & Fase 4)
+  // =========================================================================
+
+  async function loadInventoryData(forceRefresh = false) {
+    try {
+      const res = await window.api.getInventoryItems(forceRefresh);
+      if (res && res.status === "success") {
+        renderInventoryItems(res.items || []);
+      }
+    } catch (e) {
+      console.error("Erro ao carregar inventário:", e);
+    }
+  }
+
+  function renderInventoryItems(items) {
+    const container = document.getElementById("inventory-items-container");
+    const badge = document.getElementById("inventory-count-badge");
+    const tabBadge = document.getElementById("tab-inventory-badge");
+
+    if (badge) badge.textContent = `${items.length} Itens`;
+    if (tabBadge) {
+      tabBadge.textContent = items.length;
+      if (items.length > 0) tabBadge.classList.remove("hidden");
+      else tabBadge.classList.add("hidden");
+    }
+
+    if (!container) return;
+
+    if (!items.length) {
+      container.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 48px; color: var(--text-muted);">
+          🎒 O inventário da conta está vazio no momento.
+        </div>
+      `;
+      return;
+    }
+
+    let html = "";
+    items.forEach(item => {
+      const iconHtml = item.icon_url
+        ? `<img src="${item.icon_url}" alt="${item.title}" />`
+        : `🎒`;
+
+      html += `
+        <div class="inventory-card" data-item-id="${item.id}">
+          <div>
+            <div class="inventory-thumb-box">
+              <div class="inventory-icon">${iconHtml}</div>
+              <div style="flex: 1;">
+                <div style="font-weight: 700; font-size: 0.95rem; line-height: 1.2; margin-bottom: 4px;">${item.title}</div>
+                <span class="inventory-quantity-badge">Qtd: ${item.count}</span>
+              </div>
+            </div>
+            <div class="inventory-desc">${item.description || 'Item consumível de inventário.'}</div>
+          </div>
+          <div>
+            <button class="btn btn-secondary btn-use-inventory-item" data-item-id="${item.id}" data-item-title="${item.title}" style="width: 100%;">
+              ⚡ Utilizar Item
+            </button>
+          </div>
+        </div>
+      `;
+    });
+
+    container.innerHTML = html;
+
+    // Attach click listener with confirmation dialog
+    container.querySelectorAll(".btn-use-inventory-item").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const itemId = e.currentTarget.getAttribute("data-item-id");
+        const title = e.currentTarget.getAttribute("data-item-title") || "este item";
+
+        const confirmed = confirm(`Tem a certeza que deseja ativar o item "${title}"?\n\nEsta ação consumirá o item do seu inventário.`);
+        if (!confirmed) return;
+
+        btn.disabled = true;
+        btn.textContent = "A ativar...";
+        try {
+          const res = await window.api.useInventoryItem(itemId);
+          if (res && res.status === "success") {
+            addLogEntry("INFO", "inventory", `🎒 Item "${title}" ativado com sucesso!`);
+            await loadInventoryData(true);
+          } else {
+            addLogEntry("WARNING", "inventory", `Falha ao ativar o item "${title}".`);
+            btn.disabled = false;
+            btn.textContent = "⚡ Utilizar Item";
+          }
+        } catch (err) {
+          addLogEntry("CRITICAL", "inventory", `Erro ao ativar item: ${err.message}`);
+          btn.disabled = false;
+        }
+      });
+    });
+  }
+
+  function setupInventoryEventListeners() {
+    document.getElementById("btn-inventory-refresh")?.addEventListener("click", () => loadInventoryData(true));
+  }
+
+  // =========================================================================
+  // Cloud SQL & Multi-World Concurrency UI Orchestration
+  // =========================================================================
+
+  function updateTopNavVisibility(isWorkspace) {
+    const worldDropdown = document.getElementById("world-dropdown-wrapper");
+    const worldTabs = document.getElementById("world-tabs-container");
+    const btnAddWorld = document.getElementById("btn-add-world");
+    const badgeClock = document.getElementById("badge-clock");
+    const badgeStatus = document.getElementById("badge-status");
+    const btnScheduler = document.getElementById("btn-toggle-scheduler");
+    const btnLogout = document.getElementById("btn-logout");
+    const btnRefresh = document.getElementById("btn-refresh-data");
+    const btnClaim = document.getElementById("btn-claim-quests");
+
+    const displayVal = isWorkspace ? "inline-flex" : "none";
+    const displayFlex = isWorkspace ? "flex" : "none";
+
+    if (worldDropdown) worldDropdown.style.display = displayVal;
+    if (worldTabs) worldTabs.style.display = displayFlex;
+    if (btnAddWorld) btnAddWorld.style.display = displayVal;
+    if (badgeClock) badgeClock.style.display = displayFlex;
+    if (badgeStatus) badgeStatus.style.display = displayVal;
+    if (btnScheduler) btnScheduler.style.display = displayVal;
+    if (btnLogout) btnLogout.style.display = displayVal;
+    if (btnRefresh) btnRefresh.style.display = displayVal;
+    if (btnClaim) btnClaim.style.display = displayVal;
+  }
+
+  async function updateCloudUserUI() {
+    const emailEl = document.getElementById("cloud-user-email");
+    const licenseEl = document.getElementById("cloud-license-type");
+    const btnOpenAuth = document.getElementById("btn-open-cloud-auth");
+    const btnLogout = document.getElementById("btn-cloud-logout");
+
+    try {
+      const res = await window.api.getCurrentAppUser();
+
+      if (res && res.status === "success" && res.user) {
+        state.appUser = res.user;
+        if (emailEl) emailEl.innerHTML = `Utilizador: <span style="color:var(--neon-emerald); font-weight:700;">${res.user.email}</span>`;
+        if (licenseEl) licenseEl.textContent = `Licença: ${res.user.license_type.toUpperCase()} | Cloud SQL Neon (PostgreSQL 18.6)`;
+        if (btnOpenAuth) btnOpenAuth.style.display = "none";
+        if (btnLogout) btnLogout.style.display = "inline-flex";
+      } else {
+        state.appUser = null;
+        if (emailEl) emailEl.textContent = "Utilizador Não Autenticado";
+        if (licenseEl) licenseEl.textContent = "Inicie sessão ou registe-se para aceder ao sistema";
+        if (btnOpenAuth) btnOpenAuth.style.display = "inline-flex";
+        if (btnLogout) btnLogout.style.display = "none";
+      }
+    } catch (e) {
+      state.appUser = null;
+      if (emailEl) emailEl.textContent = "Utilizador Não Autenticado";
+      if (licenseEl) licenseEl.textContent = "Inicie sessão ou registe-se para aceder ao sistema";
+      if (btnOpenAuth) btnOpenAuth.style.display = "inline-flex";
+      if (btnLogout) btnLogout.style.display = "none";
+    }
+
+    const isWorkspaceVisible = (document.querySelector(".main-workspace")?.style.display !== "none");
+    updateTopNavVisibility(isWorkspaceVisible);
+  }
+
+  async function loadAndRenderWorlds() {
+    const container = document.getElementById("world-tabs-container");
+    if (!container) return;
+
+    try {
+      const res = await window.api.getGameWorlds();
+      const worlds = res?.worlds || [];
+      const activeFocus = res?.active_focus_world || state.account?.world;
+
+      if (!worlds.length) {
+        container.innerHTML = "";
+        return;
+      }
+
+      container.innerHTML = worlds.map(w => {
+        const isCurrent = w.world_code === activeFocus;
+        const worker = w.worker || {};
+        const isRunning = Boolean(worker.is_running && w.is_active);
+        const isRateLimited = Boolean(worker.is_rate_limited);
+        let statusBadge = `<span title="Worker Ativo" style="color:var(--neon-emerald)">🟢</span>`;
+        if (isRateLimited) {
+          statusBadge = `<span title="Rate Limited (${worker.rate_limit_seconds_left}s)" style="color:var(--neon-amber)">⏳</span>`;
+        } else if (!isRunning) {
+          statusBadge = `<span title="Worker Pausado" style="color:#94a3b8">⚪</span>`;
+        }
+
+        return `
+          <div class="world-tab-chip" style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 6px; background: ${isCurrent ? 'rgba(6,182,212,0.2)' : 'rgba(30,41,59,0.7)'}; border: 1px solid ${isCurrent ? 'var(--neon-cyan)' : 'var(--border-subtle)'}; font-size: 0.75rem;">
+            ${statusBadge}
+            <span class="world-code-label" data-world="${w.world_code}" style="cursor: pointer; font-weight: 700; color: ${isCurrent ? 'var(--neon-cyan)' : '#fff'}; font-family: var(--font-mono);">${w.world_code.toUpperCase()}</span>
+            <label style="cursor: pointer; margin: 0; display: inline-flex; align-items: center;" title="Ativar/Pausar execução em segundo plano deste mundo">
+              <input type="checkbox" class="world-toggle-switch" data-world="${w.world_code}" ${w.is_active ? 'checked' : ''} style="cursor: pointer; accent-color: var(--neon-cyan); transform: scale(0.85);" />
+            </label>
+          </div>
+        `;
+      }).join("");
+
+      // Event listeners para alternar foco de mundo ao clicar no código do mundo
+      container.querySelectorAll(".world-code-label").forEach(label => {
+        label.addEventListener("click", async () => {
+          const targetWorld = label.getAttribute("data-world");
+          if (targetWorld && targetWorld !== state.account?.world) {
+            state.account.world = targetWorld;
+            const badgeWorld = document.getElementById("badge-world-text");
+            if (badgeWorld) badgeWorld.textContent = targetWorld.toUpperCase();
+            await loadAndRenderCloudVillages(targetWorld);
+            await refreshStatus();
+          }
+        });
+      });
+
+      // Event listeners para o switch individual de background de cada mundo
+      container.querySelectorAll(".world-toggle-switch").forEach(switchEl => {
+        switchEl.addEventListener("change", async (e) => {
+          const worldCode = switchEl.getAttribute("data-world");
+          const isActive = switchEl.checked;
+          try {
+            await window.api.toggleGameWorld(worldCode, isActive);
+            addLogEntry("INFO", "orchestrator", `Mundo '${worldCode}' background alterado para ${isActive ? 'ATIVO' : 'PAUSADO'}.`);
+            await loadAndRenderWorlds();
+          } catch (err) {
+            alert(`Erro ao alterar estado do mundo ${worldCode}: ${err.message}`);
+            switchEl.checked = !isActive;
+          }
+        });
+      });
+
+    } catch (e) {
+      console.warn("Aviso ao carregar mundos:", e);
+    }
+  }
+
+  async function loadAndRenderCloudVillages(worldCode = null) {
+    const targetWorld = worldCode || state.account?.world || "pt117";
+    const tbody = document.getElementById("tbody-cloud-villages");
+    const badgeWorld = document.getElementById("badge-villages-world-code");
+    if (badgeWorld) badgeWorld.textContent = targetWorld.toUpperCase();
+    if (!tbody) return;
+
+    try {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 14px;"><span>⏳</span> A sincronizar aldeias do mundo ${targetWorld.toUpperCase()}...</td></tr>`;
+      const res = await window.api.getWorldVillages(targetWorld);
+      const villages = res?.villages || [];
+
+      if (!villages.length) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 18px;">Nenhuma aldeia sincronizada ainda para este mundo. O worker sincronizará no primeiro polling.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = villages.map(v => {
+        const updatedStr = v.updated_at ? new Date(v.updated_at).toLocaleString("pt-PT") : "Recentemente";
+        const currentModel = v.active_build_model_id || "default_plan";
+        return `
+          <tr style="border-bottom: 1px solid var(--border-subtle);">
+            <td style="padding: 10px 12px; font-family: var(--font-mono); color: var(--text-muted);">${v.village_game_id}</td>
+            <td style="padding: 10px 12px; font-weight: 600; color: #fff;">${v.village_name}</td>
+            <td style="padding: 10px 12px; font-family: var(--font-mono); color: var(--neon-cyan);">${v.coordinates || `${v.coord_x}|${v.coord_y}`}</td>
+            <td style="padding: 10px 12px;">
+              <select class="select-village-build-model" data-village-id="${v.id}" style="padding: 5px 10px; background: rgba(30,41,59,0.9); border: 1px solid var(--neon-cyan); border-radius: 6px; color: #fff; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
+                <option value="default_plan" ${currentModel === 'default_plan' ? 'selected' : ''}>🏛️ Padrão (Balanceado)</option>
+                <option value="rush_resources" ${currentModel === 'rush_resources' ? 'selected' : ''}>🌲 Rush Recursos (Poços 30)</option>
+                <option value="military_rush" ${currentModel === 'military_rush' ? 'selected' : ''}>⚔️ Rush Militar (Quartel/Oficina)</option>
+                <option value="balanced" ${currentModel === 'balanced' ? 'selected' : ''}>⚖️ Equilibrado (Defesa/Ataque)</option>
+              </select>
+            </td>
+            <td style="padding: 10px 12px; font-size: 0.75rem; color: var(--text-muted);">${updatedStr}</td>
+          </tr>
+        `;
+      }).join("");
+
+      // Event listeners para alteração imediata de modelo no Cloud SQL
+      tbody.querySelectorAll(".select-village-build-model").forEach(sel => {
+        sel.addEventListener("change", async () => {
+          const villageId = sel.getAttribute("data-village-id");
+          const newModel = sel.value;
+          try {
+            sel.disabled = true;
+            sel.style.borderColor = "var(--neon-amber)";
+            await window.api.updateVillageModel(villageId, newModel);
+            sel.style.borderColor = "var(--neon-emerald)";
+            addLogEntry("SUCCESS", "building", `Modelo de construção '${newModel}' atribuído com sucesso à aldeia.`);
+            setTimeout(() => { sel.style.borderColor = "var(--neon-cyan)"; }, 1500);
+          } catch (err) {
+            alert(`Erro ao atualizar modelo da aldeia: ${err.message}`);
+            sel.style.borderColor = "var(--neon-red)";
+          } finally {
+            sel.disabled = false;
+          }
+        });
+      });
+
+    } catch (e) {
+      console.warn("Aviso ao carregar aldeias do Cloud SQL:", e);
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--neon-amber); padding: 14px;">Não foi possível carregar aldeias do Cloud SQL (${e.message}).</td></tr>`;
+    }
+  }
+
+  // Funções Globais de controlo do Modal de Autenticação Cloud SQL
+  window.openCloudAuthModal = function() {
+    const modal = document.getElementById("modal-cloud-auth");
+    if (modal) modal.style.display = "flex";
+  };
+
+  window.closeCloudAuthModal = function() {
+    const modal = document.getElementById("modal-cloud-auth");
+    if (modal) modal.style.display = "none";
+  };
+
+  window.switchCloudAuthTab = function(tabName) {
+    const tabLogin = document.getElementById("tab-auth-login");
+    const tabRegister = document.getElementById("tab-auth-register");
+    const formLogin = document.getElementById("form-cloud-login");
+    const formRegister = document.getElementById("form-cloud-register");
+
+    if (tabName === "login") {
+      if (tabLogin) { tabLogin.style.background = "var(--gradient-primary)"; tabLogin.style.color = "#fff"; }
+      if (tabRegister) { tabRegister.style.background = "transparent"; tabRegister.style.color = "var(--text-muted)"; }
+      if (formLogin) formLogin.style.display = "flex";
+      if (formRegister) formRegister.style.display = "none";
+    } else {
+      if (tabRegister) { tabRegister.style.background = "var(--gradient-primary)"; tabRegister.style.color = "#fff"; }
+      if (tabLogin) { tabLogin.style.background = "transparent"; tabLogin.style.color = "var(--text-muted)"; }
+      if (formRegister) formRegister.style.display = "flex";
+      if (formLogin) formLogin.style.display = "none";
+    }
+  };
+
+  function setupCloudSqlUi() {
+    // 1. Abertura e fecho do modal de autenticação
+    const btnOpenAuth = document.getElementById("btn-open-cloud-auth");
+    const btnCloseAuth = document.getElementById("btn-close-cloud-auth");
+    const modalAuth = document.getElementById("modal-cloud-auth");
+    const btnLogout = document.getElementById("btn-cloud-logout");
+
+    btnOpenAuth?.addEventListener("click", () => window.openCloudAuthModal());
+    btnCloseAuth?.addEventListener("click", () => window.closeCloudAuthModal());
+
+    // 2. Comutação de abas Iniciar Sessão vs Registar
+    const tabLogin = document.getElementById("tab-auth-login");
+    const tabRegister = document.getElementById("tab-auth-register");
+    const formLogin = document.getElementById("form-cloud-login");
+    const formRegister = document.getElementById("form-cloud-register");
+
+    tabLogin?.addEventListener("click", () => window.switchCloudAuthTab("login"));
+    tabRegister?.addEventListener("click", () => window.switchCloudAuthTab("register"));
+
+    // 3. Submissão de Login
+    formLogin?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = document.getElementById("input-cloud-login-email")?.value;
+      const pass = document.getElementById("input-cloud-login-password")?.value;
+      const errEl = document.getElementById("cloud-login-error");
+      const submitBtn = document.getElementById("btn-submit-cloud-login");
+      if (errEl) errEl.style.display = "none";
+
+      try {
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = "<span>⏳</span> A autenticar..."; }
+        const res = await window.api.loginAppUser(email, pass);
+        if (res && res.status === "success") {
+          addLogEntry("SUCCESS", "auth", `Sessão iniciada com sucesso como ${email}!`);
+          if (modalAuth) modalAuth.style.display = "none";
+          await updateCloudUserUI();
+          await loadAndRenderAccounts();
+        } else {
+          if (errEl) { errEl.textContent = res?.message || "Credenciais inválidas."; errEl.style.display = "block"; }
+        }
+      } catch (err) {
+        if (errEl) { errEl.textContent = err.message || "Erro na autenticação."; errEl.style.display = "block"; }
+      } finally {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = "<span>🔑</span> Entrar na Aplicação"; }
+      }
+    });
+
+    // 4. Submissão de Registo
+    formRegister?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = document.getElementById("input-cloud-register-email")?.value;
+      const pass = document.getElementById("input-cloud-register-password")?.value;
+      const license = document.getElementById("select-cloud-register-license")?.value || "pro";
+      const errEl = document.getElementById("cloud-register-error");
+      const submitBtn = document.getElementById("btn-submit-cloud-register");
+      if (errEl) errEl.style.display = "none";
+
+      try {
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = "<span>⏳</span> A criar conta no Cloud SQL..."; }
+        const res = await window.api.registerAppUser(email, pass, license);
+        if (res && res.status === "success") {
+          addLogEntry("SUCCESS", "auth", `Conta de utilizador criada com sucesso no PostgreSQL!`);
+          if (modalAuth) modalAuth.style.display = "none";
+          await updateCloudUserUI();
+          await loadAndRenderAccounts();
+        } else {
+          if (errEl) { errEl.textContent = res?.message || "Erro ao criar utilizador."; errEl.style.display = "block"; }
+        }
+      } catch (err) {
+        if (errEl) { errEl.textContent = err.message || "Erro ao registar conta."; errEl.style.display = "block"; }
+      } finally {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = "<span>✨</span> Criar Conta & Persistir no Cloud SQL"; }
+      }
+    });
+
+    // 5. Logout
+    btnLogout?.addEventListener("click", async () => {
+      try {
+        await window.api.logoutAppUser();
+        addLogEntry("INFO", "auth", "Sessão terminada. Retornando ao estado de convidado.");
+        await updateCloudUserUI();
+        await loadAndRenderAccounts();
+      } catch (err) {
+        alert(`Erro ao terminar sessão: ${err.message}`);
+      }
+    });
+
+    // 6. Botão Sincronizar Aldeias do Cloud SQL
+    document.getElementById("btn-sync-cloud-villages")?.addEventListener("click", () => {
+      loadAndRenderCloudVillages(state.account?.world || "pt117");
+    });
+
+    // Atualização de dados inicial
+    updateCloudUserUI();
+  }
+
+  // Inicializa listeners dos novos módulos da Fase 4 e Cloud SQL
+  setupScavengeEventListeners();
+  setupSnobEventListeners();
+  setupInventoryEventListeners();
+  setupCloudSqlUi();
+
   let initialLoaded = false;
 
   async function refreshStatus() {
@@ -5767,8 +7686,23 @@ document.addEventListener("DOMContentLoaded", async () => {
       refreshDiscoveredWorlds();
       if (!initialLoaded) {
         initialLoaded = true;
-        // O bot arranca SEMPRE no Gestor de Contas (Hub) com todas as contas Offline
-        showAccountHub();
+        const urlParams = new URLSearchParams(window.location.search);
+        const shouldGoToDashboard = (
+          urlParams.get("view") === "dashboard" ||
+          window.location.hash === "#tab-dashboard" ||
+          sessionStorage.getItem("goto_tab") === "tab-dashboard"
+        );
+        sessionStorage.removeItem("goto_tab");
+
+        if (shouldGoToDashboard) {
+          hideAccountHub();
+          const dashBtn = document.getElementById("tab-btn-dashboard");
+          if (dashBtn) dashBtn.click();
+          updateDashboard(statusData);
+        } else {
+          // O bot arranca no Gestor de Contas (Hub) apenas no arranque a frio se não vier de login
+          showAccountHub();
+        }
       }
     } catch (e) {
       // Sidecar ainda pode estar a iniciar

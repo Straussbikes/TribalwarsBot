@@ -120,6 +120,58 @@ class TestStatsTracker(unittest.TestCase):
         self.assertEqual(summary["totals_all_time"]["total"], 0)
         self.assertEqual(summary["totals_all_time"]["villages_farmed"], 0)
 
+    def test_legacy_stats_merging(self):
+        # Simula criação de ficheiro legado stats_default_{world}.json
+        legacy_file = self.cache_dir / f"stats_default_{self.tracker.world}.json"
+        legacy_data = {
+            "world": self.tracker.world,
+            "created_at": time.time(),
+            "last_updated": time.time(),
+            "total_wood": 5000,
+            "total_stone": 5000,
+            "total_iron": 5000,
+            "total_attacks_sent": 100,
+            "total_attacks_successful": 100,
+            "total_villages_farmed": 80,
+            "hourly_buckets": {
+                "2026-09-01 12:00": {
+                    "hour_key": "2026-09-01 12:00",
+                    "timestamp": 1788200000.0,
+                    "wood": 5000,
+                    "stone": 5000,
+                    "iron": 5000,
+                    "total": 15000,
+                    "attacks_count": 100,
+                    "attacks_successful": 100,
+                    "villages_farmed": 80,
+                    "troops_recruited": 0,
+                }
+            },
+            "recent_loot_events": [
+                {
+                    "timestamp": 1788200000.0,
+                    "village_id": 1,
+                    "target_x": 500,
+                    "target_y": 500,
+                    "wood": 500,
+                    "stone": 500,
+                    "iron": 500,
+                    "total": 1500,
+                    "wall": 0,
+                    "losses": False,
+                    "village_name": "Barb",
+                }
+            ],
+            "recent_commands": [],
+        }
+        legacy_file.write_text(json.dumps(legacy_data), encoding="utf-8")
+
+        # Nova instância com account_id="profile_new" (ficheiro vazio inicialmente)
+        new_tracker = StatsTracker(world=self.tracker.world, cache_dir=self.cache_dir, account_id="profile_new")
+        self.assertEqual(new_tracker.total_looted, 15000)
+        self.assertEqual(new_tracker.total_attacks_sent, 100)
+        self.assertEqual(len(new_tracker.recent_loot_events), 1)
+
 
 class TestStatsApiRoutes(unittest.TestCase):
     """Testes para as rotas REST de estatísticas no FastAPI Sidecar."""
@@ -210,3 +262,4 @@ class TestStatsApiRoutes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

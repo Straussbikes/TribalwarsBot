@@ -5,26 +5,26 @@
   "world": "pt117",
   "domain": "tribalwars.com.pt",
   "village_id": null,
-  "session_cookie": "0%3Afca084c32db17bb7574ca8606cb1ff69b17a6c3472a7896b1c4ed4577a0988dd893a9388d25597313c5f65f09632aa138e0eaaea6355d2c15ced880c92ec9ae5",
-  "sid": "0%3Afca084c32db17bb7574ca8606cb1ff69b17a6c3472a7896b1c4ed4577a0988dd893a9388d25597313c5f65f09632aa138e0eaaea6355d2c15ced880c92ec9ae5",
+  "session_cookie": "0%3A1f589107ed2e21dd39c4457ccc3ca8b48b833e24e18dae2ce5f4b891d028b7d105a5b946337e1ce023cb93fd51a795abe4e1a356275db716c28362eb25d719c9",
+  "sid": "0%3A1f589107ed2e21dd39c4457ccc3ca8b48b833e24e18dae2ce5f4b891d028b7d105a5b946337e1ce023cb93fd51a795abe4e1a356275db716c28362eb25d719c9",
   "build_order_strategy": "default_plan",
   "building_template": "default_plan",
-  "farm_presets": {},
+  "farm_presets": [],
   "recruitment_models": {},
   "config_data": {
     "world": "pt117",
     "domain": "tribalwars.com.pt",
-    "sid": "0%3Afca084c3...",
+    "sid": "0%3A1f589107...",
     "auth": {
       "username": "",
       "has_password": false,
-      "auto_login": false,
+      "auto_login": true,
       "keep_alive": true,
       "keep_alive_interval_minutes": 15.0
     },
     "building": {
       "enabled": true,
-      "template": "custom",
+      "template": "default_plan",
       "max_queue": 2,
       "interval_seconds": 320.0,
       "custom_plan": [
@@ -1236,11 +1236,11 @@
     }
   },
   "proxy": null,
-  "username": null,
-  "password_enc": null,
+  "username": "",
+  "password_enc": "",
   "auto_login": true,
   "keep_alive": true,
-  "last_used": "2026-09-02T17:41:35.910876",
-  "created_at": "2026-09-02T17:41:33.208168",
+  "last_used": "2026-09-03T15:36:47.341529",
+  "created_at": 1788445747.167641,
   "is_active": true
 }

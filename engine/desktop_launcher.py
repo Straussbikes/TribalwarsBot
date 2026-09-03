@@ -10,6 +10,7 @@ import logging
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 import webview
@@ -95,14 +96,33 @@ class DesktopApp:
             scheduler = TaskScheduler()
             scheduler.start()
 
-            # Cria Contexto Sidecar em modo Standby / Offline
+            # Cria Contexto Sidecar Cloud-Native
             self.context = EngineContext(
                 scheduler=scheduler,
                 config=cfg,
                 account=None,
             )
-            # Assegura que todas as contas arrancam em modo Offline na base de dados SQLite
-            self.context.profile_manager.deactivate_all()
+
+            # Bootstrap Gatekeeper: Conectividade Cloud SQL obrigatória
+            try:
+                await self.context.cloud_db.init_db()
+                logger.info("[Bootstrap Gatekeeper] Conexão Cloud SQL (PostgreSQL 18.6) verificada com sucesso.")
+            except Exception as e:
+                logger.critical(f"❌ [Bootstrap Gatekeeper] Não foi possível ligar ao Cloud SQL: {e}")
+                scheduler.pause()
+
+            # Restauração de token a partir do único ficheiro local autorizado (auth.dat)
+            from engine.storage.token_storage import token_storage
+            saved_token = token_storage.load_token()
+            if saved_token:
+                try:
+                    user = await self.context.user_repo.get_by_id(saved_token)
+                    if user:
+                        self.context.current_app_user = user
+                        logger.info(f"[Bootstrap Gatekeeper] Sessão restaurada a partir de 'auth.dat': {user.email}")
+                except Exception as e:
+                    logger.debug(f"[Bootstrap Gatekeeper] Aviso ao carregar sessão de 'auth.dat': {e}")
+
             self.context.active_profile_id = None
             self.context.on_renew_session = self.navigate_to_login
             self.context.on_captcha_alert = self.handle_captcha_alert
@@ -394,6 +414,8 @@ class DesktopApp:
                 inst.config.sid = sid
 
         if self.context.account:
+            self.context.account.stats_tracker = self.context.get_stats_tracker(self.context.config.world)
+            self.context.account._broadcast_sync = self.context.broadcast_sync
             try:
                 fut = asyncio.run_coroutine_threadsafe(
                     self.context.account.update_sid(sid), self.loop
@@ -419,6 +441,8 @@ class DesktopApp:
                 domain=cfg.domain,
                 proxy=cfg.proxy,
             )
+            account.stats_tracker = self.context.get_stats_tracker(cfg.world)
+            account._broadcast_sync = self.context.broadcast_sync
             self.context.account = account
             try:
                 fut = asyncio.run_coroutine_threadsafe(
@@ -451,8 +475,10 @@ class DesktopApp:
                 self.context.toggle_quest_module(enabled=True)
 
         time.sleep(1.5)
-        cockpit_url = f"http://{self.host}:{self.port}/"
-        logger.info(f"A regressar ao Cockpit: {cockpit_url}")
+        # Prepara a transição direta para a aba Dashboard no regresso do login
+        self._js_safe("window.sessionStorage ? window.sessionStorage.setItem('goto_tab', 'tab-dashboard') : null")
+        cockpit_url = f"http://{self.host}:{self.port}/?view=dashboard#tab-dashboard"
+        logger.info(f"A regressar ao Cockpit (Dashboard): {cockpit_url}")
         self.window.load_url(cockpit_url)
 
     def on_login_finished(self):

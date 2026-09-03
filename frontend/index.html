@@ -12,6 +12,22 @@
   
   <!-- Estilos Customizados -->
   <link rel="stylesheet" href="css/style.css">
+  
+  <script>
+    (function() {
+      try {
+        var p = new URLSearchParams(window.location.search);
+        if (p.get("view") === "dashboard" || window.location.hash === "#tab-dashboard" || (window.sessionStorage && window.sessionStorage.getItem("goto_tab") === "tab-dashboard")) {
+          document.addEventListener("DOMContentLoaded", function() {
+            var hub = document.getElementById("account-hub-view");
+            var ws = document.querySelector(".main-workspace");
+            if (hub) hub.style.display = "none";
+            if (ws) ws.style.display = "flex";
+          });
+        }
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <div class="app-container">
@@ -28,8 +44,8 @@
 
       <!-- Coluna 2: Centro (Mundos, Relógio e Status Perfeitamente Centrados na Janela) -->
       <div class="top-nav-center">
-        <!-- Dropdown Seletor de Mundo -->
-        <div class="world-dropdown-wrapper" style="position: relative; display: inline-flex; align-items: center;">
+        <!-- Dropdown Seletor de Mundo (Oculto até que utilizador esteja autenticado com sessão ativa) -->
+        <div class="world-dropdown-wrapper" id="world-dropdown-wrapper" style="position: relative; display: none; align-items: center;">
           <button class="badge badge-world" id="btn-world-dropdown" title="Clique para selecionar outro mundo (ex: pt114, pt117)" style="cursor: pointer; display: flex; align-items: center; gap: 5px; border: 1px solid var(--neon-cyan); background: rgba(6, 182, 212, 0.15); color: var(--neon-cyan); font-weight: 700; padding: 4px 8px; border-radius: 6px;">
             <span>🌐</span>
             <span id="badge-world-text">PT117</span>
@@ -49,24 +65,30 @@
         </div>
 
         <!-- Chips de Mundos Concorrentes Ativos -->
-        <div id="world-tabs-container" style="display: flex; gap: 4px; align-items: center;">
+        <div id="world-tabs-container" style="display: none; gap: 4px; align-items: center;">
           <!-- Botões de mundos injetados via JS -->
         </div>
-        <button class="btn btn-secondary btn-sm" id="btn-add-world" style="padding: 3px 7px; font-size: 0.72rem; border-radius: 6px;" title="Adicionar e orquestrar outro mundo em simultâneo">
+        <button class="btn btn-secondary btn-sm" id="btn-add-world" style="display: none; padding: 3px 7px; font-size: 0.72rem; border-radius: 6px;" title="Adicionar e orquestrar outro mundo em simultâneo">
           <span>➕</span>
         </button>
 
         <!-- Relógio HUD de Alta Precisão -->
-        <div class="badge badge-clock" id="badge-clock" title="Relógio do Jogo / Servidor (Horas:Minutos:Segundos.Microssegundos)">
+        <div class="badge badge-clock" id="badge-clock" style="display: none;" title="Relógio do Jogo / Servidor (Horas:Minutos:Segundos.Microssegundos)">
           <span class="clock-icon">⏳</span>
           <span class="clock-digits" id="clock-hms">00:00:00</span>
           <span class="clock-sub" id="clock-ms">.000000</span>
         </div>
 
         <!-- Indicador de Status do Motor -->
-        <div class="badge badge-status active" id="badge-status">
+        <div class="badge badge-status active" id="badge-status" style="display: none;">
           <span class="status-dot"></span>
           <span id="status-text">MOTOR ATIVO</span>
+        </div>
+
+        <!-- Indicador de Incomings / Ataques a Chegar (Item 2.8) -->
+        <div class="badge badge-incomings danger-pulse" id="badge-incomings" style="display: none; cursor: pointer;" title="Ataques a chegar! Clique para abrir o Painel de Defesa">
+          <span class="incoming-icon">🚨</span>
+          <span id="badge-incomings-count">0</span> <span id="badge-incomings-label">Ataques</span>
         </div>
       </div>
 
@@ -75,23 +97,72 @@
         <button class="btn btn-secondary btn-sm" id="btn-switch-account" title="Trocar de conta e regressar ao Hub de Gestão de Contas" style="border: 1px solid var(--neon-purple); background: rgba(168,85,247,0.15); color: #c084fc; font-weight: 600; padding: 4px 8px; font-size: 0.72rem;">
           <span>👤</span> Contas
         </button>
-        <button class="btn btn-secondary btn-sm" id="btn-refresh-data" title="Atualizar recursos e tropas da aldeia ativa" style="padding: 4px 6px; font-size: 0.72rem;">
+        <button class="btn btn-secondary btn-sm" id="btn-refresh-data" title="Atualizar recursos e tropas da aldeia ativa" style="display: none; padding: 4px 6px; font-size: 0.72rem;">
           <span>🔄</span>
         </button>
-        <button class="btn btn-secondary btn-sm" id="btn-claim-quests" title="Resgatar todas as recompensas de missões prontas de forma segura" style="padding: 4px 8px; font-size: 0.72rem;">
+        <button class="btn btn-secondary btn-sm" id="btn-claim-quests" title="Resgatar todas as recompensas de missões prontas de forma segura" style="display: none; padding: 4px 8px; font-size: 0.72rem;">
           <span>🎁</span> <span id="badge-quest-count" class="badge" style="display:none; background:var(--neon-emerald); color:#000; padding:1px 5px; border-radius:8px; font-size:0.65rem; margin-left:2px; font-weight:700;">0</span>
         </button>
-        <button class="btn btn-warning btn-sm" id="btn-toggle-scheduler" style="padding: 4px 8px; font-size: 0.72rem;">
+        <button class="btn btn-warning btn-sm" id="btn-toggle-scheduler" style="display: none; padding: 4px 8px; font-size: 0.72rem;">
           <span>⏸</span> Pausar
         </button>
-        <button class="btn btn-danger btn-sm" id="btn-logout" title="Terminar sessão da conta ativa e regressar ao Gestor de Contas" style="padding: 4px 8px; font-size: 0.72rem;">
+        <button class="btn btn-danger btn-sm" id="btn-logout" title="Terminar sessão da conta ativa e regressar ao Gestor de Contas" style="display: none; padding: 4px 8px; font-size: 0.72rem;">
           <span>🚪</span> Sair
         </button>
       </div>
     </header>
 
+    <!-- Floating Emergency Danger Banner (Incomings) -->
+    <div id="incomings-banner" class="incomings-banner" style="display: none;">
+      <div class="incomings-banner-content">
+        <div class="incomings-banner-left">
+          <span class="siren-icon danger-pulse-icon">🚨</span>
+          <div>
+            <div class="incomings-banner-title">
+              <strong>ALERTA DE ATAQUES RECEBIDOS!</strong>
+              <span class="badge badge-danger-count" id="banner-incomings-count">0 comandos</span>
+            </div>
+            <div class="incomings-banner-desc" id="banner-incomings-details">
+              Ataques detectados a caminho da aldeia. Monitorização e radar de defesa ativos.
+            </div>
+          </div>
+        </div>
+        <div class="incomings-banner-right">
+          <div class="banner-impact-timer">
+            Impacto em: <strong class="countdown-highlight" id="banner-countdown">--:--:--</strong>
+          </div>
+          <button class="btn btn-sm btn-outline-danger" id="btn-banner-view-defense" style="padding: 4px 10px; font-weight: 600;">
+            🛡️ Ver Defesa & Dodge
+          </button>
+          <button class="btn btn-sm btn-secondary" id="btn-toggle-alarm-sound" title="Ligar/Desligar som do alarme" style="padding: 4px 8px;">
+            <span id="alarm-sound-icon">🔊</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Ecrã Inicial: Gestor e Selecionador de Contas (Account Hub) -->
     <div id="account-hub-view" class="account-hub-view" style="display: block; padding: 32px 40px; max-width: 1200px; margin: 0 auto; width: 100%;">
+      
+      <!-- Banner de Utilizador / Painel de Autenticação Cloud SQL -->
+      <div id="cloud-auth-panel" style="background: rgba(15, 23, 42, 0.85); border: 1px solid var(--neon-cyan); border-radius: 12px; padding: 18px 24px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 20px rgba(6,182,212,0.15);">
+        <div id="cloud-auth-status" style="display: flex; align-items: center; gap: 12px;">
+          <div style="font-size: 1.8rem;">☁️</div>
+          <div>
+            <div style="font-weight: 700; color: #fff; font-size: 0.95rem;" id="cloud-user-email">Utilizador Convidado (Modo Local)</div>
+            <div style="font-size: 0.75rem; color: var(--neon-cyan);" id="cloud-license-type">Conectado ao Cloud SQL Neon (PostgreSQL 18.6)</div>
+          </div>
+        </div>
+        <div id="cloud-auth-actions" style="display: flex; gap: 10px;">
+          <button class="btn btn-primary btn-sm" id="btn-open-cloud-auth" onclick="openCloudAuthModal()" style="padding: 6px 14px; font-weight: 600; background: var(--gradient-primary); cursor: pointer;">
+            <span>🔑</span> Entrar / Registar
+          </button>
+          <button class="btn btn-danger btn-sm" id="btn-cloud-logout" style="display: none; padding: 6px 14px; font-weight: 600;">
+            <span>🚪</span> Sair da App
+          </button>
+        </div>
+      </div>
+
       <div class="hub-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; border-bottom: 1px solid var(--border-glass); padding-bottom: 18px;">
         <div>
           <h2 style="font-family: var(--font-title); font-size: 1.6rem; color: #fff; display: flex; align-items: center; gap: 10px;">
@@ -102,6 +173,9 @@
           </p>
         </div>
         <div id="hub-header-actions" style="display: none; gap: 10px; align-items: center;">
+          <button class="btn btn-secondary" id="btn-hub-back-to-cockpit" style="display: none; align-items: center; gap: 6px; padding: 8px 16px; font-weight: 600; border: 1px solid var(--neon-cyan); color: var(--neon-cyan); background: rgba(6,182,212,0.1);">
+            <span>◀</span> Voltar ao Cockpit
+          </button>
           <button class="btn btn-primary" id="btn-hub-add-account" style="display: flex; align-items: center; gap: 6px; padding: 8px 16px; font-weight: 600; background: var(--gradient-primary); box-shadow: 0 4px 16px rgba(168,85,247,0.3);">
             <span>➕</span> Adicionar Conta
           </button>
@@ -137,6 +211,25 @@
         </button>
         <button class="nav-tab" data-tab="tab-map" id="tab-btn-map">
           <span class="tab-icon">🗺</span> Mapa Tático
+        </button>
+        <button class="nav-tab" data-tab="tab-defense" id="tab-btn-defense">
+          <span class="tab-icon">🚨</span> Defesa & Incomings
+          <span class="tab-badge danger hidden" id="tab-defense-badge">0</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-combat" id="tab-btn-combat">
+          <span class="tab-icon">⚔️</span> Combate & Milissegundo
+          <span class="tab-badge primary hidden" id="tab-combat-badge">0</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-scavenge" id="tab-btn-scavenge">
+          <span class="tab-icon">🌾</span> Coleta de Recursos
+          <span class="tab-badge info hidden" id="tab-scavenge-badge">0</span>
+        </button>
+        <button class="nav-tab" data-tab="tab-snob" id="tab-btn-snob">
+          <span class="tab-icon">👑</span> Academia & Moedas
+        </button>
+        <button class="nav-tab" data-tab="tab-inventory" id="tab-btn-inventory">
+          <span class="tab-icon">🎒</span> Inventário
+          <span class="tab-badge warning hidden" id="tab-inventory-badge">0</span>
         </button>
         <button class="nav-tab" data-tab="tab-villages" id="tab-btn-villages">
           <span class="tab-icon">🏰</span> Multi-Aldeia
@@ -336,6 +429,39 @@
             </div>
             <div style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.5">
               <span>• Gestão inteligente de construção, recrutamento e arbitragem de mercado.</span>
+            </div>
+          </section>
+
+          <!-- Card: Tabela de Aldeias do Mundo & Atribuição de Modelo Ativo (Cloud SQL) -->
+          <section class="glass-card col-12" id="section-cloud-villages" style="margin-top: 6px;">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+              <div class="card-title" style="display: flex; align-items: center; gap: 8px;">
+                <span class="icon">🏰</span> Gestão de Aldeias do Mundo & Modelo de Construção 
+                <span class="badge" style="background: rgba(6,182,212,0.15); color: var(--neon-cyan); border: 1px solid var(--neon-cyan); font-size: 0.72rem; padding: 2px 8px; border-radius: 6px;" id="badge-villages-world-code">PT117</span>
+              </div>
+              <button class="btn btn-secondary btn-sm" id="btn-sync-cloud-villages" style="font-size: 0.75rem; padding: 4px 10px; display: flex; align-items: center; gap: 5px;">
+                <span>🔄</span> Sincronizar Aldeias
+              </button>
+            </div>
+            <div style="overflow-x: auto; margin-top: 10px;">
+              <table class="table-villages" style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+                <thead>
+                  <tr style="border-bottom: 1px solid var(--border-glass); text-align: left; color: var(--text-muted);">
+                    <th style="padding: 10px 12px;">ID Aldeia</th>
+                    <th style="padding: 10px 12px;">Nome</th>
+                    <th style="padding: 10px 12px;">Coordenadas</th>
+                    <th style="padding: 10px 12px;">Modelo de Construção Ativo</th>
+                    <th style="padding: 10px 12px;">Última Atualização</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-cloud-villages">
+                  <tr>
+                    <td colspan="5" style="padding: 16px; text-align: center; color: var(--text-muted);">
+                      A carregar aldeias sincronizadas no Cloud SQL...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </section>
 
@@ -621,6 +747,11 @@
               <div style="display: flex; align-items: center; gap: 4px; background: rgba(15,23,42,0.6); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-subtle);">
                 <span style="font-size: 0.75rem; color: var(--text-muted);">Pop Mín:</span>
                 <input type="number" id="rec-min-free-pop" value="5" min="0" max="500" style="width: 45px; background: transparent; border: none; color: #fff; font-family: var(--font-mono); font-size: 0.8rem; text-align: right;">
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 4px; background: rgba(15,23,42,0.6); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-subtle);" title="Limite máximo de ordens simultâneas na fila de cada edifício militar">
+                <span style="font-size: 0.75rem; color: var(--text-muted);">Fila Máx:</span>
+                <input type="number" id="rec-max-queue" value="3" min="1" max="10" style="width: 40px; background: transparent; border: none; color: #fff; font-family: var(--font-mono); font-size: 0.8rem; text-align: right;">
               </div>
 
               <button class="btn btn-secondary" id="btn-refresh-recruitment-queue" style="padding: 6px 12px; font-size: 0.8rem;">
@@ -1753,16 +1884,16 @@
               <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                 <!-- Seletor de Intervalo -->
                 <div class="btn-group" style="display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid var(--border-glass);">
-                  <button type="button" class="btn btn-sm btn-stats-range active" data-range="24" id="btn-stats-range-24h" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 0; border: none; background: rgba(6,182,212,0.25); color: var(--neon-cyan); font-weight: 700;">24 Horas</button>
-                  <button type="button" class="btn btn-sm btn-stats-range" data-range="168" id="btn-stats-range-7d" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 0; border: none; background: rgba(30,41,59,0.7); color: var(--text-muted);">7 Dias</button>
+                  <button type="button" class="btn btn-sm btn-stats-range active" data-range="24" id="btn-stats-range-24h">24 Horas</button>
+                  <button type="button" class="btn btn-sm btn-stats-range" data-range="168" id="btn-stats-range-7d">7 Dias</button>
                 </div>
 
                 <!-- Seletor de Métrica -->
                 <div class="btn-group" style="display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid var(--border-glass);">
-                  <button type="button" class="btn btn-sm btn-stats-metric active" data-metric="total" id="btn-metric-total" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 0; border: none; background: rgba(16,185,129,0.25); color: var(--neon-emerald); font-weight: 700;">Total</button>
-                  <button type="button" class="btn btn-sm btn-stats-metric" data-metric="wood" id="btn-metric-wood" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 0; border: none; background: rgba(30,41,59,0.7); color: #34d399;">🌲 Madeira</button>
-                  <button type="button" class="btn btn-sm btn-stats-metric" data-metric="stone" id="btn-metric-stone" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 0; border: none; background: rgba(30,41,59,0.7); color: var(--neon-cyan);">🧱 Argila</button>
-                  <button type="button" class="btn btn-sm btn-stats-metric" data-metric="iron" id="btn-metric-iron" style="padding: 4px 10px; font-size: 0.75rem; border-radius: 0; border: none; background: rgba(30,41,59,0.7); color: #cbd5e1;">⛏ Ferro</button>
+                  <button type="button" class="btn btn-sm btn-stats-metric active" data-metric="total" id="btn-metric-total">Total</button>
+                  <button type="button" class="btn btn-sm btn-stats-metric" data-metric="wood" id="btn-metric-wood">🌲 Madeira</button>
+                  <button type="button" class="btn btn-sm btn-stats-metric" data-metric="stone" id="btn-metric-stone">🧱 Argila</button>
+                  <button type="button" class="btn btn-sm btn-stats-metric" data-metric="iron" id="btn-metric-iron">⛏ Ferro</button>
                 </div>
               </div>
             </div>
@@ -1832,6 +1963,715 @@
             </div>
 
           </div>
+
+        </div>
+      </main>
+
+      <!-- Panel: Defesa, Alarme de Incomings & Auto-Dodge (Item 2.8) -->
+      <main class="tab-content" id="tab-defense">
+        <div class="defense-container" style="max-width: 1200px; margin: 0 auto; width: 100%;">
+          
+          <!-- Linha Superior: Status de Alerta e Painel de Controle de Emergência -->
+          <div class="defense-top-grid" style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; margin-bottom: 20px;">
+            
+            <!-- Card 1: Status Geral de Defesa e Ameaças -->
+            <section class="glass-card defense-status-card" id="defense-threat-card">
+              <div class="card-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 12px;">
+                <div class="card-title" style="display: flex; align-items: center; gap: 10px;">
+                  <span class="icon" style="font-size: 1.3rem;">🛡️</span>
+                  <span>Alarme de Ataques & Radar Tático</span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <button class="btn btn-secondary btn-sm" id="btn-check-incomings-now" title="Verificar ataques no jogo agora">
+                    <span>🔄</span> Verificar Agora
+                  </button>
+                  <button class="btn btn-secondary btn-sm" id="btn-test-alarm-sound" title="Testar som do alarme">
+                    <span>🔊</span> Testar Alarme
+                  </button>
+                </div>
+              </div>
+
+              <div class="defense-status-body" style="padding: 18px 6px 6px 6px;">
+                <!-- Status Visual Banner -->
+                <div class="defense-alert-status safe" id="defense-status-banner" style="display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-radius: 10px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3);">
+                  <div style="display: flex; align-items: center; gap: 14px;">
+                    <span class="status-indicator-icon" id="defense-status-icon" style="font-size: 1.8rem;">🟢</span>
+                    <div>
+                      <h3 id="defense-status-headline" style="font-size: 1.05rem; font-weight: 700; color: #34d399; margin: 0;">ALDEIAS SEGURAS</h3>
+                      <p id="defense-status-subline" style="font-size: 0.8rem; color: var(--text-muted); margin: 2px 0 0 0;">Nenhum ataque inimigo detectado a caminho.</p>
+                    </div>
+                  </div>
+                  <div class="defense-counter-badge" style="text-align: right;">
+                    <span class="defense-count-number" id="defense-count-big" style="font-size: 1.8rem; font-weight: 800; font-family: var(--font-mono); color: #fff;">0</span>
+                    <div style="font-size: 0.7rem; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Ataques</div>
+                  </div>
+                </div>
+
+                <!-- Detalhes do Ataque Mais Iminente -->
+                <div class="defense-imminent-box" id="defense-imminent-box" style="margin-top: 14px; padding: 12px 16px; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-glass); display: none;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">Impacto Mais Iminente:</span>
+                    <span class="imminent-countdown" id="imminent-countdown" style="font-size: 1.1rem; font-weight: 700; color: #f87171; font-family: var(--font-mono);">--:--:--</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">Unidade Mais Lenta Estimada:</span>
+                    <span class="badge" id="imminent-slowest-unit" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; font-weight: 700; border: 1px solid rgba(239, 68, 68, 0.4);">Desconhecido</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Card 2: Configuração e Controle do Auto-Dodge -->
+            <section class="glass-card auto-dodge-card">
+              <div class="card-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 12px;">
+                <div class="card-title" style="display: flex; align-items: center; gap: 8px;">
+                  <span class="icon">⚡</span>
+                  <span>Módulo Auto-Dodge (Esquiva de Tropas)</span>
+                </div>
+                <div>
+                  <label class="switch" style="vertical-align: middle;">
+                    <input type="checkbox" id="switch-auto-dodge">
+                    <span class="slider round"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="card-body" style="padding: 16px 6px 6px 6px;">
+                <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+                  Desvia automaticamente todas as tropas para uma aldeia bárbara segundos antes do impacto do ataque e cancela a ordem logo após a colisão, devolvendo as tropas ilesas à aldeia!
+                </p>
+
+                <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div class="form-group">
+                    <label style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">
+                      Antecedência de Esquiva (Segundos):
+                    </label>
+                    <input type="number" id="input-dodge-lead-time" class="form-control" value="30" min="5" max="300" style="width: 100%; padding: 6px 10px; background: rgba(15,23,42,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff;">
+                    <small style="font-size: 0.68rem; color: var(--text-muted);">Padrão: 30s antes do impacto</small>
+                  </div>
+
+                  <div class="form-group">
+                    <label style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">
+                      Atraso de Cancelamento (Segundos):
+                    </label>
+                    <input type="number" id="input-dodge-cancel-delay" class="form-control" value="5" min="2" max="60" style="width: 100%; padding: 6px 10px; background: rgba(15,23,42,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff;">
+                    <small style="font-size: 0.68rem; color: var(--text-muted);">Padrão: 5s após o impacto</small>
+                  </div>
+                </div>
+
+                <div class="form-group" style="margin-top: 10px;">
+                  <label style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">
+                    Coordenadas de Escape:
+                  </label>
+                  <input type="text" id="input-dodge-escape-coords" class="form-control" placeholder="Automático: Aldeia Bárbara mais próxima" style="width: 100%; padding: 6px 10px; background: rgba(15,23,42,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff;">
+                </div>
+
+                <div style="display: flex; gap: 10px; align-items: center; margin-top: 14px;">
+                  <button class="btn btn-primary btn-sm" id="btn-save-dodge-config" style="flex: 1; padding: 7px 12px; font-weight: 600;">
+                    💾 Guardar Parâmetros
+                  </button>
+                  <button class="btn btn-danger btn-sm" id="btn-trigger-manual-dodge" style="flex: 1; padding: 7px 12px; font-weight: 600;" title="Dispara um desvio imediato de tropas da aldeia ativa">
+                    ⚡ Desviar Tropas Agora
+                  </button>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- Card 3: Tabela de Comandos a Chegar (Incomings Overview) -->
+          <section class="glass-card" style="margin-bottom: 20px;">
+            <div class="card-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 12px;">
+              <div class="card-title" style="display: flex; align-items: center; gap: 8px;">
+                <span class="icon">🚨</span>
+                <span>Comandos a Chegar (Incomings Ativos)</span>
+              </div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">
+                Total: <strong id="defense-table-count" style="color: #fff;">0</strong> ataques
+              </div>
+            </div>
+
+            <div class="card-body" style="padding: 0; overflow-x: auto;">
+              <table class="data-table" id="incomings-table-live" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.82rem;">
+                <thead>
+                  <tr style="background: rgba(15, 23, 42, 0.8); border-bottom: 1px solid var(--border-glass);">
+                    <th style="padding: 10px 14px;">ID / Comando</th>
+                    <th style="padding: 10px 14px;">Origem</th>
+                    <th style="padding: 10px 14px;">Destino</th>
+                    <th style="padding: 10px 14px;">Atacante</th>
+                    <th style="padding: 10px 14px;">Distância</th>
+                    <th style="padding: 10px 14px;">Chegada</th>
+                    <th style="padding: 10px 14px;">Tempo Restante</th>
+                    <th style="padding: 10px 14px;">Unidade Mais Lenta Estimada</th>
+                  </tr>
+                </thead>
+                <tbody id="incomings-table-body">
+                  <tr>
+                    <td colspan="8" style="padding: 30px; text-align: center; color: var(--text-muted);">
+                      🟢 Nenhuma ameaça a caminho. Aldeias totalmente seguras!
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- Card 4: Dodges em Andamento (Aguardando Cancelamento) -->
+          <section class="glass-card">
+            <div class="card-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 12px;">
+              <div class="card-title" style="display: flex; align-items: center; gap: 8px;">
+                <span class="icon">🔙</span>
+                <span>Operações de Auto-Dodge em Trânsito (Aguardando Cancelamento)</span>
+              </div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">
+                Tropas em manobra de esquiva militar
+              </div>
+            </div>
+
+            <div class="card-body" style="padding: 0; overflow-x: auto;">
+              <table class="data-table" id="dodges-table-live" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.82rem;">
+                <thead>
+                  <tr style="background: rgba(15, 23, 42, 0.8); border-bottom: 1px solid var(--border-glass);">
+                    <th style="padding: 10px 14px;">ID Comando Dodge</th>
+                    <th style="padding: 10px 14px;">Aldeia</th>
+                    <th style="padding: 10px 14px;">Coordenadas de Escape</th>
+                    <th style="padding: 10px 14px;">Status</th>
+                    <th style="padding: 10px 14px;">Ataque Inimigo</th>
+                    <th style="padding: 10px 14px;">Cancelamento Agendado</th>
+                    <th style="padding: 10px 14px;">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="dodges-table-body">
+                  <tr>
+                    <td colspan="7" style="padding: 24px; text-align: center; color: var(--text-muted);">
+                      Nenhum comando de esquiva ativo no momento.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+        </div>
+      </main>
+
+      <!-- Panel: Táticas de Combate & Sincronização ao Milissegundo (Item 2.9) -->
+      <main class="tab-content" id="tab-combat">
+        <div class="combat-container" style="max-width: 1200px; margin: 0 auto; width: 100%;">
+          
+          <!-- Linha 1: Status de Sincronização do Relógio do Servidor -->
+          <section class="glass-card" style="margin-bottom: 20px;">
+            <div class="card-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 12px;">
+              <div class="card-title" style="display: flex; align-items: center; gap: 10px;">
+                <span class="icon" style="font-size: 1.3rem;">⏱️</span>
+                <span>Sincronização de Alta Precisão (Relógio do Servidor & RTT)</span>
+              </div>
+              <div>
+                <button class="btn btn-secondary btn-sm" id="btn-sync-clock-now" title="Efetuar ping de teste e calcular latência RTT">
+                  <span>🔄</span> Sincronizar Relógio (Ping)
+                </button>
+              </div>
+            </div>
+
+            <div class="card-body" style="padding: 16px 20px;">
+              <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;">
+                <div class="telemetry-box" style="background: rgba(15,23,42,0.6); padding: 12px; border-radius: 8px; border: 1px solid var(--border-glass);">
+                  <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Latência RTT (Ida e Volta)</div>
+                  <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                    <span id="combat-rtt-val" style="font-size: 1.4rem; font-weight: 800; font-family: var(--font-mono); color: var(--neon-cyan);">45.0</span>
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">ms</span>
+                  </div>
+                  <div id="combat-rtt-status" style="font-size: 0.7rem; color: #34d399; margin-top: 2px;">● Conexão Excelente</div>
+                </div>
+
+                <div class="telemetry-box" style="background: rgba(15,23,42,0.6); padding: 12px; border-radius: 8px; border: 1px solid var(--border-glass);">
+                  <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Desvio do Servidor (Offset)</div>
+                  <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                    <span id="combat-offset-val" style="font-size: 1.4rem; font-weight: 800; font-family: var(--font-mono); color: #fff;">+0.000</span>
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">s</span>
+                  </div>
+                  <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">Compensação local ativa</div>
+                </div>
+
+                <div class="telemetry-box" style="background: rgba(15,23,42,0.6); padding: 12px; border-radius: 8px; border: 1px solid var(--border-glass);">
+                  <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Precisão de Disparo</div>
+                  <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                    <span id="combat-precision-val" style="font-size: 1.4rem; font-weight: 800; font-family: var(--font-mono); color: #34d399;">&lt; 1.0</span>
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">ms</span>
+                  </div>
+                  <div style="font-size: 0.7rem; color: #34d399; margin-top: 2px;">Sub-milissegundo via Spin-Wait</div>
+                </div>
+
+                <div class="telemetry-box" style="background: rgba(15,23,42,0.6); padding: 12px; border-radius: 8px; border: 1px solid var(--border-glass);">
+                  <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Amostras Coletadas</div>
+                  <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+                    <span id="combat-samples-val" style="font-size: 1.4rem; font-weight: 800; font-family: var(--font-mono); color: #c084fc;">0</span>
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">amostras</span>
+                  </div>
+                  <div id="combat-sync-state-badge" style="font-size: 0.7rem; color: #34d399; margin-top: 2px;">Sincronizado</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Linha 2: Lançador de Noble Train & Calculadora de Backtime -->
+          <div style="display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 20px; margin-bottom: 20px;">
+            
+            <!-- Card 2: Lançador de Comboio de Nobres (Noble Train) -->
+            <section class="glass-card">
+              <div class="card-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 12px;">
+                <div class="card-title" style="display: flex; align-items: center; gap: 10px;">
+                  <span class="icon">🚀</span>
+                  <span>Lançador de Comboio de Nobres (Noble Train)</span>
+                </div>
+                <div>
+                  <span class="badge" style="background: rgba(236,72,153,0.2); color: #f472b6; border: 1px solid rgba(236,72,153,0.4); font-weight: 700;">
+                    👑 Conquista
+                  </span>
+                </div>
+              </div>
+
+              <div class="card-body" style="padding: 16px 20px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                  <div class="form-group">
+                    <label style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">
+                      Aldeia Alvo:
+                    </label>
+                    <input type="text" id="input-noble-train-target" class="form-control" placeholder="503|504" style="width: 100%; padding: 7px 10px; background: rgba(15,23,42,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff; font-family: var(--font-mono);">
+                  </div>
+
+                  <div class="form-group">
+                    <label style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">
+                      Tamanho do Comboio:
+                    </label>
+                    <select id="select-noble-train-size" class="form-control" style="width: 100%; padding: 7px 10px; background: rgba(15,23,42,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff;">
+                      <option value="4" selected>4 Nobres (Padrão de Conquista)</option>
+                      <option value="5">5 Nobres (Anti-Cura de Lealdade)</option>
+                      <option value="3">3 Nobres (Finalização)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                  <div class="form-group">
+                    <label style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">
+                      Intervalo entre Ataques (Gap em ms):
+                    </label>
+                    <input type="number" id="input-noble-train-gap" class="form-control" value="100" min="20" max="500" style="width: 100%; padding: 7px 10px; background: rgba(15,23,42,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff; font-family: var(--font-mono);">
+                    <small style="font-size: 0.68rem; color: var(--text-muted);">Recomendado: 50ms a 100ms</small>
+                  </div>
+
+                  <div class="form-group">
+                    <label style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">
+                      Dispersão Máxima Fail-Safe (ms):
+                    </label>
+                    <input type="number" id="input-noble-train-failsafe" class="form-control" value="400" min="100" max="2000" style="width: 100%; padding: 7px 10px; background: rgba(15,23,42,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff; font-family: var(--font-mono);">
+                    <small style="font-size: 0.68rem; color: var(--text-muted);">Cancela de emergência se spread &gt; limite</small>
+                  </div>
+                </div>
+
+                <!-- Painel de Tropas: Nuke vs Escolta -->
+                <div style="background: rgba(15,23,42,0.5); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-glass); margin-bottom: 14px;">
+                  <div style="font-size: 0.76rem; font-weight: 700; color: #fff; margin-bottom: 6px;">
+                    🛡️ Estrutura Tática do Comboio:
+                  </div>
+                  <div style="font-size: 0.74rem; color: var(--text-muted); line-height: 1.4;">
+                    • <strong>Ataque #1 (Nuke):</strong> Tropas de limpeza da aldeia + 1 Nobre.<br>
+                    • <strong>Ataques #2 a #4:</strong> Escolta de segurança (50 Vikings + 20 Cavalaria Leve) + 1 Nobre cada.
+                  </div>
+                </div>
+
+                <div style="display: flex; gap: 10px; align-items: center;">
+                  <button class="btn btn-primary" id="btn-launch-noble-train" style="flex: 1; padding: 10px 16px; font-weight: 700; background: var(--gradient-primary); box-shadow: 0 4px 16px rgba(168,85,247,0.35);">
+                    🚀 Disparar Noble Train Agora
+                  </button>
+                  <button class="btn btn-secondary btn-sm" id="btn-save-combat-config" style="padding: 10px 14px;" title="Guardar definições padrão de combate">
+                    💾 Guardar Padrões
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <!-- Card 3: Calculadora & Agendador de Backtime -->
+            <section class="glass-card">
+              <div class="card-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 12px;">
+                <div class="card-title" style="display: flex; align-items: center; gap: 10px;">
+                  <span class="icon">⏱️</span>
+                  <span>Calculadora de Backtime (Contra-Ataque)</span>
+                </div>
+              </div>
+
+              <div class="card-body" style="padding: 16px 20px;">
+                <div class="form-group" style="margin-bottom: 10px;">
+                  <label style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">
+                    Alvo Inimigo a Retaliar:
+                  </label>
+                  <input type="text" id="input-backtime-target" class="form-control" placeholder="503|504" style="width: 100%; padding: 7px 10px; background: rgba(15,23,42,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff; font-family: var(--font-mono);">
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 10px; margin-bottom: 10px;">
+                  <div class="form-group">
+                    <label style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">
+                      Hora de Regresso do Inimigo:
+                    </label>
+                    <input type="time" step="1" id="input-backtime-time" class="form-control" style="width: 100%; padding: 7px 10px; background: rgba(15,23,42,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff; font-family: var(--font-mono);">
+                  </div>
+
+                  <div class="form-group">
+                    <label style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">
+                      Unidade Mais Lenta:
+                    </label>
+                    <select id="select-backtime-slowest-unit" class="form-control" style="width: 100%; padding: 7px 10px; background: rgba(15,23,42,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff;">
+                      <option value="light" selected>Cavalaria Leve (10m)</option>
+                      <option value="heavy">Cavalaria Pesada (11m)</option>
+                      <option value="axe">Viking / Machado (18m)</option>
+                      <option value="ram">Aríete (30m)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Painel de Resultados do Cálculo -->
+                <div id="backtime-calc-results" style="background: rgba(15,23,42,0.5); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-glass); margin-bottom: 12px; font-size: 0.76rem;">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                    <span style="color: var(--text-muted);">Distância:</span>
+                    <strong id="backtime-dist" style="font-family: var(--font-mono); color: var(--neon-cyan);">-- campos</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                    <span style="color: var(--text-muted);">Duração da Marcha:</span>
+                    <strong id="backtime-dur" style="font-family: var(--font-mono); color: #fff;">--:--:--</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-muted);">Momento Exato de Partida:</span>
+                    <strong id="backtime-launch" style="font-family: var(--font-mono); color: #f87171;">--:--:--</strong>
+                  </div>
+                </div>
+
+                <div style="display: flex; gap: 8px;">
+                  <button class="btn btn-secondary btn-sm" id="btn-calc-backtime" style="flex: 1; padding: 8px 12px;">
+                    🧮 Calcular Tempo
+                  </button>
+                  <button class="btn btn-primary btn-sm" id="btn-schedule-backtime" style="flex: 1; padding: 8px 12px; font-weight: 600;">
+                    ⏱️ Agendar Backtime
+                  </button>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- Linha 3: Sniper de Nobres & Intercalação Anti-Conquista -->
+          <section class="glass-card" style="margin-bottom: 20px;">
+            <div class="card-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 12px;">
+              <div class="card-title" style="display: flex; align-items: center; gap: 10px;">
+                <span class="icon">🎯</span>
+                <span>Sniper de Nobres (Intercalação Defensiva Anti-Conquista)</span>
+              </div>
+              <div>
+                <button class="btn btn-secondary btn-sm" id="btn-analyze-snipes-now">
+                  <span>🔄</span> Analisar Incomings para Sniper
+                </button>
+              </div>
+            </div>
+
+            <div class="card-body" style="padding: 16px 20px;">
+              <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
+                O Sniper detecta comboios inimigos a chegar e calcula automaticamente janelas de milissegundos para intercalar tropas de defesa exatamente entre o ataque de limpeza (Nuke) e os nobres inimigos, destruindo os conquistadores sem sofrer danos da infantaria de choque!
+              </p>
+
+              <div id="snipes-container">
+                <div id="snipes-empty-msg" style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.82rem;">
+                  Nenhum comboio inimigo detectado a caminho das suas aldeias. O radar de defesa está limpo.
+                </div>
+                <div id="snipes-list" style="display: none; display: grid; gap: 10px;">
+                  <!-- Injetado dinamicamente -->
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Linha 4: Fila de Operações Táticas Agendadas & Histórico -->
+          <section class="glass-card">
+            <div class="card-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 12px;">
+              <div class="card-title" style="display: flex; align-items: center; gap: 10px;">
+                <span class="icon">📋</span>
+                <span>Fila de Operações Táticas Agendadas & Histórico</span>
+              </div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">
+                Operações de Precisão Milimétrica
+              </div>
+            </div>
+
+            <div class="card-body" style="padding: 0; overflow-x: auto;">
+              <table class="data-table" id="tactical-operations-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.82rem;">
+                <thead>
+                  <tr style="background: rgba(15, 23, 42, 0.8); border-bottom: 1px solid var(--border-glass);">
+                    <th style="padding: 10px 14px;">ID Operação</th>
+                    <th style="padding: 10px 14px;">Tipo de Manobra</th>
+                    <th style="padding: 10px 14px;">Origem</th>
+                    <th style="padding: 10px 14px;">Alvo</th>
+                    <th style="padding: 10px 14px;">Hora de Disparo</th>
+                    <th style="padding: 10px 14px;">Dispersão / Drift</th>
+                    <th style="padding: 10px 14px;">Status</th>
+                    <th style="padding: 10px 14px;">Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="tactical-operations-tbody">
+                  <tr>
+                    <td colspan="8" style="padding: 24px; text-align: center; color: var(--text-muted);">
+                      Nenhuma operação tática agendada no momento.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+        </div>
+      </main>
+
+      <!-- Panel: Coleta de Recursos / Scavenging (Ponto 2.4 & Fase 4) -->
+      <main class="tab-content" id="tab-scavenge">
+        <div class="dashboard-grid">
+          
+          <!-- Banner Superior com Status & Disparo Imediato -->
+          <section class="card" style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+            <div>
+              <h2 style="margin: 0 0 6px 0; display: flex; align-items: center; gap: 10px;">
+                🌾 Coleta de Recursos Inteligente
+                <span class="badge" id="scavenge-global-status">Inativo</span>
+              </h2>
+              <p style="margin: 0; color: var(--text-muted); font-size: 0.88rem;">
+                Distribuição ponderada por rácio de saque para retorno simultâneo das 4 categorias e maximização de recursos/hora.
+              </p>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: center;">
+              <label class="toggle-switch-label" style="margin: 0;">
+                <input type="checkbox" id="toggle-scavenge-auto" />
+                <span class="toggle-slider"></span>
+                <span style="font-weight: 600; font-size: 0.9rem;">Auto-Coleta</span>
+              </label>
+              <button class="btn btn-primary" id="btn-scavenge-trigger-now">
+                ⚡ Disparar Ronda Imediata
+              </button>
+              <button class="btn btn-secondary" id="btn-scavenge-refresh">
+                🔄 Atualizar
+              </button>
+            </div>
+          </section>
+
+          <!-- 4 Categorias de Coleta -->
+          <section class="card" style="grid-column: 1 / -1;">
+            <div class="card-header">
+              <h3>Categorias de Expedição</h3>
+              <div style="font-size: 0.85rem; color: var(--text-muted);" id="scavenge-summary-text">
+                Carregando estado das expedições...
+              </div>
+            </div>
+            <div class="scavenge-cards-grid" id="scavenge-options-container">
+              <!-- Renderizado dinamicamente via JS -->
+            </div>
+          </section>
+
+          <!-- Definições de Tropas Elegíveis & Reservas -->
+          <section class="card" style="grid-column: span 6;">
+            <div class="card-header">
+              <h3>Tropas Elegíveis para Coleta</h3>
+            </div>
+            <div style="padding: 12px 0;">
+              <div style="display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px;">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="checkbox" id="scav-unit-spear" checked /> Lança (25)
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="checkbox" id="scav-unit-sword" checked /> Espada (15)
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="checkbox" id="scav-unit-axe" checked /> Machado (10)
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="checkbox" id="scav-unit-archer" checked /> Arqueiro (10)
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                  <input type="checkbox" id="scav-unit-light" checked /> Cav. Leve (80)
+                </label>
+              </div>
+              <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                <div style="flex: 1;">
+                  <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">Reserva Mín. Lanças:</label>
+                  <input type="number" id="scav-min-spear" class="input-field" value="10" min="0" />
+                </div>
+                <div style="flex: 1;">
+                  <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">Reserva Mín. Espadas:</label>
+                  <input type="number" id="scav-min-sword" class="input-field" value="10" min="0" />
+                </div>
+              </div>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 16px;">
+                <input type="checkbox" id="scav-auto-unlock" checked />
+                <span style="font-size: 0.88rem;">Auto-desbloquear categorias sequencialmente quando houver recursos suficientes</span>
+              </label>
+              <button class="btn btn-primary" id="btn-scavenge-save-config">
+                💾 Guardar Definições de Coleta
+              </button>
+            </div>
+          </section>
+
+          <!-- Tropas Disponíveis na Aldeia -->
+          <section class="card" style="grid-column: span 6;">
+            <div class="card-header">
+              <h3>Tropas Disponíveis na Aldeia</h3>
+            </div>
+            <div id="scavenge-troops-summary" style="display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 0;">
+              <span style="color: var(--text-muted); font-size: 0.88rem;">Carregando tropas...</span>
+            </div>
+          </section>
+
+        </div>
+      </main>
+
+      <!-- Panel: Academia & Cunhagem de Moedas (Ponto 2.6 & Fase 4) -->
+      <main class="tab-content" id="tab-snob">
+        <div class="dashboard-grid">
+          
+          <!-- Banner Superior com Status da Academia -->
+          <section class="card" style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+            <div>
+              <h2 style="margin: 0 0 6px 0; display: flex; align-items: center; gap: 10px;">
+                👑 Academia & Gestão de Moedas
+                <span class="badge" id="snob-status-badge">Pronto</span>
+              </h2>
+              <p style="margin: 0; color: var(--text-muted); font-size: 0.88rem;">
+                Cunhagem de moedas de ouro em lote, treino de Nobres e cunhagem automática de segurança por limite de armazém.
+              </p>
+            </div>
+            <div style="display: flex; gap: 12px;">
+              <button class="btn btn-secondary" id="btn-snob-refresh">
+                🔄 Atualizar Academia
+              </button>
+            </div>
+          </section>
+
+          <!-- Telemetria de Moedas e Nobres (4 Metricas) -->
+          <section class="card" style="grid-column: 1 / -1;">
+            <div class="metrics-grid" style="grid-template-columns: repeat(4, 1fr);">
+              <div class="metric-card">
+                <span class="metric-label">Moedas Cunhadas (Total)</span>
+                <span class="metric-value" id="snob-coins-minted">--</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Para Próximo Nobre</span>
+                <span class="metric-value" id="snob-coins-next">--</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Nobres Disponíveis</span>
+                <span class="metric-value highlight" id="snob-nobles-count">--</span>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Nobres em Formação</span>
+                <span class="metric-value" id="snob-nobles-prod">--</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- Painel de Cunhagem Manual & Treino -->
+          <section class="card" style="grid-column: span 6;">
+            <div class="card-header">
+              <h3>Cunhagem Manual & Recrutamento</h3>
+            </div>
+            <div style="padding: 12px 0;">
+              <div style="background: var(--surface-hover); padding: 12px; border-radius: 6px; margin-bottom: 16px;">
+                <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 6px;">Custo por Moeda:</div>
+                <div style="font-weight: 600; font-size: 0.95rem;">🪵 28.000 &nbsp; 🧱 30.000 &nbsp; ⛏️ 25.000</div>
+              </div>
+              
+              <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px;">
+                <div style="flex: 1;">
+                  <label style="display: block; font-size: 0.85rem; margin-bottom: 4px;">Quantidade a cunhar:</label>
+                  <input type="number" id="snob-mint-count" class="input-field" value="1" min="1" max="100" />
+                </div>
+                <div style="display: flex; gap: 6px; align-self: flex-end;">
+                  <button class="btn btn-secondary" id="btn-snob-mint-quick-1">1</button>
+                  <button class="btn btn-secondary" id="btn-snob-mint-quick-5">5</button>
+                  <button class="btn btn-secondary" id="btn-snob-mint-quick-max">Máx</button>
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 12px;">
+                <button class="btn btn-primary" id="btn-snob-mint-now" style="flex: 1;">
+                  👑 Cunhar Moedas
+                </button>
+                <button class="btn btn-secondary" id="btn-snob-recruit-now" style="flex: 1;">
+                  🏰 Formar 1 Nobre
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Painel de Auto-Cunhagem Inteligente por Armazém -->
+          <section class="card" style="grid-column: span 6;">
+            <div class="card-header">
+              <h3>Auto-Cunhagem Inteligente (Armazém)</h3>
+            </div>
+            <div style="padding: 12px 0;">
+              <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0;">
+                Cunha moedas automaticamente quando os recursos acumulados ultrapassarem o limite seguro do armazém, evitando desperdício por transbordamento.
+              </p>
+              <label class="toggle-switch-label" style="margin-bottom: 16px;">
+                <input type="checkbox" id="toggle-snob-auto-mint" />
+                <span class="toggle-slider"></span>
+                <span style="font-weight: 600; font-size: 0.9rem;">Ativar Auto-Cunhagem por Armazém</span>
+              </label>
+
+              <div style="margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                  <span style="font-size: 0.85rem; font-weight: 600;">Limite de Acionamento:</span>
+                  <span style="font-size: 0.85rem; font-weight: 700; color: var(--primary);" id="snob-storage-pct-label">85%</span>
+                </div>
+                <input type="range" id="snob-storage-threshold" min="50" max="95" value="85" style="width: 100%; cursor: pointer;" />
+              </div>
+
+              <label class="toggle-switch-label" style="margin-bottom: 20px;">
+                <input type="checkbox" id="toggle-snob-auto-recruit" />
+                <span class="toggle-slider"></span>
+                <span style="font-size: 0.88rem;">Treinar Nobres automaticamente quando houver moedas e recursos suficientes</span>
+              </label>
+
+              <button class="btn btn-primary" id="btn-snob-save-config">
+                💾 Guardar Definições da Academia
+              </button>
+            </div>
+          </section>
+
+        </div>
+      </main>
+
+      <!-- Panel: Visualizador de Inventário & Gestão de Itens (Ponto 2.10 & Fase 4) -->
+      <main class="tab-content" id="tab-inventory">
+        <div class="dashboard-grid">
+          
+          <!-- Banner Superior com Segurança de Uso -->
+          <section class="card" style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+            <div>
+              <h2 style="margin: 0 0 6px 0; display: flex; align-items: center; gap: 10px;">
+                🎒 Inventário & Itens da Conta
+                <span class="badge" id="inventory-count-badge">0 Itens</span>
+              </h2>
+              <p style="margin: 0; color: var(--text-muted); font-size: 0.88rem;">
+                Visualização de pacotes de recursos, buffs e consumíveis. <strong>Proteção Ativa:</strong> Apenas o utilizador pode ativar itens manualmente.
+              </p>
+            </div>
+            <div style="display: flex; gap: 12px;">
+              <button class="btn btn-secondary" id="btn-inventory-refresh">
+                🔄 Atualizar Inventário
+              </button>
+            </div>
+          </section>
+
+          <!-- Grelha de Itens do Inventário -->
+          <section class="card" style="grid-column: 1 / -1;">
+            <div class="inventory-grid" id="inventory-items-container">
+              <div style="grid-column: 1 / -1; text-align: center; padding: 48px; color: var(--text-muted);">
+                A carregar itens do inventário...
+              </div>
+            </div>
+          </section>
 
         </div>
       </main>
@@ -2376,6 +3216,75 @@
         <div style="display: flex; justify-content: flex-end; border-top: 1px solid var(--border-subtle); padding-top: 10px;">
           <button type="button" class="btn btn-secondary" onclick="closePlayerHistoryModal()">Fechar</button>
         </div>
+
+      </div>
+    </div>
+
+    <!-- Modal de Autenticação Cloud SQL (Login / Registo) -->
+    <div class="modal-overlay" id="modal-cloud-auth" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(8px); z-index: 9999; align-items: center; justify-content: center;">
+      <div class="modal-container glass-card" style="width: 90%; max-width: 440px; background: rgba(15, 23, 42, 0.95); border: 1px solid var(--neon-cyan); border-radius: 14px; padding: 24px; box-shadow: 0 20px 60px rgba(0,0,0,0.8);">
+        
+        <!-- Cabeçalho do Modal -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 1.5rem;">☁️</span>
+            <div>
+              <h3 style="margin: 0; font-size: 1.15rem; color: #fff; font-family: var(--font-title);">Conta da Aplicação</h3>
+              <small style="color: var(--neon-cyan); font-size: 0.72rem;">Cloud SQL / PostgreSQL Seguro</small>
+            </div>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-close-cloud-auth" onclick="closeCloudAuthModal()" style="padding: 2px 8px; cursor: pointer;">✕</button>
+        </div>
+
+        <!-- Seletor de Modo: Iniciar Sessão vs Criar Conta -->
+        <div style="display: flex; background: rgba(30, 41, 59, 0.6); padding: 3px; border-radius: 8px; margin-bottom: 18px; border: 1px solid var(--border-subtle);">
+          <button type="button" id="tab-auth-login" onclick="switchCloudAuthTab('login')" class="btn btn-sm" style="flex: 1; border: none; background: var(--gradient-primary); color: #fff; font-weight: 700; border-radius: 6px; padding: 6px 0; cursor: pointer;">
+            Iniciar Sessão
+          </button>
+          <button type="button" id="tab-auth-register" onclick="switchCloudAuthTab('register')" class="btn btn-sm" style="flex: 1; border: none; background: transparent; color: var(--text-muted); font-weight: 600; border-radius: 6px; padding: 6px 0; cursor: pointer;">
+            Registar Nova Conta
+          </button>
+        </div>
+
+        <!-- Formulário: Iniciar Sessão -->
+        <form id="form-cloud-login" style="display: flex; flex-direction: column; gap: 14px;">
+          <div>
+            <label style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 5px;">Email</label>
+            <input type="email" id="input-cloud-login-email" required placeholder="seu_email@exemplo.com" style="width: 100%; padding: 8px 12px; background: rgba(30,41,59,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff; font-size: 0.85rem;" />
+          </div>
+          <div>
+            <label style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 5px;">Password</label>
+            <input type="password" id="input-cloud-login-password" required placeholder="••••••••" style="width: 100%; padding: 8px 12px; background: rgba(30,41,59,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff; font-size: 0.85rem;" />
+          </div>
+          <div id="cloud-login-error" style="display: none; color: #ef4444; font-size: 0.78rem;"></div>
+          <button type="submit" class="btn btn-primary" id="btn-submit-cloud-login" style="margin-top: 6px; padding: 9px; font-weight: 700; background: var(--gradient-primary);">
+            <span>🔑</span> Entrar na Aplicação
+          </button>
+        </form>
+
+        <!-- Formulário: Registar -->
+        <form id="form-cloud-register" style="display: none; flex-direction: column; gap: 14px;">
+          <div>
+            <label style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 5px;">Email</label>
+            <input type="email" id="input-cloud-register-email" required placeholder="seu_email@exemplo.com" style="width: 100%; padding: 8px 12px; background: rgba(30,41,59,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff; font-size: 0.85rem;" />
+          </div>
+          <div>
+            <label style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 5px;">Password</label>
+            <input type="password" id="input-cloud-register-password" required placeholder="Mínimo 8 caracteres" style="width: 100%; padding: 8px 12px; background: rgba(30,41,59,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff; font-size: 0.85rem;" />
+          </div>
+          <div>
+            <label style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 5px;">Tipo de Licença</label>
+            <select id="select-cloud-register-license" style="width: 100%; padding: 8px 12px; background: rgba(30,41,59,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff; font-size: 0.85rem;">
+              <option value="standard">Standard (Multi-Conta Básico)</option>
+              <option value="pro" selected>Pro (Multi-Mundo Paralelo & Mutex)</option>
+              <option value="enterprise">Enterprise (Ilimitado + Proxy Dedicado)</option>
+            </select>
+          </div>
+          <div id="cloud-register-error" style="display: none; color: #ef4444; font-size: 0.78rem;"></div>
+          <button type="submit" class="btn btn-primary" id="btn-submit-cloud-register" style="margin-top: 6px; padding: 9px; font-weight: 700; background: var(--gradient-primary);">
+            <span>✨</span> Criar Conta & Persistir no Cloud SQL
+          </button>
+        </form>
 
       </div>
     </div>

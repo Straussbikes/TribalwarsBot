@@ -54,6 +54,11 @@ def create_app(
     token_verifier = TokenVerifier(valid_token=token)
 
     # Rota pública de descoberta para o cliente local (localhost)
+    @app.get("/api/health")
+    async def health_check():
+        """Health check endpoint público para inicialização do launcher."""
+        return {"status": "ok"}
+
     @app.get("/api/auth-info")
     async def get_auth_info():
         """Fornece o token de autenticação exclusivamente para clientes na interface local."""
@@ -84,9 +89,17 @@ def create_app(
         desktop_logger.addHandler(ws_handler)
 
     # 5. Monta a interface estática do Frontend se a pasta existir
-    frontend_dir = Path(__file__).resolve().parent.parent.parent / "frontend"
-    if not frontend_dir.exists():
-        frontend_dir = Path("frontend")
+    import sys
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        frontend_dir = Path(sys._MEIPASS) / "frontend"
+    elif getattr(sys, "frozen", False):
+        frontend_dir = Path(sys.executable).resolve().parent / "_internal" / "frontend"
+        if not frontend_dir.exists():
+            frontend_dir = Path(sys.executable).resolve().parent / "frontend"
+    else:
+        frontend_dir = Path(__file__).resolve().parent.parent.parent / "frontend"
+        if not frontend_dir.exists():
+            frontend_dir = Path("frontend")
 
     if frontend_dir.exists() and (frontend_dir / "index.html").exists():
         from fastapi.staticfiles import StaticFiles

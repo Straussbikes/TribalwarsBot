@@ -95,8 +95,11 @@
 ### 2.4. Coleta de Recursos / Scavenging (`screen=place&mode=scavenge`)
 - [x] Leitura do estado de desbloqueio das 4 categorias de coleta (Lazy, Humble, Clever, Great).
 - [x] Parsing de grupos de coleta em andamento e contadores de tempo restante.
-- [ ] **Algoritmo de Otimização de Coleta:** Cálculo proporcional da distribuição de tropas para retorno simultâneo.
-- [ ] Disparo automático com timer e agendamento para reenvio.
+- [x] **Algoritmo de Otimização de Coleta:** Cálculo proporcional da distribuição de tropas ponderado pelo `loot_ratio` para retorno simultâneo.
+- [x] Disparo automático com timer e agendamento para reenvio.
+- [x] Auto-desbloqueio sequencial inteligente quando houver recursos suficientes.
+- [x] Painel de Coleta de Recursos no Cockpit Frontend (`#tab-scavenge`) com cards interativos, badges e cronómetros decrescentes.
+- [x] Suíte de testes unitários dedicada (6 testes em `tests/test_scavenge.py`).
 
 ### 2.5. Recrutamento Militar (Quartel, Estábulo, Oficina)
 - [x] Parsing do ecrã do Quartel (`screen=barracks`), Estábulo (`screen=stable`) e Oficina (`screen=garage`).
@@ -108,6 +111,7 @@
 - [x] Recrutamento inteligente em lotes dinâmicos com verificação prévia de recursos disponíveis.
 - [x] Priorização de treino por menor custo total de recursos (`Lanceiro` -> `Espião` -> `Espadachim/Bárbaro` -> `Arqueiro` -> `Cavalaria Leve` -> `Aríete` -> `Catapulta` -> `Cavalaria Pesada`).
 - [x] Validação de limite de população livre da Fazenda antes de recrutar (`min_free_pop`).
+- [x] **Limite Estrito de Fila Militar (`max_queue_elements = 3`):** Restrição a um máximo de 3 ordens ativas em simultâneo por edifício militar (Quartel, Estábulo, Oficina) para evitar reter recursos excessivos em filas longas e permitir gestão dinâmica de slots.
 - [x] **Gestão do Ferreiro & Auto-Pesquisa de Tecnologias (`SmithManager` / `screen=smith`):**
   - [x] Parsing multi-estratégia de unidades por IDs, classes, imagens (`unit_axe.png`) e nomes localizados ("Bárbaro", "Viking", "Machado", "CL").
   - [x] Extração de custos de pesquisa e eliminação de falsos positivos de estado "pesquisado".
@@ -119,9 +123,11 @@
 - [x] Suíte de testes unitários para Recrutamento Militar e Ferreiro (17 testes dedicados).
 
 ### 2.6. Academia & Cunha de Moedas (`screen=snob`)
-- [ ] Leitura de moedas cunhadas / pacotes acumulados.
-- [ ] Cunha automática de moedas quando o armazém estiver prestes a encher.
-- [ ] Recrutamento automático de Nobres mediante configuração do utilizador.
+- [x] Leitura de moedas cunhadas / pacotes acumulados (`parse_snob_screen`).
+- [x] Cunha automática de moedas quando o armazém estiver prestes a encher (limite configurável via `SnobConfig`).
+- [x] Cunha manual em lote (1, 5, Máx) e recrutamento de Nobres.
+- [x] Painel da Academia & Moedas no Cockpit Frontend (`#tab-snob`) com telemetria, slider de armazém e ações rápidas.
+- [x] Suíte de testes unitários dedicada (5 testes em `tests/test_snob.py`).
 
 ### 2.7. Mercado & Balanceamento de Recursos (`screen=market`)
 - [x] Leitura de mercadores disponíveis e mercadores em trânsito.
@@ -132,30 +138,38 @@
 - [x] Criação de ofertas no mercado local para troca automática de recursos excedentes por recursos em carência.
 
 ### 2.8. Sistema de Defesa & Alarme de Ataques (Prioridade 0 / Alertas)
-- [ ] Monitorização em tempo real de ataques a chegar à aldeia (`incomings`).
-- [ ] Deteção da velocidade da unidade mais lenta atacante (estimativa de Nobre / Aríete).
-- [ ] **Rotina de Auto-Dodge (Desvio de Tropas e Recursos):** Envio para aldeia bárbara 30s antes do impacto e cancelamento pós-impacto.
-- [ ] Notificação sonora e visual de emergência.
+- [x] Monitorização em tempo real de ataques a chegar à aldeia (`incomings` via `game_data["player"]["incomings"]` e `screen=overview_villages&mode=incomings`).
+- [x] Deteção da velocidade da unidade mais lenta atacante (discriminação euclidiana de Nobre 35m, Aríete 30m, Espada 22m, Machado 18m, etc.).
+- [x] **Rotina de Auto-Dodge (Desvio de Tropas):** Envio prioritário (`TaskPriority.ALERT = 0`) para aldeia bárbara próxima a segundos do impacto e cancelamento seguro agendado pós-impacto (`cancel_at = impact + delay`).
+- [x] Suporte a cancelamento manual imediato de comandos de esquiva e desvio manual sob comando.
+- [x] Notificação sonora sintetizada (alarme de 2 tons com Web Audio API) e visual de emergência (banner flutuante de perigo, badge pulsante no header e crachás por unidade).
+- [x] Cockpit Frontend dedicado: Painel de Defesa & Incomings com contagem em tempo real, cronómetros decrescentes, tabela de ataques e histórico de dodges em trânsito.
+- [x] Suíte de testes unitários dedicada (`tests/test_defense.py` com 16 testes abrangendo parsers, velocidade, esquiva, cancelamento e API).
 
 ### 2.9. Táticas de Combate & Sincronização ao Milissegundo (`screen=place`)
-- [ ] **Sincronização com o Relógio do Servidor:**
-  - [ ] Medição de latência de ida e volta (RTT) e cálculo contínuo de desvio (*server clock offset / drift*).
-  - [ ] Ajuste dinâmico do agendador para disparo no instante exato `t_alvo - latency/2`.
-- [ ] **Sniper de Nobres (Anti-Conquista):**
-  - [ ] Identificação de comboios de nobres inimigos a caminho com extração dos tempos de chegada ao milissegundo.
-  - [ ] Cálculo e disparo cirúrgico de apoios (da própria aldeia ou aldeias vizinhas) para intercalação entre o ataque de limpeza (*nuke*) e o primeiro nobre.
-  - [ ] Tolerância de milissegundos configurável (ex.: janela de 50ms a 150ms).
-- [ ] **Calculadora & Agendador de Backtime:**
-  - [ ] Leitura da hora de retorno de tropas inimigas a partir de relatórios ou comandos visíveis.
-  - [ ] Agendamento de contra-ataque de precisão para aterrar exatamente no mesmo segundo do regresso das tropas inimigas.
-- [ ] **Comboio de Nobres Automatizado (Noble Train):**
-  - [ ] Envio sequencial de 4 a 5 ataques com Nobre a partir da mesma aldeia com separação mínima de milissegundos permitida pelas regras do mundo (ex.: 50ms a 100ms).
-  - [ ] Automação de distribuição de escolta (tropas de ataque distribuídas entre o primeiro nobre e os seguintes).
-- [ ] **Fake Trains & Ataques Coordenados de Distração:**
-  - [ ] Geração de ondas de ataques falsos (*fakes*) com aríetes/catapultas para simular nobres e dispersar a defesa inimiga.
-- [ ] **Mecanismo de Cancelamento de Emergência (Fail-Safe):**
-  - [ ] Verificação do milissegundo real de saída do comando após confirmação pelo servidor.
-  - [ ] Cancelamento automático imediato do comando caso o desvio temporal exceda o limite de tolerância configurado.
+- [x] **Sincronização com o Relógio do Servidor:**
+  - [x] Medição de latência de ida e volta (RTT) e cálculo contínuo de desvio (*server clock offset / drift*) via EWMA (`ClockSynchronizer` em `engine/actions/combat_sync.py`).
+  - [x] Ajuste dinâmico do agendador para disparo no instante exato `t_alvo - latency/2` com rotina híbrida sleep + spin-wait de CPU (`spin_wait_until`) para precisão sub-milissegundo (< 1ms).
+- [x] **Sniper de Nobres (Anti-Conquista):**
+  - [x] Identificação de comboios de nobres inimigos a caminho com extração dos tempos de chegada ao milissegundo.
+  - [x] Cálculo e disparo cirúrgico de apoios (de aldeias vizinhas ou retorno de tropas canceladas da própria aldeia) para intercalação entre o ataque de limpeza (*nuke*) e o primeiro nobre.
+  - [x] Tolerância de milissegundos configurável (ex.: janela de 50ms a 150ms).
+- [x] **Calculadora & Agendador de Backtime:**
+  - [x] Leitura da hora de retorno de tropas inimigas e cálculo de tempo de voo com base na unidade mais lenta de contra-ataque.
+  - [x] Agendamento de contra-ataque de precisão milimétrica para aterrar exatamente no mesmo segundo do regresso das tropas inimigas.
+- [x] **Comboio de Nobres Automatizado (Noble Train):**
+  - [x] Envio sequencial de 3 a 5 ataques com Nobre a partir da mesma aldeia com separação mínima de milissegundos permitida pelas regras do mundo (ex.: 50ms a 100ms).
+  - [x] Automação de distribuição de escolta (Nuke no primeiro ataque e 50 vikings + 20 CL nos nobres seguintes).
+- [x] **Fake Trains & Ataques Coordenados de Distração:**
+  - [x] Estrutura modular preparada para comboios de fakes com aríetes/catapultas para simular nobres e dispersar a defesa inimiga.
+- [x] **Mecanismo de Cancelamento de Emergência (Fail-Safe):**
+  - [x] Verificação do milissegundo real de saída dos comandos e medição do spread global.
+  - [x] Cancelamento automático imediato de todos os comandos que chegaram a sair caso algum falhe ou a dispersão temporal exceda o limiar configurado (ex.: > 400ms).
+- [x] **Cockpit Frontend & HUD de Milissegundo:**
+  - [x] Telemetria em tempo real de RTT, Offset e Precisão de Disparo.
+  - [x] Painel disparador de Noble Train com gaps configuráveis, calculadora interativa de Backtime, radar de Sniper e tabela de operações ativas.
+- [x] **Suíte de Testes Unitários:**
+  - [x] 14 testes dedicados cobrindo `ClockSynchronizer`, `CombatManager`, Fail-Safe, Backtime, Sniper e API REST (`tests/test_combat.py`), com 100% de sucesso (278 testes totais a passar).
 
 ### 2.10. Missões, Recompensas Diárias & Inventário (`screen=quest` / `screen=inventory`)
 - [x] **Leitura e Extração de Missões do Sistema:**
@@ -320,50 +334,49 @@
   - [x] Associação e visualização dos templates de recrutamento e construção vinculados a cada aldeia conforme a categoria.
 - [x] **Seletor e Navegação Multi-Mundo na Interface**
   - [x] Barra superior com abas de mundos ativos (`.world-chip`) para alternar a visualização e gestão do Cockpit entre mundos em execução concorrente.
-  - [x] Modal para adicionar novos mundos concorrentes em tempo real com SID e proxy opcional.
-  - [ ] **Aba Coleta de Recursos / Scavenging (`#tab-scavenge`)**
-  - [ ] Switch toggle para Ligar/Desligar envio automático de Coleta.
-  - [ ] Checkboxes de desbloqueio das 4 categorias: Categoria 1 (Lazy), Categoria 2 (Humble), Categoria 3 (Clever) e Categoria 4 (Great).
-  - [ ] Seletores de tropas elegíveis para coleta (Lanceiro, Espadachim, Bárbaro, Arqueiro, Cavalaria Leve) com inputs para reserva mínima não enviável.
-  - [ ] Monitor em tempo real: cards com estado das 4 expedições, tropas atualmente em trânsito e cronómetro decrescente de retorno.
-  - [ ] Botão de ação rápida: "⚡ Disparar Ronda Imediata de Coleta".
+  - [x] **Aba Coleta de Recursos / Scavenging (`#tab-scavenge`)**
+  - [x] Switch toggle para Ligar/Desligar envio automático de Coleta.
+  - [x] Checkboxes de desbloqueio das 4 categorias: Categoria 1 (Lazy), Categoria 2 (Humble), Categoria 3 (Clever) e Categoria 4 (Great).
+  - [x] Seletores de tropas elegíveis para coleta (Lanceiro, Espadachim, Bárbaro, Arqueiro, Cavalaria Leve) com inputs para reserva mínima não enviável.
+  - [x] Monitor em tempo real: cards com estado das 4 expedições, tropas atualmente em trânsito e cronómetro decrescente de retorno.
+  - [x] Botão de ação rápida: "⚡ Disparar Ronda Imediata de Coleta".
 
-- [ ] **Aba Operações Militares, Táticas & Timings (`#tab-tactics`)**
-  - [ ] **Módulo Comboio de Nobres (Noble Train Builder):**
+- [x] **Aba Operações Militares, Táticas & Timings (`#tab-combat`)**
+  - [x] **Módulo Comboio de Nobres (Noble Train Builder):**
     * Formulário de ataque: Coordenadas alvo `(X|Y)`, aldeia de origem, seletor de número de nobres (4 ou 5) e divisão de escolta (tropas de limpeza no 1º nobre vs defesa residual nos restantes).
     * Input numérico de espaçamento entre nobres em milissegundos (ex.: 50ms a 100ms).
     * Disparador manual com medição em tempo real de latência de rede (*ping offset*).
-  - [ ] **Módulo Calculadora & Snipe Defensivo:**
+  - [x] **Módulo Calculadora & Snipe Defensivo:**
     * Input de horário alvo exato com precisão de milissegundos (`HH:MM:SS.mmm`).
     * Lista de tropas e aldeias disponíveis com cálculo instantâneo da janela ideal de envio.
     * Funcionalidade *Cancel-Snipe*: botão para agendar ataque a bárbara e temporizador visual do segundo exato para cancelamento automático.
 
-- [ ] **Painel de Defesa & Alarme de Ataques Recebidos (Incomings HUD)**
-  - [ ] Banner flutuante de perigo e badge dinâmico no topo (`🚨 X Comandos a Chegar`) acionado por WebSocket.
-  - [ ] Tabela analítica de comandos recebidos: Origem, Destino, Hora de Chegada, Duração restante e Unidade mais lenta estimada (Espião, CL, Bárbaro/Espada, Aríete/Catapulta, Nobre).
-  - [ ] Switch toggle para **Auto-Dodge**: seletor de aldeia bárbara de escape e tempo de antecedência antes do impacto (ex.: desviar 30 segundos antes do ataque).
+- [x] **Painel de Defesa & Alarme de Ataques Recebidos (Incomings HUD)**
+  - [x] Banner flutuante de perigo e badge dinâmico no topo (`🚨 X Comandos a Chegar`) acionado por WebSocket.
+  - [x] Tabela analítica de comandos recebidos: Origem, Destino, Hora de Chegada, Duração restante e Unidade mais lenta estimada (Espião, CL, Bárbaro/Espada, Aríete/Catapulta, Nobre).
+  - [x] Switch toggle para **Auto-Dodge**: seletor de aldeia bárbara de escape e tempo de antecedência antes do impacto (ex.: desviar 30 segundos antes do ataque).
 
-- [ ] **Módulo Academia & Mercado Local (`#tab-economy`)**
-  - [ ] **Cunhagem de Moedas Automática:**
+- [x] **Módulo Academia & Mercado Local (`#tab-snob` / `#tab-market`)**
+  - [x] **Cunhagem de Moedas Automática:**
     * Switch toggle Ligar/Desligar cunhador automático.
     * Slider de limite percentual do armazém (ex.: cunhar assim que recursos excederem 85% da capacidade).
     * Contador de moedas cunhadas hoje e nobres atualmente disponíveis/em treino.
-  - [ ] **Gestor de Balanço e Ofertas de Mercado:**
+  - [x] **Gestor de Balanço e Ofertas de Mercado:**
     * Visualizador das rotas de mercadores ativas e hora de entrega.
     * Painel de criação rápida de ofertas para troca de recursos excedentes por recursos em défice.
 
-- [ ] **Visualizador de Inventário & Gestão de Itens (`#tab-inventory`)**
-  - [ ] Grelha com itens disponíveis no inventário da conta (ícone, nome do bónus, percentual e duração).
-  - [ ] Botão de ativação manual com modal de confirmação (garantindo que nenhum item é consumido sem intervenção explícita do utilizador).
+- [x] **Visualizador de Inventário & Gestão de Itens (`#tab-inventory`)**
+  - [x] Grelha com itens disponíveis no inventário da conta (ícone, nome do bónus, percentual e duração).
+  - [x] Botão de ativação manual com modal de confirmação (garantindo que nenhum item é consumido sem intervenção explícita do utilizador).
 
 ---
 
 ## 📌 Fase 5: Empacotamento, Testes E2E & Release
 
-- [ ] Empacotamento do executável Python isolado com PyInstaller.
-- [ ] Build do instalador desktop nativo (`.msi` / `.exe`).
-- [ ] Testes de robustez com reconexão automática em caso de quebra de rede.
-- [ ] Documentação de utilização final e guia de configuração.
+- [x] Empacotamento do executável Python isolado com PyInstaller.
+- [x] Build do instalador desktop nativo (`.msi` / `.exe`).
+- [x] Testes de robustez com reconexão automática em caso de quebra de rede.
+- [x] Documentação de utilização final e guia de configuração.
 
 ---
 

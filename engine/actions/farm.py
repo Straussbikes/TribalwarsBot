@@ -700,6 +700,14 @@ class FarmManager:
                 tracker = getattr(account, "stats_tracker", None) or (account.get_stats_tracker() if hasattr(account, "get_stats_tracker") else None)
                 if tracker:
                     tracker.record_command(command_type="farm", target_coords=target.target_coords, success=True)
+                    squad_cap = squad.carrying_capacity() if squad else 240
+                    cap_per_res = max(30, squad_cap // 3)
+                    tracker.record_farm_loot(
+                        wood=cap_per_res, stone=cap_per_res, iron=cap_per_res,
+                        village_id=village_id or account.current_village_id or 0,
+                        target_x=target.x, target_y=target.y,
+                        village_name=target.target_name,
+                    )
             except Exception as e:
                 logger.debug(f"Aviso ao registar métricas de farm no tracker: {e}")
         return success
@@ -812,6 +820,24 @@ class FarmManager:
                     if target.target_coords:
                         self._recent_farm_targets.add(target.target_coords)
                     target.has_attack_in_transit = True
+
+                    try:
+                        tracker = getattr(account, "stats_tracker", None) or (account.get_stats_tracker() if hasattr(account, "get_stats_tracker") else None)
+                        if tracker:
+                            tracker.record_command(command_type="farm", target_coords=target.target_coords, success=True)
+                            haul_cap = 300
+                            if am_state and am_state.haul_capacities:
+                                haul_cap = am_state.haul_capacities.get(chosen_letter.lower(), 300) or 300
+                            ratio = 1.0 if target.loot_status == "full" else (0.5 if target.loot_status == "partial" else 0.75)
+                            cap_per_res = max(30, int((haul_cap * ratio) // 3))
+                            tracker.record_farm_loot(
+                                wood=cap_per_res, stone=cap_per_res, iron=cap_per_res,
+                                village_id=v_id,
+                                target_x=target.x, target_y=target.y,
+                                village_name=target.target_name,
+                            )
+                    except Exception as e_st:
+                        logger.debug(f"Aviso ao registar telemetria de farm no ciclo de raio: {e_st}")
 
                     logger.info(
                         f"[{account.world}] 🌾 [SAQUE DESPACHADO] Modelo {chosen_letter.upper()} enviado com sucesso para "
@@ -1239,6 +1265,14 @@ class FarmManager:
             except Exception as e:
                 logger.warning(f"Erro na execução da onda de farm: {e}")
             finally:
+                try:
+                    tracker = getattr(account, "stats_tracker", None)
+                    broadcast_fn = getattr(account, "_broadcast_sync", None)
+                    if broadcast_fn and tracker:
+                        broadcast_fn("STATS_UPDATED", tracker.get_summary())
+                except Exception:
+                    pass
+
                 # Reagenda para o próximo ciclo de farm com delay estocástico gaussiano
                 if scheduler.is_running and not scheduler.is_paused:
                     scheduler.schedule_human_like(

@@ -368,11 +368,12 @@ class SidecarApi {
     });
   }
 
-  async toggleRecruitment(enabled = null, intervalMinutes = null, minFreePop = null) {
+  async toggleRecruitment(enabled = null, intervalMinutes = null, minFreePop = null, maxQueueElements = null) {
     const payload = {};
     if (enabled !== null) payload.enabled = enabled;
     if (intervalMinutes !== null) payload.interval_minutes = parseFloat(intervalMinutes);
     if (minFreePop !== null) payload.min_free_pop = parseInt(minFreePop, 10);
+    if (maxQueueElements !== null) payload.max_queue_elements = parseInt(maxQueueElements, 10);
     return await this.request("/api/recruitment/toggle", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -610,6 +611,260 @@ class SidecarApi {
     if (limit) usp.append("limit", limit);
     const qs = usp.toString() ? `?${usp.toString()}` : "";
     return await this.request(`/api/radar/player-history/${playerId}${qs}`);
+  }
+
+  // --- Módulo de Defesa & Alarme de Ataques (Ponto 2.8) ---
+
+  async getDefenseStatus(world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/defense/incomings${qs}`);
+  }
+
+  async checkDefenseIncomings(world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/defense/check${qs}`, { method: "POST" });
+  }
+
+  async toggleAutoDodge(payload, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/defense/dodge/toggle${qs}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async triggerManualDodge(payload = {}, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/defense/dodge/trigger${qs}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async cancelDefenseCommand(commandId, villageId = null, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/defense/command/cancel${qs}`, {
+      method: "POST",
+      body: JSON.stringify({ command_id: commandId, village_id: villageId }),
+    });
+  }
+
+  async updateDefenseConfig(payload, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/defense/config${qs}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // --- Módulo de Táticas de Combate & Sincronização ao Milissegundo (Ponto 2.9) ---
+
+  async getCombatStatus(world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/combat/status${qs}`);
+  }
+
+  async pingClockSync(world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/combat/sync/ping${qs}`, { method: "POST" });
+  }
+
+  async launchNobleTrain(payload, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/combat/noble-train${qs}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async calculateBacktime(payload, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/combat/backtime/calculate${qs}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async scheduleBacktime(payload, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/combat/backtime/schedule${qs}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async analyzeSnipes(villageId = null, world = null) {
+    const qs = new URLSearchParams();
+    if (villageId) qs.append("village_id", villageId);
+    if (world) qs.append("world", world);
+    const qsStr = qs.toString() ? `?${qs.toString()}` : "";
+    return await this.request(`/api/combat/snipe/analyze${qsStr}`, { method: "POST" });
+  }
+
+  async cancelTacticalOperation(operationId) {
+    return await this.request("/api/combat/operation/cancel", {
+      method: "POST",
+      body: JSON.stringify({ operation_id: operationId }),
+    });
+  }
+
+  async updateCombatConfig(payload, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/combat/config${qs}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // --- Módulo de Coleta de Recursos / Scavenging (Ponto 2.4 & Fase 4) ---
+
+  async getScavengeStatus(villageId = null, world = null) {
+    const qs = new URLSearchParams();
+    if (villageId) qs.append("village_id", villageId);
+    if (world) qs.append("world", world);
+    const qsStr = qs.toString() ? `?${qs.toString()}` : "";
+    return await this.request(`/api/scavenge/status${qsStr}`);
+  }
+
+  async toggleScavengeModule(payload, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/scavenge/toggle${qs}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async triggerScavengeCycle(payload = {}, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/scavenge/trigger${qs}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async unlockScavengeOption(optionId, villageId = null, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/scavenge/unlock${qs}`, {
+      method: "POST",
+      body: JSON.stringify({ option_id: optionId, village_id: villageId }),
+    });
+  }
+
+  // --- Módulo da Academia & Moedas (Ponto 2.6 & Fase 4) ---
+
+  async getSnobStatus(villageId = null, world = null) {
+    const qs = new URLSearchParams();
+    if (villageId) qs.append("village_id", villageId);
+    if (world) qs.append("world", world);
+    const qsStr = qs.toString() ? `?${qs.toString()}` : "";
+    return await this.request(`/api/snob/status${qsStr}`);
+  }
+
+  async mintSnobCoins(count = 1, villageId = null, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/snob/mint${qs}`, {
+      method: "POST",
+      body: JSON.stringify({ count: count, village_id: villageId }),
+    });
+  }
+
+  async recruitSnobNobleman(villageId = null, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/snob/recruit${qs}`, {
+      method: "POST",
+      body: JSON.stringify({ village_id: villageId }),
+    });
+  }
+
+  async updateSnobConfig(payload, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/snob/config${qs}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // --- Módulo do Inventário (Ponto 2.10 & Fase 4) ---
+
+  async getInventoryItems(forceRefresh = false, world = null) {
+    const qs = new URLSearchParams();
+    if (forceRefresh) qs.append("force_refresh", "true");
+    if (world) qs.append("world", world);
+    const qsStr = qs.toString() ? `?${qs.toString()}` : "";
+    return await this.request(`/api/inventory/items${qsStr}`);
+  }
+
+  async useInventoryItem(itemId, villageId = null, world = null) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/inventory/use${qs}`, {
+      method: "POST",
+      body: JSON.stringify({ item_id: itemId, village_id: villageId }),
+    });
+  }
+
+  // --- Cloud SQL / Multi-Account & Multi-World APIs ---
+
+  async registerAppUser(email, password, licenseType = "standard") {
+    return await this.request("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ email, password, license_type: licenseType }),
+    });
+  }
+
+  async loginAppUser(email, password) {
+    return await this.request("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+  }
+
+  async getCurrentAppUser() {
+    return await this.request("/api/auth/me");
+  }
+
+  async logoutAppUser() {
+    return await this.request("/api/auth/logout", { method: "POST" });
+  }
+
+  async switchGameAccount(gameUsername, accountId = null) {
+    return await this.request("/api/accounts/switch", {
+      method: "POST",
+      body: JSON.stringify({ game_username: gameUsername, account_id: accountId }),
+    });
+  }
+
+  async getActiveAccountStatus() {
+    return await this.request("/api/accounts/active");
+  }
+
+  async getGameWorlds(accountId = null) {
+    const qs = accountId ? `?account_id=${encodeURIComponent(accountId)}` : "";
+    return await this.request(`/api/worlds${qs}`);
+  }
+
+  async addGameWorld(worldCode, isActive = true) {
+    return await this.request("/api/worlds", {
+      method: "POST",
+      body: JSON.stringify({ world_code: worldCode, is_active: isActive }),
+    });
+  }
+
+  async toggleGameWorld(worldCode, isActive) {
+    return await this.request(`/api/worlds/${encodeURIComponent(worldCode)}/toggle`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_active: isActive }),
+    });
+  }
+
+  async getWorldVillages(worldCode) {
+    return await this.request(`/api/worlds/${encodeURIComponent(worldCode)}/villages`);
+  }
+
+  async updateVillageModel(villageId, activeBuildModelId) {
+    return await this.request(`/api/villages/${encodeURIComponent(villageId)}/model`, {
+      method: "PATCH",
+      body: JSON.stringify({ active_build_model_id: activeBuildModelId }),
+    });
   }
 }
 

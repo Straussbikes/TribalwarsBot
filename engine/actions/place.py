@@ -434,5 +434,157 @@ class PlaceManager:
             village_id=village_id,
         )
 
+    async def cancel_command(
+        self,
+        account: TribalAccount,
+        command_id: str,
+        village_id: Optional[int] = None,
+    ) -> bool:
+        """
+        Cancela um comando militar em andamento (ex.: comando de esquiva/dodge pós-impacto).
+        Submete a requisição action=cancel com o ID do comando e token CSRF.
+        """
+        v_id = village_id or account.current_village_id
+        cmd_id = str(command_id).strip()
+        logger.info(f"[{account.world}] A cancelar comando {cmd_id} na aldeia {v_id}...")
+
+        csrf_token = account.csrf_token or ""
+        try:
+            # 1. Tenta envio via POST action=cancel na Praça
+            data = {"id": cmd_id}
+            if csrf_token:
+                data["h"] = csrf_token
+
+            html = await account.post_action(
+                screen="place",
+                action="cancel",
+                data=data,
+                village_id=v_id,
+                apply_jitter=False,  # Em cancelamento de emergência, zero delay desnecessário
+            )
+
+            # Verifica mensagens de erro ou sucesso
+            html_lower = html.lower()
+            if "cancelado" in html_lower or "cancelled" in html_lower or "cancel" in html_lower:
+                logger.info(f"[{account.world}] ✅ [COMANDO CANCELADO] ID: {cmd_id}")
+                return True
+
+            # 2. Fallback via GET action=cancel
+            h_param = f"&h={csrf_token}" if csrf_token else ""
+            resp = await account.get_screen(
+                screen=f"place&action=cancel&id={cmd_id}{h_param}",
+                village_id=v_id,
+                apply_jitter=False,
+            )
+            resp_lower = resp.lower()
+            if "cancelado" in resp_lower or "cancelled" in resp_lower or cmd_id not in resp:
+                logger.info(f"[{account.world}] ✅ [COMANDO CANCELADO VIA GET] ID: {cmd_id}")
+                return True
+
+            logger.info(f"[{account.world}] Comando {cmd_id} cancelado com sucesso (sem erros reportados).")
+            return True
+        except Exception as e:
+            logger.error(f"[{account.world}] Erro ao cancelar comando {cmd_id}: {e}")
+            return False
+
+    async def send_dodge_command(
+        self,
+        account: TribalAccount,
+        target_coords: Tuple[int, int],
+        units: Optional[UnitsCount] = None,
+        village_id: Optional[int] = None,
+        offensive_only: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Despacha tropas em esquiva rápida (Auto-Dodge) para uma coordenada de fuga
+        e extrai o ID do comando gerado para cancelamento posterior pós-impacto.
+        """
+        if isinstance(target_coords, str) and "|" in target_coords:
+            tx_s, ty_s = target_coords.split("|", 1)
+            target_x, target_y = int(tx_s), int(ty_s)
+        else:
+            target_x, target_y = target_coords
+
+        v_id = village_id or account.current_village_id
+        state = await self.get_state(account, village_id=v_id)
+
+        # Determina tropas a enviar
+        if units is not None:
+            troops_to_send = units.clamp_to_available(state.units)
+        elif offensive_only:
+            # Desvia tropas ofensivas vitais
+            off_dict = {
+                "spear": 0, "sword": 0,
+                "axe": state.units.axe,
+                "archer": 0,
+                "spy": min(5, state.units.spy),
+                "light": state.units.light,
+                "marcher": state.units.marcher,
+                "heavy": 0,
+                "ram": state.units.ram,
+                "catapult": state.units.catapult,
+                "knight": 0,
+                "snob": state.units.snob,
+            }
+            troops_to_send = UnitsCount.from_dict(off_dict)
+        else:
+            # Desvia todas as tropas disponíveis na aldeia
+            troops_to_send = state.units
+
+        if troops_to_send.total_units() == 0:
+            logger.warning(f"[{account.world}] Sem tropas para dodge na aldeia {v_id}.")
+            return {"success": False, "message": "Nenhuma tropa disponível na aldeia para esquiva."}
+
+        # Etapa 1: Preparar comando
+        prep = await self.prepare_command(
+            account=account,
+            target_x=target_x,
+            target_y=target_y,
+            units=troops_to_send,
+            is_attack=True,
+            village_id=v_id,
+        )
+        if not prep.get("success"):
+            return {"success": False, "message": prep.get("error_message", "Falha na Etapa 1 do dodge.")}
+
+        # Etapa 2: Confirmar comando
+        hidden_fields = prep.get("hidden_fields", {})
+        try:
+            html = await account.post_action(
+                screen="place",
+                action="command",
+                data=hidden_fields,
+                village_id=v_id,
+                apply_jitter=False,
+            )
+
+            # Localiza o comando recém-criado na resposta da Praça
+            outgoings = parse_place_commands(html)
+            cmd_id = ""
+            target_str = f"{target_x}|{target_y}"
+            for cmd in outgoings:
+                if target_str in cmd.get("target_coords", "") or target_str in cmd.get("raw_text", ""):
+                    cmd_id = cmd.get("command_id", "")
+                    break
+
+            if not cmd_id and outgoings:
+                # O comando mais recente normalmente é o primeiro
+                cmd_id = outgoings[0].get("command_id", "")
+
+            logger.info(
+                f"[{account.world}] 🛡️ [AUTO-DODGE DISPACHADO] "
+                f"Destino: ({target_x}|{target_y}) | Tropas: {troops_to_send.to_summary_str()} | ID Comando: {cmd_id or 'Auto'}"
+            )
+            return {
+                "success": True,
+                "command_id": cmd_id,
+                "target_coords": f"{target_x}|{target_y}",
+                "units": troops_to_send.to_dict(),
+                "duration_str": prep.get("duration_str", ""),
+            }
+        except Exception as e:
+            logger.error(f"[{account.world}] Falha ao disparar dodge: {e}")
+            return {"success": False, "message": str(e)}
+
     # Alias para compatibilidade de API
     send_attack = send_command

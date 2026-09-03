@@ -170,6 +170,7 @@ class MultiVillageCoordinator:
                         batch_sizes=config.recruitment.batch_sizes,
                         min_free_pop=config.recruitment.min_free_pop,
                         village_id=v_id,
+                        max_queue_elements=getattr(config.recruitment, "max_queue_elements", 3),
                     )
                     if r_res:
                         results["recruitment_actions"] += 1

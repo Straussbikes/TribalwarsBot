@@ -127,6 +127,84 @@ class TestScavenge(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(success)
         account.post_action.assert_called_once()
 
+    def test_calculate_optimal_distribution(self):
+        from engine.actions.scavenge import calculate_optimal_distribution
+
+        ready_options = [
+            ScavengeOption(id=1, name="Lazy", is_unlocked=True, is_scavenging=False, loot_ratio=0.10),
+            ScavengeOption(id=2, name="Humble", is_unlocked=True, is_scavenging=False, loot_ratio=0.20),
+            ScavengeOption(id=3, name="Clever", is_unlocked=True, is_scavenging=False, loot_ratio=0.50),
+            ScavengeOption(id=4, name="Great", is_unlocked=True, is_scavenging=False, loot_ratio=0.75),
+        ]
+        available_troops = {"spear": 155, "sword": 155}
+        dist = calculate_optimal_distribution(
+            available_troops=available_troops,
+            ready_options=ready_options,
+            eligible_units=["spear", "sword"],
+            min_reserved={"spear": 0, "sword": 0},
+        )
+
+        # Proporções: 10, 20, 50, 75
+        self.assertEqual(dist[1]["spear"], 10)
+        self.assertEqual(dist[2]["spear"], 20)
+        self.assertEqual(dist[3]["spear"], 50)
+        self.assertEqual(dist[4]["spear"], 75)
+
+        self.assertEqual(dist[1]["sword"], 10)
+        self.assertEqual(dist[2]["sword"], 20)
+        self.assertEqual(dist[3]["sword"], 50)
+        self.assertEqual(dist[4]["sword"], 75)
+
+    async def test_execute_scavenge_cycle(self):
+        from engine.core.account import TribalAccount
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.csrf_token = "csrf_scav"
+        account.current_village_id = 12345
+        account.get_screen = AsyncMock(return_value=SAMPLE_SCAVENGE_HTML)
+        account.post_action = AsyncMock(return_value="<html>ok</html>")
+
+        mgr = ScavengeManager()
+        from unittest.mock import MagicMock
+        cfg = MagicMock()
+        cfg.auto_unlock = True
+        cfg.eligible_units = ["spear", "sword"]
+        cfg.min_reserved_units = {"spear": 20}
+
+        res = await mgr.execute_scavenge_cycle(account, cfg, village_id=12345)
+        self.assertEqual(res["status"], "success")
+        self.assertGreaterEqual(len(res["sent_expeditions"]), 1)
+        account.post_action.assert_called()
+
+
+class TestScavengeApi(unittest.TestCase):
+
+    def setUp(self):
+        from fastapi.testclient import TestClient
+        from engine.api.server import create_app
+        from engine.api.context import EngineContext
+        from engine.config.settings import BotConfig
+        from engine.core.account import TribalAccount
+
+        self.account = TribalAccount(world="pt117", sid="test_sid")
+        self.account.current_village_id = 12345
+        self.account.get_screen = AsyncMock(return_value=SAMPLE_SCAVENGE_HTML)
+
+        self.cfg = BotConfig(world="pt117")
+        self.ctx = EngineContext(account=self.account, config=self.cfg)
+        self.token = "test_token_scavenge"
+        self.app = create_app(self.ctx, token=self.token, attach_log_handler=False)
+        self.client = TestClient(self.app, headers={"X-Engine-Token": self.token})
+
+    def test_get_scavenge_status_endpoint(self):
+        res = self.client.get("/api/scavenge/status?village_id=12345")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["status"], "success")
+        self.assertEqual(len(data["options"]), 4)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
