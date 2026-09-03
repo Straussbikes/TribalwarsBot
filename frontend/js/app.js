@@ -7671,20 +7671,42 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
+      if (!cachedBuildingTemplates || cachedBuildingTemplates.length === 0) {
+        await loadBuildingTemplatesList();
+      }
+
+      const templatesList = (cachedBuildingTemplates && cachedBuildingTemplates.length > 0)
+        ? cachedBuildingTemplates
+        : [
+            { id: "ee02gd68de", name: "AI - Build Model" },
+            { id: "zbhbufxza0q", name: "Construcao" },
+            { id: "4zyrtbsdxa", name: "Upar Barbara" },
+            { id: "rtk1zhvuvtr", name: "Sprinter BR131" },
+            { id: "6goivjbmzbh", name: "Pontos Premium" },
+          ];
+
       tbody.innerHTML = villages.map(v => {
         const updatedStr = v.updated_at ? new Date(v.updated_at).toLocaleString("pt-PT") : "Recentemente";
-        const currentModel = v.active_build_model_id || "default_plan";
+        let currentModel = (v.active_build_model_id || "ee02gd68de").toLowerCase().trim();
+        if (currentModel === "default_plan" || currentModel === "military_rush" || currentModel === "balanced") {
+          currentModel = "ee02gd68de";
+        } else if (currentModel === "rush_resources") {
+          currentModel = "4zyrtbsdxa";
+        }
+
+        const optionsHtml = templatesList.map(t => {
+          const isSel = (t.id.toLowerCase() === currentModel || t.name.toLowerCase() === currentModel);
+          return `<option value="${t.id}" ${isSel ? 'selected' : ''}>🏛️ ${t.name}</option>`;
+        }).join("");
+
         return `
           <tr style="border-bottom: 1px solid var(--border-subtle);">
             <td style="padding: 10px 12px; font-family: var(--font-mono); color: var(--text-muted);">${v.village_game_id}</td>
             <td style="padding: 10px 12px; font-weight: 600; color: #fff;">${v.village_name}</td>
             <td style="padding: 10px 12px; font-family: var(--font-mono); color: var(--neon-cyan);">${v.coordinates || `${v.coord_x}|${v.coord_y}`}</td>
             <td style="padding: 10px 12px;">
-              <select class="select-village-build-model" data-village-id="${v.id}" style="padding: 5px 10px; background: rgba(30,41,59,0.9); border: 1px solid var(--neon-cyan); border-radius: 6px; color: #fff; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
-                <option value="default_plan" ${currentModel === 'default_plan' ? 'selected' : ''}>🏛️ Padrão (Balanceado)</option>
-                <option value="rush_resources" ${currentModel === 'rush_resources' ? 'selected' : ''}>🌲 Rush Recursos (Poços 30)</option>
-                <option value="military_rush" ${currentModel === 'military_rush' ? 'selected' : ''}>⚔️ Rush Militar (Quartel/Oficina)</option>
-                <option value="balanced" ${currentModel === 'balanced' ? 'selected' : ''}>⚖️ Equilibrado (Defesa/Ataque)</option>
+              <select class="select-village-build-model" data-village-id="${v.id}" data-village-game-id="${v.village_game_id}" style="padding: 5px 10px; background: rgba(30,41,59,0.9); border: 1px solid var(--neon-cyan); border-radius: 6px; color: #fff; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
+                ${optionsHtml}
               </select>
             </td>
             <td style="padding: 10px 12px; font-size: 0.75rem; color: var(--text-muted);">${updatedStr}</td>

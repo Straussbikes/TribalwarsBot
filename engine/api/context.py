@@ -3679,13 +3679,22 @@ class EngineContext:
         }
 
     async def update_village_build_model(self, village_id: str, active_build_model_id: str) -> Dict[str, Any]:
-        """Define o modelo de construção ativo para uma aldeia na base de dados."""
+        """Define o modelo de construção ativo para uma aldeia na base de dados e no runtime."""
         updated = await self.village_repo.update_build_model(
             village_id=village_id,
             active_build_model_id=active_build_model_id,
         )
         if not updated:
             return {"status": "error", "message": "Aldeia não encontrada."}
+
+        # Atualiza a configuração em runtime da aldeia
+        if hasattr(self, "config") and self.config:
+            v_key = str(updated.village_game_id)
+            if v_key not in self.config.villages:
+                from engine.config.settings import VillageConfig
+                self.config.villages[v_key] = VillageConfig()
+            self.config.villages[v_key].building_template = active_build_model_id
+
         return {
             "status": "success",
             "village": updated.to_dict(),
