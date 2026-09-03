@@ -432,6 +432,12 @@ class SidecarApi {
     });
   }
 
+  async autoLoginAccount(accountId) {
+    return await this.request(`/api/accounts/${encodeURIComponent(accountId)}/auto-login`, {
+      method: "POST",
+    });
+  }
+
   async disconnectAccount() {
     return await this.request("/api/accounts/disconnect", {
       method: "POST",

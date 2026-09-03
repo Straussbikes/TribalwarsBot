@@ -217,10 +217,12 @@ class AccountCreateRequest(BaseModel):
     proxy: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None
+    auto_login_enabled: Optional[bool] = None
 
 
 class AccountUpdateRequest(BaseModel):
     name: Optional[str] = None
+    game_username: Optional[str] = None
     world_domain: Optional[str] = None
     world: Optional[str] = None
     domain: Optional[str] = None
@@ -234,6 +236,7 @@ class AccountUpdateRequest(BaseModel):
     proxy: Optional[str] = None
     username: Optional[str] = None
     password: Optional[str] = None
+    auto_login_enabled: Optional[bool] = None
 
 
 class AddFarmTargetRequest(BaseModel):
@@ -568,6 +571,7 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
                 world=world_val,
                 proxy=payload.proxy,
                 password=payload.password,
+                auto_login_enabled=payload.auto_login_enabled,
             )
             if res.get("status") == "error":
                 raise HTTPException(status_code=400, detail=res.get("message"))
@@ -608,6 +612,19 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
             "session_start_time": context.session_manager.session_start_time,
         }
 
+    @router.post("/accounts/{account_id}/auto-login")
+    async def auto_login_account(account_id: str):
+        """Executa a autenticação direta via Auto-Login para a conta especificada."""
+        res = await context.perform_auto_login(account_id)
+        if res.get("status") == "error":
+            status_code = 400
+            if res.get("error_type") == "captcha_required":
+                status_code = 403
+            elif res.get("error_type") == "invalid_credentials":
+                status_code = 401
+            raise HTTPException(status_code=status_code, detail=res.get("message"))
+        return res
+
     @router.get("/accounts/{account_id}")
     async def get_account(account_id: str):
         """Obtém detalhes de uma conta específica do Cloud SQL ou local."""
@@ -624,6 +641,9 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
                     d["world"] = w_code
                     d["world_domain"] = f"{w_code}.{creds.get('domain', 'tribalwars.com.pt')}"
                     d["session_cookie"] = creds.get("sid", "")
+                    d["has_password"] = bool(creds.get("password"))
+                    d["auto_login_enabled"] = bool(creds.get("auto_login_enabled", False))
+                    d["last_auto_login"] = creds.get("last_auto_login")
                     return d
             except Exception:
                 pass
@@ -651,6 +671,12 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
                         w_val = data.get("world") or data.get("world_domain", "").split(".")[0]
                         creds["world"] = w_val
                         await context.game_world_repo.get_or_create(acc.id, w_val)
+                    if "password" in data and data["password"]:
+                        creds["password"] = data["password"].strip()
+                    if "auto_login_enabled" in data and data["auto_login_enabled"] is not None:
+                        creds["auto_login_enabled"] = bool(data["auto_login_enabled"])
+                    if "proxy" in data:
+                        creds["proxy"] = data["proxy"]
                     await context.game_account_repo.create_or_update(
                         app_user_id=context.current_app_user.id,
                         game_username=data.get("name") or acc.game_username,

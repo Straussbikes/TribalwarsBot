@@ -156,6 +156,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     inputAccSid: document.getElementById("input-acc-sid"),
     inputAccVillageId: document.getElementById("input-acc-village-id"),
     inputAccProxy: document.getElementById("input-acc-proxy"),
+    inputAccPassword: document.getElementById("input-acc-password"),
+    inputAccAutoLogin: document.getElementById("input-acc-auto-login"),
     inputAccTemplate: document.getElementById("input-acc-template"),
 
     // Mercado & Balanceamento de Recursos (Secção 2.7)
@@ -1495,9 +1497,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (elements.inputAccName) elements.inputAccName.value = "";
     if (elements.inputAccWorldDomain) elements.inputAccWorldDomain.value = state.account?.world || "pt117";
     if (elements.inputAccSid) elements.inputAccSid.value = "";
+    if (elements.inputAccPassword) {
+      elements.inputAccPassword.value = "";
+      elements.inputAccPassword.placeholder = "Introduza a password para login automático...";
+    }
+    if (elements.inputAccAutoLogin) elements.inputAccAutoLogin.checked = false;
     if (elements.inputAccVillageId) elements.inputAccVillageId.value = "";
     if (elements.inputAccProxy) elements.inputAccProxy.value = "";
-    if (elements.inputAccTemplate) elements.inputAccTemplate.value = "default_plan";
+    if (elements.inputAccTemplate) elements.inputAccTemplate.value = "ee02gd68de";
     elements.accountModal.style.display = "flex";
   }
 
@@ -1509,9 +1516,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (elements.inputAccName) elements.inputAccName.value = acc.name || "";
     if (elements.inputAccWorldDomain) elements.inputAccWorldDomain.value = acc.world_domain || acc.world || "pt117";
     if (elements.inputAccSid) elements.inputAccSid.value = acc.session_cookie || acc.sid || "";
+    if (elements.inputAccPassword) {
+      elements.inputAccPassword.value = "";
+      elements.inputAccPassword.placeholder = acc.has_password
+        ? "•••••••• (Guardada no cofre - preencha apenas para alterar)"
+        : "Introduza a password para login automático...";
+    }
+    if (elements.inputAccAutoLogin) {
+      elements.inputAccAutoLogin.checked = !!acc.auto_login_enabled;
+    }
     if (elements.inputAccVillageId) elements.inputAccVillageId.value = acc.village_id || "";
     if (elements.inputAccProxy) elements.inputAccProxy.value = acc.proxy || "";
-    if (elements.inputAccTemplate) elements.inputAccTemplate.value = acc.build_order_strategy || "default_plan";
+    if (elements.inputAccTemplate) elements.inputAccTemplate.value = acc.build_order_strategy || "ee02gd68de";
     elements.accountModal.style.display = "flex";
   }
 
@@ -1604,6 +1620,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                   <h4 style="color: #fff; font-family: var(--font-title); font-size: 1.05rem; margin: 0; font-weight: 700; display: flex; align-items: center; gap: 6px;">
                     ${username}
                     ${isCloudVault ? '<span title="Cofre Criptográfico AES-256-GCM" style="font-size: 0.75rem;">🔐</span>' : ''}
+                    ${acc.auto_login_enabled ? '<span class="badge" title="Auto-Login Ativo" style="background: rgba(6,182,212,0.15); border: 1px solid rgba(6,182,212,0.4); color: var(--neon-cyan); font-size: 0.65rem; padding: 2px 5px; border-radius: 4px;">⚡ Auto</span>' : ''}
                   </h4>
                   <span style="font-size: 0.72rem; color: var(--neon-cyan); font-weight: 600; font-family: var(--font-mono);">🌐 ${(acc.world || acc.world_domain || 'Multi-Mundo').toUpperCase()}</span>
                 </div>
@@ -1617,12 +1634,17 @@ document.addEventListener("DOMContentLoaded", async () => {
                 <div><strong>Registo / Uso:</strong> ${lastUsedStr}</div>
               </div>
             </div>
-            <div style="display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border-glass); padding-top: 12px;">
-              <button class="btn btn-primary btn-sm btn-activate-acc" data-id="${acc.id}" data-username="${username}" data-is-active="${isActive}" style="flex: 1; min-width: 110px; background: var(--gradient-primary); font-weight: 600;">
-                <span>▶</span> ${isActive ? 'Focar Painel' : 'Ativar Sessão (Lock)'}
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px solid var(--border-glass); padding-top: 12px;">
+              <button class="btn btn-primary btn-sm btn-activate-acc" data-id="${acc.id}" data-username="${username}" data-is-active="${isActive}" style="flex: 1; min-width: 100px; background: var(--gradient-primary); font-weight: 600;">
+                <span>▶</span> ${isActive ? 'Focar Painel' : 'Ativar (Lock)'}
               </button>
-              <button class="btn btn-secondary btn-sm btn-login-acc" data-id="${acc.id}" data-username="${username}" title="Abrir ecrã do jogo para autenticar" style="padding: 4px 8px;">
-                <span>🔑</span> Login
+              ${acc.has_password ? `
+                <button class="btn btn-secondary btn-sm btn-auto-login-acc" data-id="${acc.id}" data-username="${username}" title="Autenticar diretamente no Tribal Wars via Auto-Login" style="padding: 4px 8px; border-color: rgba(6,182,212,0.5); color: var(--neon-cyan);">
+                  <span>⚡</span> Auto-Login
+                </button>
+              ` : ''}
+              <button class="btn btn-secondary btn-sm btn-login-acc" data-id="${acc.id}" data-username="${username}" title="Abrir navegador integrado para login manual" style="padding: 4px 8px;">
+                <span>🔑</span> Login Manual
               </button>
               <button class="btn btn-secondary btn-sm btn-edit-acc" data-id="${acc.id}" title="Editar Definições" style="padding: 4px 8px;">
                 <span>✏️</span>
@@ -1634,6 +1656,37 @@ document.addEventListener("DOMContentLoaded", async () => {
           </div>
         `;
       }).join("");
+
+      grid.querySelectorAll(".btn-auto-login-acc").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const accId = btn.getAttribute("data-id");
+          const targetUsername = btn.getAttribute("data-username");
+          const origHtml = btn.innerHTML;
+          try {
+            btn.disabled = true;
+            btn.innerHTML = "<span>⏳</span> A autenticar...";
+            addLogEntry("INFO", "auth", `A iniciar login automático no Tribal Wars para '${targetUsername}'...`);
+            const res = await window.api.autoLoginAccount(accId);
+            addLogEntry("SUCCESS", "auth", `Login automático concluído com sucesso para '${targetUsername}'! Novo cookie capturado.`);
+            await loadAndRenderAccounts();
+            if (state.activeProfileId === accId || (state.activeGameUsername && state.activeGameUsername.toLowerCase() === targetUsername.toLowerCase())) {
+              const status = await window.api.getStatus();
+              updateDashboard(status);
+            }
+          } catch (err) {
+            console.error("Erro no auto-login:", err);
+            addLogEntry("ERROR", "auth", `Falha no auto-login de '${targetUsername}': ${err.message}`);
+            if (err.message && (err.message.toLowerCase().includes("anti-bot") || err.message.toLowerCase().includes("captcha"))) {
+              alert(`Atenção: Verificação anti-bot / CAPTCHA intercetada no Tribal Wars!\n\nPor favor, faça login manual clicando em 'Login Manual' para resolver o desafio no navegador.`);
+            } else {
+              alert(`Erro no login automático: ${err.message}`);
+            }
+          } finally {
+            btn.disabled = false;
+            btn.innerHTML = origHtml;
+          }
+        });
+      });
 
       // Event listeners dos botões dos cards de conta
       grid.querySelectorAll(".btn-activate-acc").forEach(btn => {
@@ -1889,6 +1942,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       const worldClean = worldDomain.split(".")[0].trim().toLowerCase();
       const domainClean = worldDomain.includes(".") ? worldDomain.split(".").slice(1).join(".") : "tribalwars.com.pt";
+      const passwordVal = elements.inputAccPassword ? elements.inputAccPassword.value.trim() : "";
+      const autoLoginVal = elements.inputAccAutoLogin ? elements.inputAccAutoLogin.checked : false;
+
       const payload = {
         name,
         game_username: name,
@@ -1900,7 +1956,11 @@ document.addEventListener("DOMContentLoaded", async () => {
         village_id: villageIdStr ? parseInt(villageIdStr, 10) : null,
         proxy,
         build_order_strategy: template,
+        auto_login_enabled: autoLoginVal,
       };
+      if (passwordVal) {
+        payload.password = passwordVal;
+      }
 
       try {
         elements.btnSaveAccountModal.disabled = true;

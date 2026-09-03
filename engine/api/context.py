@@ -3299,6 +3299,9 @@ class EngineContext:
                 creds = self.game_account_repo.decrypt_credentials(acc)
                 a_dict["session_cookie"] = creds.get("sid", "")
                 a_dict["sid"] = creds.get("sid", "")
+                a_dict["has_password"] = bool(creds.get("password"))
+                a_dict["auto_login_enabled"] = bool(creds.get("auto_login_enabled", False))
+                a_dict["last_auto_login"] = creds.get("last_auto_login")
                 if creds.get("domain"):
                     a_dict["domain"] = creds.get("domain")
                     a_dict["world_domain"] = f"{a_dict['world']}.{creds.get('domain')}"
@@ -3322,6 +3325,7 @@ class EngineContext:
         world: Optional[str] = None,
         proxy: Optional[str] = None,
         password: Optional[str] = None,
+        auto_login_enabled: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """Regista ou atualiza uma conta de jogo encriptando as credenciais no cofre e persistindo o mundo."""
         await self.ensure_current_app_user()
@@ -3329,12 +3333,32 @@ class EngineContext:
             return {"status": "error", "message": "Autenticação requerida."}
 
         target_world = (world.split(".")[0].strip().lower() if world else "pt117")
+
+        # Preserva password e definições anteriores se não forem passadas novamente
+        existing_acc = await self.game_account_repo.get_by_user_and_username(self.current_app_user.id, game_username)
+        existing_creds = {}
+        if existing_acc:
+            try:
+                existing_creds = self.game_account_repo.decrypt_credentials(existing_acc)
+            except Exception:
+                pass
+
+        final_password = password.strip() if password else existing_creds.get("password")
+        final_sid = sid.strip() if sid else existing_creds.get("sid", "")
+        final_auto_login = (
+            bool(auto_login_enabled)
+            if auto_login_enabled is not None
+            else existing_creds.get("auto_login_enabled", bool(final_password))
+        )
+
         creds = {
-            "sid": sid.strip(),
-            "domain": domain.strip(),
+            "sid": final_sid,
+            "domain": domain.strip() if domain else "tribalwars.com.pt",
             "world": target_world,
-            "proxy": proxy.strip() if proxy else None,
-            "password": password.strip() if password else None,
+            "proxy": proxy.strip() if proxy else existing_creds.get("proxy"),
+            "password": final_password,
+            "auto_login_enabled": final_auto_login,
+            "last_auto_login": existing_creds.get("last_auto_login"),
         }
         acc = await self.game_account_repo.create_or_update(
             app_user_id=self.current_app_user.id,
@@ -3355,6 +3379,99 @@ class EngineContext:
             "account": acc.to_dict(),
             "world": gw_obj.to_dict() if gw_obj else None,
             "message": f"Conta de jogo '{game_username}' gravada com cofre seguro no Cloud SQL!",
+        }
+
+    async def perform_auto_login(self, account_id: str) -> Dict[str, Any]:
+        """
+        Executa o fluxo de autenticação automática direta para a conta selecionada.
+        Se bem-sucedido, atualiza o SID no cofre e na sessão em runtime.
+        Se falhar por CAPTCHA ou credenciais, reporta o erro e NÃO repete para evitar bloqueio.
+        """
+        await self.ensure_current_app_user()
+        if not self.current_app_user:
+            return {"status": "error", "message": "Autenticação requerida."}
+
+        acc = await self.game_account_repo.get_by_id(account_id)
+        if not acc:
+            return {"status": "error", "message": f"Conta '{account_id}' não encontrada."}
+
+        if acc.app_user_id != self.current_app_user.id:
+            return {"status": "error", "message": "Acesso não autorizado a esta conta de jogo."}
+
+        try:
+            creds = self.game_account_repo.decrypt_credentials(acc)
+        except Exception as e:
+            return {"status": "error", "message": f"Falha ao aceder ao cofre de credenciais: {e}"}
+
+        password = creds.get("password")
+        if not password:
+            return {
+                "status": "error",
+                "error_type": "no_password",
+                "message": f"A conta '{acc.game_username}' não tem palavra-passe guardada no cofre. Edite a conta para configurar.",
+            }
+
+        world = creds.get("world") or "pt117"
+        domain = creds.get("domain") or "tribalwars.com.pt"
+        proxy = creds.get("proxy")
+
+        from engine.core.auth_handler import TribalWarsAuthHandler
+        handler = TribalWarsAuthHandler(domain=domain, proxy=proxy)
+
+        logger.info(f"[AutoLogin] A iniciar autenticação automática para '{acc.game_username}' no mundo {world}...")
+        res = await handler.login(
+            username=acc.game_username,
+            password=password,
+            target_world=world,
+        )
+
+        if not res.success:
+            logger.warning(f"[AutoLogin] Falha no auto-login de '{acc.game_username}': {res.message}")
+            if res.captcha_detected and hasattr(self, "broadcast_sync"):
+                self.broadcast_sync("ANTI_BOT_ALERT", {
+                    "account": acc.game_username,
+                    "world": world,
+                    "message": "CAPTCHA / Verificação anti-bot intercetada no login. Resolução manual necessária.",
+                })
+            return {
+                "status": "error",
+                "error_type": res.error_type,
+                "captcha_detected": res.captcha_detected,
+                "message": res.message,
+            }
+
+        # Sucesso! Atualiza o SID no cofre encriptado
+        new_sid = res.sid
+        creds["sid"] = new_sid
+        creds["last_auto_login"] = time.time()
+        await self.game_account_repo.create_or_update(
+            app_user_id=self.current_app_user.id,
+            game_username=acc.game_username,
+            credentials_data=creds,
+        )
+
+        # Atualiza a sessão em runtime se for a conta ativa
+        if self.account and (getattr(self.account, "username", "").lower() == acc.game_username.lower() or self.active_profile_id == acc.id):
+            await self.account.update_sid(new_sid)
+            try:
+                await self.account.refresh_state()
+            except Exception:
+                pass
+
+        if hasattr(self, "broadcast_sync"):
+            self.broadcast_sync("AUTO_LOGIN_SUCCESS", {
+                "account": acc.game_username,
+                "world": world,
+                "message": f"Sessão renovada com sucesso via auto-login ({acc.game_username}).",
+            })
+
+        return {
+            "status": "success",
+            "message": f"Login automático concluído com sucesso para '{acc.game_username}'!",
+            "account_id": acc.id,
+            "game_username": acc.game_username,
+            "world": world,
+            "sid": new_sid,
         }
 
     async def switch_active_game_account(self, game_username: str, account_id: Optional[str] = None) -> Dict[str, Any]:
