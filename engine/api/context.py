@@ -3436,11 +3436,15 @@ class EngineContext:
 
         # 1. Se não tiver acc_id direto, tenta obter a partir do username ativo ou das contas do utilizador
         if not acc_id and self.current_app_user:
-            target_username = (
-                self.session_manager.active_game_username or
-                (self.account.player_name if self.account else None) or
-                (self.account.username if self.account else None)
-            )
+            runtime_name = None
+            if self.account:
+                runtime_name = getattr(self.account, "player_name", None)
+                if not runtime_name and getattr(self.account, "player", None):
+                    runtime_name = getattr(self.account.player, "name", None)
+                if not runtime_name:
+                    runtime_name = getattr(self.account, "username", None)
+
+            target_username = self.session_manager.active_game_username or runtime_name
             if target_username:
                 acc = await self.game_account_repo.get_by_user_and_username(self.current_app_user.id, target_username)
                 if acc:
@@ -3456,8 +3460,16 @@ class EngineContext:
                     self.session_manager.active_game_username = user_accounts[0].game_username
 
         # 2. Se o runtime do bot tiver uma conta conectada em memória, assegura no Cloud SQL
-        if not acc_id and self.current_app_user and self.account and (self.account.player_name or getattr(self.account, "username", None)):
-            p_name = self.account.player_name or self.account.username
+        runtime_p = None
+        if self.account:
+            runtime_p = getattr(self.account, "player_name", None)
+            if not runtime_p and getattr(self.account, "player", None):
+                runtime_p = getattr(self.account.player, "name", None)
+            if not runtime_p:
+                runtime_p = getattr(self.account, "username", None)
+
+        if not acc_id and self.current_app_user and runtime_p:
+            p_name = str(runtime_p).strip()
             acc = await self.game_account_repo.create_or_update(
                 app_user_id=self.current_app_user.id,
                 game_username=p_name,
@@ -3468,6 +3480,8 @@ class EngineContext:
                 },
             )
             acc_id = acc.id
+            self.session_manager.active_account_id = acc.id
+            self.session_manager.active_game_username = p_name
             self.session_manager.active_account_id = acc.id
             self.session_manager.active_game_username = p_name
 
@@ -3529,8 +3543,14 @@ class EngineContext:
             return 0
 
         target_username = game_username or self.session_manager.active_game_username
-        if not target_username and self.account and self.account.player_name:
-            target_username = self.account.player_name
+        if not target_username and self.account:
+            p_val = getattr(self.account, "player_name", None)
+            if not p_val and getattr(self.account, "player", None):
+                p_val = getattr(self.account.player, "name", None)
+            if not p_val:
+                p_val = getattr(self.account, "username", None)
+            if p_val:
+                target_username = str(p_val).strip()
 
         if not target_username:
             return 0

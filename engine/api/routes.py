@@ -506,10 +506,15 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
 
             # 3. Conta atualmente ativa em runtime no motor
             runtime_player = None
-            if context.account and context.account.player_name:
-                runtime_player = context.account.player_name.strip()
-            elif context.account and hasattr(context.account, "username") and context.account.username:
-                runtime_player = str(context.account.username).strip()
+            if context.account:
+                p_val = getattr(context.account, "player_name", None)
+                if not p_val:
+                    p_obj = getattr(context.account, "player", None)
+                    p_val = getattr(p_obj, "name", None) if p_obj else None
+                if not p_val:
+                    p_val = getattr(context.account, "username", None)
+                if p_val:
+                    runtime_player = str(p_val).strip()
 
             if runtime_player:
                 curr_lower = runtime_player.lower()

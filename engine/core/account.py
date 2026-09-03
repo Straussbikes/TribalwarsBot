@@ -118,6 +118,26 @@ class TribalAccount:
         self._lock = asyncio.Lock()
 
     @property
+    def player_name(self) -> str:
+        """Nome do jogador autenticado ou string vazia."""
+        if self.player and getattr(self.player, "name", None):
+            return str(self.player.name).strip()
+        return getattr(self, "_username", "") or ""
+
+    @player_name.setter
+    def player_name(self, val: str) -> None:
+        self._username = str(val).strip()
+
+    @property
+    def username(self) -> str:
+        """Alias para o nome do jogador ou identificador de conta."""
+        return self.player_name
+
+    @username.setter
+    def username(self, val: str) -> None:
+        self._username = str(val).strip()
+
+    @property
     def game_data(self) -> Dict[str, Any]:
         """Retorna os dados do jogo mais recentes obtidos via script game_data."""
         return self.last_game_data or {}
