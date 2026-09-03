@@ -55,6 +55,7 @@
 | **Fase 5** | **UI Cockpit & Autenticação Cloud** | ✅ Concluída | Persistência e comutação atómica de contas, atribuição de modelos por aldeia na Dashboard. |
 | **Fase 6** | **Scripts de Sanitização e Purga** | ✅ Concluída | `scripts/sanitize_cloud_db.py` (purga transacional com preservação dos 5 modelos oficiais) e `scripts/purge_local_state.py` (purga local de caches e DBs legadas). |
 | **Fase 7** | **Portal de Login Mandatório Pré-Hub** | ✅ Concluída | Ecrã primário exclusivo (`#app-portal-view`) para login/registo no programa. Ocultação total do Hub de Contas do Tribos, top-nav de automação e dados de jogo até autenticação com Cloud SQL. |
+| **Fase 8** | **Persistência Total no Cloud SQL (`game_accounts`, `game_worlds`, `villages`)** | ✅ Concluída | Eliminação do desfasamento onde apenas `app_users` era gravado. Login no navegador integrado, criação manual de contas e leituras de aldeia (`fetch_all_villages_overview` / `refresh_state`) agora persistem ativamente e de forma relacional as contas, mundos e aldeias na base de dados Cloud SQL. |
 
 ---
 
