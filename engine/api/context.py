@@ -4,6 +4,7 @@ Mantém o estado unificado, distribui eventos para WebSockets e fornece acesso �
 """
 
 import asyncio
+from datetime import datetime, timezone
 import logging
 from pathlib import Path
 import time
@@ -3228,10 +3229,27 @@ class EngineContext:
         }
 
     async def login_app_user(self, email: str, password: str) -> Dict[str, Any]:
-        """Autentica o utilizador da aplicação."""
+        """Autentica o utilizador da aplicação com validações comerciais de licença."""
         user = await self.user_repo.authenticate(email=email, password=password)
         if not user:
             return {"status": "error", "message": "Email ou password inválidos."}
+
+        # 1. Validação de suspensão manual
+        if not getattr(user, "is_active", True):
+            return {
+                "status": "error",
+                "message": "A sua conta encontra-se suspensa. Por favor, contacte o suporte comercial.",
+            }
+
+        # 2. Validação de expiração da subscrição
+        now = datetime.now(timezone.utc)
+        if user.expires_at and user.expires_at < now:
+            dt_str = user.expires_at.strftime("%d/%m/%Y")
+            return {
+                "status": "error",
+                "message": f"A sua subscrição expirou em {dt_str}. Por favor, renove o seu plano para continuar.",
+            }
+
         # Se mudou de utilizador da app, limpa a sessão em memória do utilizador anterior
         if self.current_app_user and self.current_app_user.id != user.id:
             self.account = None
@@ -3251,7 +3269,7 @@ class EngineContext:
         }
 
     async def ensure_current_app_user(self):
-        """Assegura que self.current_app_user está carregado a partir do token_storage se for None."""
+        """Assegura que self.current_app_user está carregado a partir do token_storage se for None e válido."""
         if not self.current_app_user:
             try:
                 from engine.storage.token_storage import token_storage
@@ -3259,6 +3277,11 @@ class EngineContext:
                 if saved_token:
                     user = await self.user_repo.get_by_id(saved_token)
                     if user:
+                        now = datetime.now(timezone.utc)
+                        if not getattr(user, "is_active", True) or (user.expires_at and user.expires_at < now):
+                            token_storage.clear_token()
+                            self.current_app_user = None
+                            return None
                         self.current_app_user = user
             except Exception as e:
                 logger.debug(f"Aviso ao tentar restaurar sessão do Cloud SQL: {e}")
@@ -3341,6 +3364,17 @@ class EngineContext:
 
         # Preserva password e definições anteriores se não forem passadas novamente
         existing_acc = await self.game_account_repo.get_by_user_and_username(self.current_app_user.id, game_username)
+
+        # Se for uma conta nova, valida o limite máximo de contas permitido pela licença
+        if not existing_acc:
+            user_accounts = await self.game_account_repo.list_by_user(self.current_app_user.id)
+            max_allowed = getattr(self.current_app_user, "max_accounts", 1) or 1
+            if len(user_accounts) >= max_allowed:
+                return {
+                    "status": "error",
+                    "message": f"Limite de contas atingido ({len(user_accounts)}/{max_allowed}). Atualize o seu plano para associar mais contas de jogo.",
+                }
+
         existing_creds = {}
         if existing_acc:
             try:

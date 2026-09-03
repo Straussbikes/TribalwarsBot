@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 import logging
 import os
@@ -167,16 +167,32 @@ class AppUser(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     license_type = Column(String(50), nullable=False, default="standard")
+    is_active = Column(Boolean, nullable=False, default=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    max_accounts = Column(Integer, nullable=False, default=1)
+    notes = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relações
     game_accounts = relationship("GameAccount", back_populates="app_user", cascade="all, delete-orphan")
 
     def to_dict(self) -> Dict[str, Any]:
+        now = datetime.now(timezone.utc)
+        is_expired = (self.expires_at is not None and self.expires_at < now)
+        days_left = None
+        if self.expires_at:
+            delta = self.expires_at - now
+            days_left = max(0, delta.days)
         return {
             "id": self.id,
             "email": self.email,
             "license_type": self.license_type,
+            "is_active": self.is_active,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "is_expired": is_expired,
+            "days_left": days_left,
+            "max_accounts": self.max_accounts,
+            "notes": self.notes,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -310,6 +326,30 @@ class CloudDatabase:
         self.vault = CredentialsVault()
         self.build_template_repo = BuildTemplateRepository(self)
 
+    @property
+    def user_repo(self) -> AppUserRepository:
+        if not hasattr(self, "_user_repo"):
+            self._user_repo = AppUserRepository(self)
+        return self._user_repo
+
+    @property
+    def account_repo(self) -> GameAccountRepository:
+        if not hasattr(self, "_account_repo"):
+            self._account_repo = GameAccountRepository(self)
+        return self._account_repo
+
+    @property
+    def world_repo(self) -> GameWorldRepository:
+        if not hasattr(self, "_world_repo"):
+            self._world_repo = GameWorldRepository(self)
+        return self._world_repo
+
+    @property
+    def village_repo(self) -> VillageRepository:
+        if not hasattr(self, "_village_repo"):
+            self._village_repo = VillageRepository(self)
+        return self._village_repo
+
     def _build_engine(self, raw_url: str) -> AsyncEngine:
         url = raw_url.strip()
         connect_args: Dict[str, Any] = {}
@@ -345,11 +385,22 @@ class CloudDatabase:
             return create_async_engine(url, pool_pre_ping=True, echo=False)
 
     async def init_db(self, drop_all: bool = False) -> None:
-        """Cria as tabelas declarativas na base de dados Cloud SQL se não existirem."""
+        """Cria as tabelas declarativas na base de dados Cloud SQL se não existirem e migra colunas."""
         async with self.engine.begin() as conn:
             if drop_all:
                 await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
+
+            # Migração automática de colunas comerciais em app_users
+            if "postgresql" in self.raw_url:
+                try:
+                    await conn.execute(text("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;"))
+                    await conn.execute(text("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;"))
+                    await conn.execute(text("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS max_accounts INTEGER NOT NULL DEFAULT 1;"))
+                    await conn.execute(text("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS notes VARCHAR(500) NULL;"))
+                except Exception as mig_err:
+                    logger.debug(f"[CloudDB] Aviso na migração de colunas comerciais: {mig_err}")
+
         await self.build_template_repo.seed_defaults_if_needed()
         logger.info("[CloudDB] Tabelas verificadas/criadas com sucesso no PostgreSQL.")
 
@@ -404,10 +455,30 @@ class AppUserRepository:
     def __init__(self, db: CloudDatabase):
         self.db = db
 
-    async def create_user(self, email: str, password: str, license_type: str = "standard") -> AppUser:
+    async def create_user(
+        self,
+        email: str,
+        password: str,
+        license_type: str = "standard",
+        days_valid: Optional[int] = None,
+        max_accounts: int = 1,
+        notes: Optional[str] = None,
+    ) -> AppUser:
         pwd_hash = hash_password(password)
+        expires_at = None
+        if days_valid is not None and days_valid > 0:
+            expires_at = datetime.now(timezone.utc) + timedelta(days=days_valid)
+
         async with self.db.get_session() as session:
-            user = AppUser(email=email.strip().lower(), password_hash=pwd_hash, license_type=license_type)
+            user = AppUser(
+                email=email.strip().lower(),
+                password_hash=pwd_hash,
+                license_type=license_type,
+                is_active=True,
+                expires_at=expires_at,
+                max_accounts=max_accounts,
+                notes=notes,
+            )
             session.add(user)
             await session.flush()
             await session.refresh(user)
@@ -422,6 +493,72 @@ class AppUserRepository:
         async with self.db.get_session() as session:
             res = await session.execute(select(AppUser).where(AppUser.id == user_id))
             return res.scalar_one_or_none()
+
+    async def list_all_users(self) -> List[AppUser]:
+        async with self.db.get_session() as session:
+            res = await session.execute(select(AppUser).order_by(AppUser.created_at.desc()))
+            return list(res.scalars().all())
+
+    async def extend_subscription(self, email_or_id: str, days: int) -> Optional[AppUser]:
+        async with self.db.get_session() as session:
+            query = select(AppUser).where(
+                (AppUser.email == email_or_id.strip().lower()) | (AppUser.id == email_or_id)
+            )
+            res = await session.execute(query)
+            user = res.scalar_one_or_none()
+            if not user:
+                return None
+
+            now = datetime.now(timezone.utc)
+            base_date = user.expires_at if (user.expires_at and user.expires_at > now) else now
+            user.expires_at = base_date + timedelta(days=days)
+            user.is_active = True
+            await session.flush()
+            await session.refresh(user)
+            return user
+
+    async def set_active_status(self, email_or_id: str, is_active: bool) -> Optional[AppUser]:
+        async with self.db.get_session() as session:
+            query = select(AppUser).where(
+                (AppUser.email == email_or_id.strip().lower()) | (AppUser.id == email_or_id)
+            )
+            res = await session.execute(query)
+            user = res.scalar_one_or_none()
+            if not user:
+                return None
+
+            user.is_active = is_active
+            await session.flush()
+            await session.refresh(user)
+            return user
+
+    async def update_password(self, email_or_id: str, new_password: str) -> Optional[AppUser]:
+        async with self.db.get_session() as session:
+            query = select(AppUser).where(
+                (AppUser.email == email_or_id.strip().lower()) | (AppUser.id == email_or_id)
+            )
+            res = await session.execute(query)
+            user = res.scalar_one_or_none()
+            if not user:
+                return None
+
+            user.password_hash = hash_password(new_password)
+            await session.flush()
+            await session.refresh(user)
+            return user
+
+    async def delete_user(self, email_or_id: str) -> bool:
+        async with self.db.get_session() as session:
+            query = select(AppUser).where(
+                (AppUser.email == email_or_id.strip().lower()) | (AppUser.id == email_or_id)
+            )
+            res = await session.execute(query)
+            user = res.scalar_one_or_none()
+            if not user:
+                return False
+
+            await session.delete(user)
+            return True
 
     async def authenticate(self, email: str, password: str) -> Optional[AppUser]:
         user = await self.get_by_email(email)
