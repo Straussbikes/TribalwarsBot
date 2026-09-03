@@ -752,6 +752,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Recursos (Soma de Todas as Aldeias no Painel Geral)
     const r = data.total_resources || data.resources || (data.account && data.account.village && data.account.village.resources);
     if (data.account) state.account = data.account;
+    if (data.active_profile_id) state.activeProfileId = data.active_profile_id;
+    if (data.account?.player_name) state.activeGameUsername = data.account.player_name;
     if (data.account && data.account.village) state.village = data.account.village;
     if (r) state.resources = r;
     if (data.resource_balance) state.resource_balance = data.resource_balance;
@@ -974,9 +976,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (hubView) hubView.style.display = "none";
     if (mainWorkspace) mainWorkspace.style.display = "flex";
 
-    const isReady = Boolean(state.appUser && (state.activeGameUsername || state.activeProfileId));
     if (typeof updateTopNavVisibility === "function") {
-      updateTopNavVisibility(isReady);
+      updateTopNavVisibility(true);
     }
   }
 
@@ -1726,44 +1727,73 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // Handlers do Botão Refresh da Aldeia Ativa
+  // Handlers do Botão Refresh da Barra Superior (Workspace ou Hub)
   if (elements.btnRefreshData) {
     elements.btnRefreshData.addEventListener("click", async () => {
+      const isWorkspace = (document.querySelector(".main-workspace")?.style.display !== "none");
       try {
         elements.btnRefreshData.disabled = true;
-        addLogEntry("INFO", "orchestrator", "A atualizar dados da aldeia, recursos e tropas...");
-        const res = await window.api.refreshVillage();
-        if (res && res.status === "success" && res.data) {
-          updateDashboard(res.data);
-          addLogEntry("SUCCESS", "orchestrator", "Recursos e tropas da aldeia atualizados com sucesso.");
+        elements.btnRefreshData.innerHTML = "<span>⏳</span> A atualizar...";
+        if (isWorkspace) {
+          addLogEntry("INFO", "orchestrator", "A atualizar dados da aldeia, recursos e tropas...");
+          const res = await window.api.refreshVillage();
+          if (res && res.status === "success" && res.data) {
+            updateDashboard(res.data);
+            addLogEntry("SUCCESS", "orchestrator", "Recursos e tropas da aldeia atualizados com sucesso.");
+          } else {
+            const status = await window.api.getStatus();
+            updateDashboard(status);
+            addLogEntry("SUCCESS", "orchestrator", "Estado do jogo atualizado.");
+          }
+          if (typeof loadBuildingData === "function") await loadBuildingData();
+          if (typeof loadRecruitmentData === "function") await loadRecruitmentData();
         } else {
-          const status = await window.api.getStatus();
-          updateDashboard(status);
-          addLogEntry("SUCCESS", "orchestrator", "Estado do jogo atualizado.");
+          addLogEntry("INFO", "cloud", "A sincronizar contas e mundos com o Cloud SQL...");
+          await loadAndRenderAccounts();
+          await loadAndRenderWorlds();
+          addLogEntry("SUCCESS", "cloud", "Contas e mundos sincronizados.");
         }
       } catch (err) {
         console.error("Erro ao atualizar dados:", err);
         addLogEntry("ERROR", "orchestrator", `Falha ao atualizar dados: ${err.message}`);
       } finally {
         elements.btnRefreshData.disabled = false;
+        elements.btnRefreshData.innerHTML = "<span>🔄</span> Atualizar";
       }
     });
   }
 
-  // Handlers do Account Hub, Modal & Logout
+  // Handlers do Botão Sair da Barra Superior (Workspace ou Hub)
   if (elements.btnLogout) {
     elements.btnLogout.addEventListener("click", async () => {
-      if (confirm("Deseja terminar a sessão atual da conta e regressar ao Gestor de Contas?")) {
-        try {
-          elements.btnLogout.disabled = true;
-          await window.api.disconnectAccount();
-          state.activeProfileId = null;
-          showAccountHub();
-        } catch (err) {
-          console.error("Erro ao efetuar logout:", err);
-          showAccountHub();
-        } finally {
-          elements.btnLogout.disabled = false;
+      const isWorkspace = (document.querySelector(".main-workspace")?.style.display !== "none");
+      if (isWorkspace) {
+        if (confirm("Deseja terminar a sessão atual da conta e regressar ao Gestor de Contas?")) {
+          try {
+            elements.btnLogout.disabled = true;
+            await window.api.disconnectAccount();
+            state.activeProfileId = null;
+            state.activeGameUsername = null;
+            showAccountHub();
+          } catch (err) {
+            console.error("Erro ao efetuar logout:", err);
+            showAccountHub();
+          } finally {
+            elements.btnLogout.disabled = false;
+          }
+        }
+      } else {
+        if (confirm("Deseja terminar a sessão da aplicação e regressar ao ecrã de login?")) {
+          try {
+            elements.btnLogout.disabled = true;
+            await window.api.logoutAppUser();
+            state.appUser = null;
+            showPortalLogin();
+          } catch (err) {
+            alert(`Erro ao terminar sessão: ${err.message}`);
+          } finally {
+            elements.btnLogout.disabled = false;
+          }
         }
       }
     });
@@ -3323,26 +3353,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   elements.btnResolveCaptcha?.addEventListener("click", handleResumeCaptcha);
   document.getElementById("btn-resume-captcha")?.addEventListener("click", handleResumeCaptcha);
 
-  elements.btnRefreshData?.addEventListener("click", async () => {
-    try {
-      elements.btnRefreshData.disabled = true;
-      elements.btnRefreshData.innerHTML = "<span>⏳</span> A ler...";
-      addLogEntry("INFO", "account", "A atualizar recursos, tropas e estado da aldeia...");
-      const res = await window.api.refreshVillage();
-      if (res && res.data) {
-        applyStateData(res.data);
-      }
-      await loadBuildingData();
-      await loadRecruitmentData();
-      checkQuestStatus();
-      addLogEntry("SUCCESS", "account", "Recursos, tropas e filas atualizados com sucesso!");
-    } catch (err) {
-      addLogEntry("WARNING", "account", `Falha ao atualizar dados: ${err.message}`);
-    } finally {
-      elements.btnRefreshData.disabled = false;
-      elements.btnRefreshData.innerHTML = "<span>🔄</span> Atualizar";
-    }
-  });
 
   elements.btnClaimQuests?.addEventListener("click", async () => {
     try {
@@ -7381,19 +7391,61 @@ document.addEventListener("DOMContentLoaded", async () => {
     const btnClaim = document.getElementById("btn-claim-quests");
     const btnSwitch = document.getElementById("btn-switch-account");
 
-    const displayVal = isWorkspace ? "inline-flex" : "none";
-    const displayFlex = isWorkspace ? "flex" : "none";
+    const isAuthenticated = Boolean(state.appUser);
 
-    if (worldDropdown) worldDropdown.style.display = displayVal;
-    if (worldTabs) worldTabs.style.display = displayFlex;
-    if (btnAddWorld) btnAddWorld.style.display = displayVal;
-    if (badgeClock) badgeClock.style.display = displayFlex;
-    if (badgeStatus) badgeStatus.style.display = displayVal;
-    if (btnScheduler) btnScheduler.style.display = displayVal;
-    if (btnLogout) btnLogout.style.display = displayVal;
-    if (btnRefresh) btnRefresh.style.display = displayVal;
-    if (btnClaim) btnClaim.style.display = displayVal;
-    if (btnSwitch) btnSwitch.style.display = isWorkspace ? "inline-flex" : "none";
+    if (!isAuthenticated) {
+      // Quando não autenticado (ecrã de login no programa), oculta todos os controlos da barra
+      if (worldDropdown) worldDropdown.style.display = "none";
+      if (worldTabs) worldTabs.style.display = "none";
+      if (btnAddWorld) btnAddWorld.style.display = "none";
+      if (badgeClock) badgeClock.style.display = "none";
+      if (badgeStatus) badgeStatus.style.display = "none";
+      if (btnScheduler) btnScheduler.style.display = "none";
+      if (btnLogout) btnLogout.style.display = "none";
+      if (btnRefresh) btnRefresh.style.display = "none";
+      if (btnClaim) btnClaim.style.display = "none";
+      if (btnSwitch) btnSwitch.style.display = "none";
+      return;
+    }
+
+    if (isWorkspace) {
+      // Modo Workspace (menu onde estão as abas diferentes da automação)
+      if (worldDropdown) worldDropdown.style.display = "inline-flex";
+      if (worldTabs) worldTabs.style.display = "flex";
+      if (btnAddWorld) btnAddWorld.style.display = "inline-flex";
+      if (badgeClock) badgeClock.style.display = "flex";
+      if (badgeStatus) badgeStatus.style.display = "inline-flex";
+      if (btnScheduler) btnScheduler.style.display = "inline-flex";
+      if (btnLogout) {
+        btnLogout.style.display = "inline-flex";
+        btnLogout.title = "Terminar sessão da conta ativa e regressar ao Gestor de Contas";
+      }
+      if (btnRefresh) {
+        btnRefresh.style.display = "inline-flex";
+        btnRefresh.title = "Atualizar recursos e tropas da aldeia ativa";
+      }
+      if (btnClaim) btnClaim.style.display = "inline-flex";
+      if (btnSwitch) btnSwitch.style.display = "inline-flex";
+    } else {
+      // Modo Gestor de Contas (Hub de Contas Tribos)
+      if (worldDropdown) worldDropdown.style.display = "none";
+      if (worldTabs) worldTabs.style.display = "none";
+      if (btnAddWorld) btnAddWorld.style.display = "none";
+      if (badgeClock) badgeClock.style.display = "none";
+      if (badgeStatus) badgeStatus.style.display = "none";
+      if (btnScheduler) btnScheduler.style.display = "none";
+      if (btnClaim) btnClaim.style.display = "none";
+      if (btnSwitch) btnSwitch.style.display = "none";
+      // Botões de Refresh e Logout SEMPRE visíveis na top bar
+      if (btnRefresh) {
+        btnRefresh.style.display = "inline-flex";
+        btnRefresh.title = "Atualizar contas e mundos do Cloud SQL";
+      }
+      if (btnLogout) {
+        btnLogout.style.display = "inline-flex";
+        btnLogout.title = "Terminar sessão da aplicação";
+      }
+    }
   }
 
   async function updateCloudUserUI() {
