@@ -53,11 +53,6 @@ def create_app(
     # 2. Verificador de Token
     token_verifier = TokenVerifier(valid_token=token)
 
-    # Rota pública de descoberta para o cliente local (localhost)
-    @app.get("/api/health")
-    async def health_check():
-        """Health check endpoint público para inicialização do launcher."""
-        return {"status": "ok"}
 
     @app.get("/api/auth-info")
     async def get_auth_info():

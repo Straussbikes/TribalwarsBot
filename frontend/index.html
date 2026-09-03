@@ -13,21 +13,7 @@
   <!-- Estilos Customizados -->
   <link rel="stylesheet" href="css/style.css">
   
-  <script>
-    (function() {
-      try {
-        var p = new URLSearchParams(window.location.search);
-        if (p.get("view") === "dashboard" || window.location.hash === "#tab-dashboard" || (window.sessionStorage && window.sessionStorage.getItem("goto_tab") === "tab-dashboard")) {
-          document.addEventListener("DOMContentLoaded", function() {
-            var hub = document.getElementById("account-hub-view");
-            var ws = document.querySelector(".main-workspace");
-            if (hub) hub.style.display = "none";
-            if (ws) ws.style.display = "flex";
-          });
-        }
-      } catch (e) {}
-    })();
-  </script>
+
 </head>
 <body>
   <div class="app-container">
@@ -141,24 +127,94 @@
       </div>
     </div>
 
+    <!-- Ecrã Primário de Acesso: Portal de Login da Aplicação (Antes do Hub de Contas do Tribos) -->
+    <div id="app-portal-view" class="app-portal-view" style="display: flex;">
+      <div class="portal-card">
+        
+        <!-- Cabeçalho do Portal -->
+        <div class="portal-header">
+          <div class="portal-logo-badge">⚔️</div>
+          <h2>TribalWars Bot</h2>
+          <p>Automação Multi-Mundo & Inteligência Tática</p>
+          <div class="portal-db-badge">
+            <span>🟢</span> Cloud SQL (PostgreSQL 18.6) Online
+          </div>
+        </div>
+
+        <!-- Seletor de Abas: Iniciar Sessão vs Criar Conta -->
+        <div class="portal-tabs">
+          <button type="button" id="portal-tab-btn-login" class="portal-tab-btn active" onclick="switchPortalTab('login')">
+            Iniciar Sessão
+          </button>
+          <button type="button" id="portal-tab-btn-register" class="portal-tab-btn" onclick="switchPortalTab('register')">
+            Criar Nova Conta
+          </button>
+        </div>
+
+        <!-- Formulário: Iniciar Sessão -->
+        <form id="portal-form-login" class="portal-form">
+          <div class="portal-field">
+            <label for="portal-input-login-email">Email da Aplicação</label>
+            <input type="email" id="portal-input-login-email" required placeholder="seu_email@exemplo.com" autocomplete="username" />
+          </div>
+          <div class="portal-field">
+            <label for="portal-input-login-password">Palavra-passe</label>
+            <input type="password" id="portal-input-login-password" required placeholder="••••••••" autocomplete="current-password" />
+          </div>
+          <div id="portal-login-error" class="portal-alert danger"></div>
+          <button type="submit" id="portal-btn-login-submit" class="portal-submit-btn">
+            <span>🔑</span> Entrar no Sistema
+          </button>
+        </form>
+
+        <!-- Formulário: Registar Nova Conta -->
+        <form id="portal-form-register" class="portal-form" style="display: none;">
+          <div class="portal-field">
+            <label for="portal-input-register-email">Email da Aplicação</label>
+            <input type="email" id="portal-input-register-email" required placeholder="seu_email@exemplo.com" autocomplete="username" />
+          </div>
+          <div class="portal-field">
+            <label for="portal-input-register-password">Palavra-passe</label>
+            <input type="password" id="portal-input-register-password" required placeholder="Mínimo 8 caracteres" autocomplete="new-password" />
+          </div>
+          <div class="portal-field">
+            <label for="portal-select-register-license">Tipo de Licença</label>
+            <select id="portal-select-register-license">
+              <option value="standard">Standard (Multi-Conta Básico)</option>
+              <option value="pro" selected>Pro (Multi-Mundo Paralelo & Mutex)</option>
+              <option value="enterprise">Enterprise (Ilimitado + Proxy Dedicado)</option>
+            </select>
+          </div>
+          <div id="portal-register-error" class="portal-alert danger"></div>
+          <button type="submit" id="portal-btn-register-submit" class="portal-submit-btn">
+            <span>✨</span> Registar Conta no Cloud SQL
+          </button>
+        </form>
+
+        <!-- Rodapé Informativo -->
+        <div class="portal-footer-notice">
+          🛡️ <strong>Arquitetura 100% Cloud-Native</strong><br>
+          As contas de jogo e mundos só são carregados após autenticação bem-sucedida.
+        </div>
+
+      </div>
+    </div>
+
     <!-- Ecrã Inicial: Gestor e Selecionador de Contas (Account Hub) -->
-    <div id="account-hub-view" class="account-hub-view" style="display: block; padding: 32px 40px; max-width: 1200px; margin: 0 auto; width: 100%;">
+    <div id="account-hub-view" class="account-hub-view" style="display: none; padding: 32px 40px; max-width: 1200px; margin: 0 auto; width: 100%;">
       
       <!-- Banner de Utilizador / Painel de Autenticação Cloud SQL -->
-      <div id="cloud-auth-panel" style="background: rgba(15, 23, 42, 0.85); border: 1px solid var(--neon-cyan); border-radius: 12px; padding: 18px 24px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 20px rgba(6,182,212,0.15);">
+      <div id="cloud-auth-panel" style="background: rgba(15, 23, 42, 0.85); border: 1px solid var(--neon-cyan); border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 20px rgba(6,182,212,0.15);">
         <div id="cloud-auth-status" style="display: flex; align-items: center; gap: 12px;">
-          <div style="font-size: 1.8rem;">☁️</div>
+          <div style="font-size: 1.6rem;">☁️</div>
           <div>
-            <div style="font-weight: 700; color: #fff; font-size: 0.95rem;" id="cloud-user-email">Utilizador Convidado (Modo Local)</div>
+            <div style="font-weight: 700; color: #fff; font-size: 0.95rem;" id="cloud-user-email">Utilizador Autenticado</div>
             <div style="font-size: 0.75rem; color: var(--neon-cyan);" id="cloud-license-type">Conectado ao Cloud SQL Neon (PostgreSQL 18.6)</div>
           </div>
         </div>
         <div id="cloud-auth-actions" style="display: flex; gap: 10px;">
-          <button class="btn btn-primary btn-sm" id="btn-open-cloud-auth" onclick="openCloudAuthModal()" style="padding: 6px 14px; font-weight: 600; background: var(--gradient-primary); cursor: pointer;">
-            <span>🔑</span> Entrar / Registar
-          </button>
-          <button class="btn btn-danger btn-sm" id="btn-cloud-logout" style="display: none; padding: 6px 14px; font-weight: 600;">
-            <span>🚪</span> Sair da App
+          <button class="btn btn-danger btn-sm" id="btn-cloud-logout" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; font-weight: 600;">
+            <span>🚪</span> Terminar Sessão da App
           </button>
         </div>
       </div>

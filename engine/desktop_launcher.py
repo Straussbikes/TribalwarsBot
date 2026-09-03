@@ -506,7 +506,7 @@ class DesktopApp:
         logger.info(f"A aguardar inicialização do servidor em http://{self.host}:{self.port}...")
         for _ in range(50):
             try:
-                with urllib.request.urlopen(f"http://{self.host}:{self.port}/api/health", timeout=1) as resp:
+                with urllib.request.urlopen(f"http://{self.host}:{self.port}/api/auth-info", timeout=1) as resp:
                     if resp.status == 200:
                         break
             except Exception:

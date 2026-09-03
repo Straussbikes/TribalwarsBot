@@ -52,8 +52,9 @@
 | **Fase 2** | **Módulos de Ações (`game.php`)** | ✅ Concluída | Auto-build, recrutamento, Praça de Reunião, AM Farm, radar de inativos, mapa tático, mercado e arbitragem económica. |
 | **Fase 3** | **Arquitetura 100% Cloud-Native** | ✅ Concluída | Migração total para Cloud SQL PostgreSQL 18.6, cofre AES-256-GCM, hierarquia `AppUser` -> `GameAccount` -> `GameWorld` -> `Village`, eliminação de resquícios de I/O em disco, `TokenStorage` (`auth.dat`), Bootstrap Gatekeeper. |
 | **Fase 4** | **Concorrência & Orquestração** | ✅ Concluída | `AccountSessionManager` (mutex monousuário), `WorldWorkerOrchestrator` (paralelismo multi-mundo e isolamento de rate limits), chips multi-mundo dinâmicos na interface. |
-| **Fase 5** | **UI Cockpit & Autenticação Cloud** | ✅ Concluída | Modal de login/registo Cloud SQL no Account Hub, persistência e comutação atómica de contas, atribuição de modelos por aldeia na Dashboard. |
+| **Fase 5** | **UI Cockpit & Autenticação Cloud** | ✅ Concluída | Persistência e comutação atómica de contas, atribuição de modelos por aldeia na Dashboard. |
 | **Fase 6** | **Scripts de Sanitização e Purga** | ✅ Concluída | `scripts/sanitize_cloud_db.py` (purga transacional com preservação dos 5 modelos oficiais) e `scripts/purge_local_state.py` (purga local de caches e DBs legadas). |
+| **Fase 7** | **Portal de Login Mandatório Pré-Hub** | ✅ Concluída | Ecrã primário exclusivo (`#app-portal-view`) para login/registo no programa. Ocultação total do Hub de Contas do Tribos, top-nav de automação e dados de jogo até autenticação com Cloud SQL. |
 
 ---
 

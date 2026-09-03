@@ -139,8 +139,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     aggIron: document.getElementById("agg-iron"),
     aggVillagesCount: document.getElementById("agg-villages-count"),
 
-    // Account Hub & Modais de Gestão de Contas
+    // Portal de Acesso & Account Hub
+    appPortalView: document.getElementById("app-portal-view"),
     accountHubView: document.getElementById("account-hub-view"),
+    mainWorkspace: document.getElementById("main-workspace"),
     accountsGrid: document.getElementById("accounts-grid"),
     hubHeaderActions: document.getElementById("hub-header-actions"),
     btnHubAddAccount: document.getElementById("btn-hub-add-account"),
@@ -931,16 +933,59 @@ document.addEventListener("DOMContentLoaded", async () => {
     return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   }
 
-  // --- Funções de Gestão de Contas (Account Hub / Single Active Session) ---
-  function showAccountHub() {
-    if (elements.accountHubView) elements.accountHubView.style.display = "block";
-    if (elements.mainWorkspace) elements.mainWorkspace.style.display = "none";
-    loadAndRenderAccounts();
+  // --- Funções de Gestão de Vistas (Portal de Login / Account Hub / Cockpit) ---
+  function showPortalLogin() {
+    const portalView = document.getElementById("app-portal-view");
+    const hubView = document.getElementById("account-hub-view");
+    const mainWorkspace = document.querySelector(".main-workspace");
+    if (portalView) portalView.style.display = "flex";
+    if (hubView) hubView.style.display = "none";
+    if (mainWorkspace) mainWorkspace.style.display = "none";
+    if (typeof updateTopNavVisibility === "function") {
+      updateTopNavVisibility(false);
+    }
+  }
+
+  async function showAccountHub() {
+    if (!state.appUser) {
+      showPortalLogin();
+      return;
+    }
+    const portalView = document.getElementById("app-portal-view");
+    const hubView = document.getElementById("account-hub-view");
+    const mainWorkspace = document.querySelector(".main-workspace");
+    if (portalView) portalView.style.display = "none";
+    if (hubView) hubView.style.display = "block";
+    if (mainWorkspace) mainWorkspace.style.display = "none";
+
+    if (typeof updateTopNavVisibility === "function") {
+      updateTopNavVisibility(false);
+    }
+
+    await loadAndRenderAccounts();
+    await loadAndRenderWorlds();
+  }
+
+  function hideAccountHub() {
+    const portalView = document.getElementById("app-portal-view");
+    const hubView = document.getElementById("account-hub-view");
+    const mainWorkspace = document.querySelector(".main-workspace");
+    if (portalView) portalView.style.display = "none";
+    if (hubView) hubView.style.display = "none";
+    if (mainWorkspace) mainWorkspace.style.display = "flex";
+
+    const isReady = Boolean(state.appUser && (state.activeGameUsername || state.activeProfileId));
+    if (typeof updateTopNavVisibility === "function") {
+      updateTopNavVisibility(isReady);
+    }
   }
 
   function showDashboard() {
-    if (elements.accountHubView) elements.accountHubView.style.display = "none";
-    if (elements.mainWorkspace) elements.mainWorkspace.style.display = "flex";
+    if (!state.appUser) {
+      showPortalLogin();
+      return;
+    }
+    hideAccountHub();
   }
 
   async function loadAndRenderAccounts() {
@@ -1439,33 +1484,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   });
 
-  // --- Gestão do Hub de Contas (Single-Active Session) & Acesso Restrito ---
-  async function showAccountHub() {
-    const hubView = document.getElementById("account-hub-view");
-    const mainWorkspace = document.querySelector(".main-workspace");
-    if (hubView) hubView.style.display = "block";
-    if (mainWorkspace) mainWorkspace.style.display = "none";
 
-    // Oculta rigorosamente mundos, relógio e botões de ação na Topbar quando no Hub
-    if (typeof updateTopNavVisibility === "function") {
-      updateTopNavVisibility(false);
-    }
-
-    await loadAndRenderAccounts();
-  }
-
-  function hideAccountHub() {
-    const hubView = document.getElementById("account-hub-view");
-    const mainWorkspace = document.querySelector(".main-workspace");
-    if (hubView) hubView.style.display = "none";
-    if (mainWorkspace) mainWorkspace.style.display = "flex";
-
-    // Mostra controlos na Topbar apenas se existir utilizador autenticado e conta ativa
-    const isReady = Boolean(state.appUser && (state.activeGameUsername || state.activeProfileId));
-    if (typeof updateTopNavVisibility === "function") {
-      updateTopNavVisibility(isReady);
-    }
-  }
 
   function openAddAccountModal() {
     if (!elements.accountModal) return;
@@ -7360,6 +7379,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const btnLogout = document.getElementById("btn-logout");
     const btnRefresh = document.getElementById("btn-refresh-data");
     const btnClaim = document.getElementById("btn-claim-quests");
+    const btnSwitch = document.getElementById("btn-switch-account");
 
     const displayVal = isWorkspace ? "inline-flex" : "none";
     const displayFlex = isWorkspace ? "flex" : "none";
@@ -7373,6 +7393,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (btnLogout) btnLogout.style.display = displayVal;
     if (btnRefresh) btnRefresh.style.display = displayVal;
     if (btnClaim) btnClaim.style.display = displayVal;
+    if (btnSwitch) btnSwitch.style.display = isWorkspace ? "inline-flex" : "none";
   }
 
   async function updateCloudUserUI() {
@@ -7546,132 +7567,111 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // Funções Globais de controlo do Modal de Autenticação Cloud SQL
-  window.openCloudAuthModal = function() {
-    const modal = document.getElementById("modal-cloud-auth");
-    if (modal) modal.style.display = "flex";
-  };
-
-  window.closeCloudAuthModal = function() {
-    const modal = document.getElementById("modal-cloud-auth");
-    if (modal) modal.style.display = "none";
-  };
-
-  window.switchCloudAuthTab = function(tabName) {
-    const tabLogin = document.getElementById("tab-auth-login");
-    const tabRegister = document.getElementById("tab-auth-register");
-    const formLogin = document.getElementById("form-cloud-login");
-    const formRegister = document.getElementById("form-cloud-register");
+  // Funções Globais de controlo do Portal de Autenticação da Aplicação
+  window.switchPortalTab = function(tabName) {
+    const tabLogin = document.getElementById("portal-tab-btn-login");
+    const tabRegister = document.getElementById("portal-tab-btn-register");
+    const formLogin = document.getElementById("portal-form-login");
+    const formRegister = document.getElementById("portal-form-register");
 
     if (tabName === "login") {
-      if (tabLogin) { tabLogin.style.background = "var(--gradient-primary)"; tabLogin.style.color = "#fff"; }
-      if (tabRegister) { tabRegister.style.background = "transparent"; tabRegister.style.color = "var(--text-muted)"; }
+      tabLogin?.classList.add("active");
+      tabRegister?.classList.remove("active");
       if (formLogin) formLogin.style.display = "flex";
       if (formRegister) formRegister.style.display = "none";
     } else {
-      if (tabRegister) { tabRegister.style.background = "var(--gradient-primary)"; tabRegister.style.color = "#fff"; }
-      if (tabLogin) { tabLogin.style.background = "transparent"; tabLogin.style.color = "var(--text-muted)"; }
+      tabRegister?.classList.add("active");
+      tabLogin?.classList.remove("active");
       if (formRegister) formRegister.style.display = "flex";
       if (formLogin) formLogin.style.display = "none";
     }
   };
 
   function setupCloudSqlUi() {
-    // 1. Abertura e fecho do modal de autenticação
-    const btnOpenAuth = document.getElementById("btn-open-cloud-auth");
-    const btnCloseAuth = document.getElementById("btn-close-cloud-auth");
-    const modalAuth = document.getElementById("modal-cloud-auth");
+    // 1. Comutação de abas do Portal
+    const tabLogin = document.getElementById("portal-tab-btn-login");
+    const tabRegister = document.getElementById("portal-tab-btn-register");
+    const formLogin = document.getElementById("portal-form-login");
+    const formRegister = document.getElementById("portal-form-register");
     const btnLogout = document.getElementById("btn-cloud-logout");
 
-    btnOpenAuth?.addEventListener("click", () => window.openCloudAuthModal());
-    btnCloseAuth?.addEventListener("click", () => window.closeCloudAuthModal());
+    tabLogin?.addEventListener("click", () => window.switchPortalTab("login"));
+    tabRegister?.addEventListener("click", () => window.switchPortalTab("register"));
 
-    // 2. Comutação de abas Iniciar Sessão vs Registar
-    const tabLogin = document.getElementById("tab-auth-login");
-    const tabRegister = document.getElementById("tab-auth-register");
-    const formLogin = document.getElementById("form-cloud-login");
-    const formRegister = document.getElementById("form-cloud-register");
-
-    tabLogin?.addEventListener("click", () => window.switchCloudAuthTab("login"));
-    tabRegister?.addEventListener("click", () => window.switchCloudAuthTab("register"));
-
-    // 3. Submissão de Login
+    // 2. Submissão de Login no Portal
     formLogin?.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const email = document.getElementById("input-cloud-login-email")?.value;
-      const pass = document.getElementById("input-cloud-login-password")?.value;
-      const errEl = document.getElementById("cloud-login-error");
-      const submitBtn = document.getElementById("btn-submit-cloud-login");
+      const email = document.getElementById("portal-input-login-email")?.value.trim();
+      const pass = document.getElementById("portal-input-login-password")?.value;
+      const errEl = document.getElementById("portal-login-error");
+      const submitBtn = document.getElementById("portal-btn-login-submit");
       if (errEl) errEl.style.display = "none";
 
       try {
-        if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = "<span>⏳</span> A autenticar..."; }
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = "<span>⏳</span> A autenticar com Cloud SQL..."; }
         const res = await window.api.loginAppUser(email, pass);
-        if (res && res.status === "success") {
-          addLogEntry("SUCCESS", "auth", `Sessão iniciada com sucesso como ${email}!`);
-          if (modalAuth) modalAuth.style.display = "none";
+        if (res && res.status === "success" && res.user) {
+          state.appUser = res.user;
+          addLogEntry("SUCCESS", "auth", `Sessão iniciada como ${email}! A carregar contas do Cloud SQL...`);
           await updateCloudUserUI();
-          await loadAndRenderAccounts();
+          await showAccountHub();
         } else {
           if (errEl) { errEl.textContent = res?.message || "Credenciais inválidas."; errEl.style.display = "block"; }
         }
       } catch (err) {
-        if (errEl) { errEl.textContent = err.message || "Erro na autenticação."; errEl.style.display = "block"; }
+        if (errEl) { errEl.textContent = err.message || "Erro na autenticação com a Cloud."; errEl.style.display = "block"; }
       } finally {
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = "<span>🔑</span> Entrar na Aplicação"; }
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = "<span>🔑</span> Entrar no Sistema"; }
       }
     });
 
-    // 4. Submissão de Registo
+    // 3. Submissão de Registo no Portal
     formRegister?.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const email = document.getElementById("input-cloud-register-email")?.value;
-      const pass = document.getElementById("input-cloud-register-password")?.value;
-      const license = document.getElementById("select-cloud-register-license")?.value || "pro";
-      const errEl = document.getElementById("cloud-register-error");
-      const submitBtn = document.getElementById("btn-submit-cloud-register");
+      const email = document.getElementById("portal-input-register-email")?.value.trim();
+      const pass = document.getElementById("portal-input-register-password")?.value;
+      const license = document.getElementById("portal-select-register-license")?.value || "pro";
+      const errEl = document.getElementById("portal-register-error");
+      const submitBtn = document.getElementById("portal-btn-register-submit");
       if (errEl) errEl.style.display = "none";
 
       try {
         if (submitBtn) { submitBtn.disabled = true; submitBtn.innerHTML = "<span>⏳</span> A criar conta no Cloud SQL..."; }
         const res = await window.api.registerAppUser(email, pass, license);
-        if (res && res.status === "success") {
+        if (res && res.status === "success" && res.user) {
+          state.appUser = res.user;
           addLogEntry("SUCCESS", "auth", `Conta de utilizador criada com sucesso no PostgreSQL!`);
-          if (modalAuth) modalAuth.style.display = "none";
           await updateCloudUserUI();
-          await loadAndRenderAccounts();
+          await showAccountHub();
         } else {
           if (errEl) { errEl.textContent = res?.message || "Erro ao criar utilizador."; errEl.style.display = "block"; }
         }
       } catch (err) {
         if (errEl) { errEl.textContent = err.message || "Erro ao registar conta."; errEl.style.display = "block"; }
       } finally {
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = "<span>✨</span> Criar Conta & Persistir no Cloud SQL"; }
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = "<span>✨</span> Registar Conta no Cloud SQL"; }
       }
     });
 
-    // 5. Logout
+    // 4. Logout da Aplicação
     btnLogout?.addEventListener("click", async () => {
       try {
         await window.api.logoutAppUser();
-        addLogEntry("INFO", "auth", "Sessão terminada. Retornando ao estado de convidado.");
-        await updateCloudUserUI();
-        await loadAndRenderAccounts();
+        addLogEntry("INFO", "auth", "Sessão terminada. Regressando ao ecrã de acesso.");
+        state.appUser = null;
+        showPortalLogin();
       } catch (err) {
         alert(`Erro ao terminar sessão: ${err.message}`);
       }
     });
 
-    // 6. Botão Sincronizar Aldeias do Cloud SQL
+    // 5. Botão Sincronizar Aldeias do Cloud SQL
     document.getElementById("btn-sync-cloud-villages")?.addEventListener("click", () => {
       loadAndRenderCloudVillages(state.account?.world || "pt117");
     });
-
-    // Atualização de dados inicial
-    updateCloudUserUI();
   }
 
-  // Inicializa listeners dos novos módulos da Fase 4 e Cloud SQL
+  // Inicializa listeners dos módulos da Fase 4 e Cloud SQL
   setupScavengeEventListeners();
   setupSnobEventListeners();
   setupInventoryEventListeners();
@@ -7684,8 +7684,31 @@ document.addEventListener("DOMContentLoaded", async () => {
       const statusData = await window.api.getStatus();
       applyStateData(statusData);
       refreshDiscoveredWorlds();
+
       if (!initialLoaded) {
         initialLoaded = true;
+
+        // Verificação mandatária do utilizador da aplicação
+        let currentUser = null;
+        try {
+          const userRes = await window.api.getCurrentAppUser();
+          if (userRes && userRes.status === "success" && userRes.user) {
+            currentUser = userRes.user;
+            state.appUser = currentUser;
+            await updateCloudUserUI();
+          }
+        } catch (e) {
+          currentUser = null;
+        }
+
+        // Se não houver utilizador autenticado no programa, mostra estritamente o portal de login
+        if (!currentUser) {
+          state.appUser = null;
+          showPortalLogin();
+          return;
+        }
+
+        // Se autenticado, verifica se transita para Cockpit ou para o Hub de Contas
         const urlParams = new URLSearchParams(window.location.search);
         const shouldGoToDashboard = (
           urlParams.get("view") === "dashboard" ||
@@ -7694,14 +7717,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         );
         sessionStorage.removeItem("goto_tab");
 
-        if (shouldGoToDashboard) {
+        if (shouldGoToDashboard && (statusData?.active_profile_id || state.account?.sid)) {
           hideAccountHub();
           const dashBtn = document.getElementById("tab-btn-dashboard");
           if (dashBtn) dashBtn.click();
           updateDashboard(statusData);
         } else {
-          // O bot arranca no Gestor de Contas (Hub) apenas no arranque a frio se não vier de login
-          showAccountHub();
+          await showAccountHub();
         }
       }
     } catch (e) {
