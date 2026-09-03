@@ -26,12 +26,12 @@ from engine.core.account import TribalAccount
 from engine.core.scheduler import TaskScheduler
 from engine.api.context import EngineContext
 from engine.api.server import start_sidecar_server
+from engine.utils.paths import resource_path
+from engine.utils.runtime import suppress_console_and_redirect_streams
+from engine.utils.logging_setup import setup_production_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] (%(name)s) %(message)s",
-    datefmt="%H:%M:%S",
-)
+suppress_console_and_redirect_streams()
+setup_production_logging()
 logger = logging.getLogger("TribalDesktop")
 
 

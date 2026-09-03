@@ -84,17 +84,8 @@ def create_app(
         desktop_logger.addHandler(ws_handler)
 
     # 5. Monta a interface estática do Frontend se a pasta existir
-    import sys
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        frontend_dir = Path(sys._MEIPASS) / "frontend"
-    elif getattr(sys, "frozen", False):
-        frontend_dir = Path(sys.executable).resolve().parent / "_internal" / "frontend"
-        if not frontend_dir.exists():
-            frontend_dir = Path(sys.executable).resolve().parent / "frontend"
-    else:
-        frontend_dir = Path(__file__).resolve().parent.parent.parent / "frontend"
-        if not frontend_dir.exists():
-            frontend_dir = Path("frontend")
+    from engine.utils.paths import resource_path
+    frontend_dir = resource_path("frontend")
 
     if frontend_dir.exists() and (frontend_dir / "index.html").exists():
         from fastapi.staticfiles import StaticFiles

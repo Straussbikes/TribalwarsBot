@@ -1,68 +1,104 @@
 """
-Script de automação de build para compilação do Tribal Wars Bot com PyInstaller.
+Tribal Wars Bot - Commercial Build & Packaging Automation Pipeline
+Executa a compilação do executável standalone sem consola (GUI pura) via PyInstaller.
 """
 
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
-def main():
+
+def run_pipeline():
     root_dir = Path(__file__).resolve().parent
     dist_dir = root_dir / "dist"
     build_dir = root_dir / "build"
     spec_file = root_dir / "TribalWarsBot.spec"
+    assets_dir = root_dir / "assets"
+    icon_file = assets_dir / "icon.ico"
+    version_file = root_dir / "file_version_info.txt"
 
-    print("=" * 65)
-    print("[Build] A iniciar compilacao do Tribal Wars Bot...")
-    print(f"Diretorio Raiz: {root_dir}")
-    print("=" * 65)
+    print("=" * 70)
+    print(" [Tribal Wars Bot] Pipeline de Compilação Standalone (GUI Pura)")
+    print(f" Raiz do Projeto: {root_dir}")
+    print(f" Interpretador Python: {sys.executable}")
+    print("=" * 70)
 
+    # 1. Validação de pré-requisitos
     if not spec_file.exists():
-        print(f"Erro: Ficheiro de especificacao '{spec_file}' nao encontrado.")
+        print(f"[ERRO] Ficheiro de especificação '{spec_file}' não encontrado.")
         sys.exit(1)
 
-    # Limpeza preventiva de builds antigas
+    if not version_file.exists():
+        print(f"[ERRO] Ficheiro de metadados '{version_file}' não encontrado.")
+        sys.exit(1)
+
+    # 2. Garante que o ícone existe
+    if not icon_file.exists():
+        print("[AVISO] Ícone 'assets/icon.ico' não encontrado. A gerar ícone padrão...")
+        assets_dir.mkdir(exist_ok=True)
+        try:
+            from PIL import Image, ImageDraw
+            img = Image.new("RGBA", (256, 256), (15, 23, 42, 255))
+            draw = ImageDraw.Draw(img)
+            draw.ellipse([(16, 16), (240, 240)], outline=(6, 182, 212, 255), width=8)
+            img.save(icon_file, format="ICO")
+            print(" Ícone padrão gerado com sucesso.")
+        except Exception as e:
+            print(f"[AVISO] Não foi possível gerar ícone: {e}")
+
+    # 3. Limpeza rigorosa de compilações anteriores
     if dist_dir.exists():
-        print("A limpar diretorio 'dist' anterior...")
+        print(" A limpar pasta de distribuição anterior (dist/)...")
         shutil.rmtree(dist_dir, ignore_errors=True)
+
     if build_dir.exists():
-        print("A limpar diretorio 'build' anterior...")
+        print(" A limpar pasta de build temporária (build/)...")
         shutil.rmtree(build_dir, ignore_errors=True)
 
+    # 4. Execução do PyInstaller
     cmd = [
         sys.executable,
         "-m",
         "PyInstaller",
         "--noconfirm",
+        "--clean",
         str(spec_file),
     ]
 
-    print(f"A executar comando: {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=str(root_dir))
+    print(f"\n[A EXECUTAR] {' '.join(cmd)}\n")
+    proc = subprocess.run(cmd, cwd=str(root_dir))
 
-    if result.returncode != 0:
-        print("\n[Build] Erro na compilacao do PyInstaller.")
-        sys.exit(result.returncode)
+    if proc.returncode != 0:
+        print(f"\n[FALHA] PyInstaller encerrou com código de erro: {proc.returncode}")
+        sys.exit(proc.returncode)
 
-    output_exe = dist_dir / "TribalWarsBot" / "TribalWarsBot.exe"
-    if not output_exe.exists():
-        print(f"\n[Build] Executavel nao encontrado no destino esperado: {output_exe}")
+    # 5. Checklist de Validação Pós-Build
+    exe_path = dist_dir / "TribalWarsBot" / "TribalWarsBot.exe"
+    if not exe_path.exists():
+        print(f"\n[ERRO] O executável esperado não foi encontrado em: {exe_path}")
         sys.exit(1)
 
-    dest_frontend = dist_dir / "TribalWarsBot" / "frontend"
-    if not dest_frontend.exists():
-        print("A sincronizar pasta frontend/ na raiz da distribuicao...")
-        shutil.copytree(root_dir / "frontend", dest_frontend)
+    # Verifica integridade dos assets do frontend
+    frontend_dest = dist_dir / "TribalWarsBot" / "_internal" / "frontend"
+    if not frontend_dest.exists():
+        frontend_dest = dist_dir / "TribalWarsBot" / "frontend"
 
-    exe_size_mb = output_exe.stat().st_size / (1024 * 1024)
-    print("\n" + "=" * 65)
-    print("[Build Concluido com Sucesso!]")
-    print(f"Executavel gerado: {output_exe}")
-    print(f"Tamanho do executavel: {exe_size_mb:.2f} MB")
-    print("=" * 65)
+    if not frontend_dest.exists() or not (frontend_dest / "index.html").exists():
+        print("[Sincronização] A copiar pasta 'frontend' para a raiz da distribuição...")
+        shutil.copytree(root_dir / "frontend", dist_dir / "TribalWarsBot" / "frontend", dirs_exist_ok=True)
+
+    exe_size_mb = exe_path.stat().st_size / (1024 * 1024)
+    print("\n" + "=" * 70)
+    print(" COMPILAÇÃO CONCLUÍDA COM SUCESSO!")
+    print("=" * 70)
+    print(f" Binário Gerado: {exe_path}")
+    print(f" Tamanho do Executável Principal: {exe_size_mb:.2f} MB")
+    print(" Modo de Execução: GUI Windowed (console=False, sem terminal)")
+    print(" Rotação de Logs: Silencioso em %APPDATA%/TribalWarsBot/logs/")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
-    main()
+    run_pipeline()
