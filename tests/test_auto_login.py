@@ -172,3 +172,39 @@ class TestContextAutoLogin(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res["status"], "success")
             self.assertEqual(res["sid"], "fresh_sid_987654321")
             ctx.account.update_sid.assert_awaited_once_with("fresh_sid_987654321")
+
+    async def test_list_world_villages_avoids_default_main(self):
+        from engine.api.context import EngineContext
+
+        ctx = EngineContext()
+        ctx.current_app_user = MagicMock(id="user_123")
+        ctx.active_profile_id = "default_main"
+        ctx.session_manager.active_account_id = None
+        ctx.session_manager.active_game_username = "JogadorReal"
+
+        real_acc = MagicMock()
+        real_acc.id = "uuid-1234-5678"
+        real_acc.app_user_id = "user_123"
+        real_acc.game_username = "JogadorReal"
+
+        ctx.game_account_repo = MagicMock()
+        ctx.game_account_repo.get_by_id = AsyncMock(return_value=None)
+        ctx.game_account_repo.get_by_user_and_username = AsyncMock(return_value=real_acc)
+
+        mock_gw = MagicMock()
+        mock_gw.id = "gw-999"
+        ctx.game_world_repo = MagicMock()
+        ctx.game_world_repo.get_or_create = AsyncMock(return_value=mock_gw)
+
+        ctx.village_repo = MagicMock()
+        ctx.village_repo.list_by_world = AsyncMock(return_value=[])
+
+        res = await ctx.list_world_villages("pt117")
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["game_world_id"], "gw-999")
+        # Confirma que get_or_create recebeu o UUID real e NUNCA "default_main"
+        ctx.game_world_repo.get_or_create.assert_awaited_once_with(
+            game_account_id="uuid-1234-5678",
+            world_code="pt117",
+        )
+        self.assertEqual(ctx.active_profile_id, "uuid-1234-5678")

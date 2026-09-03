@@ -2003,6 +2003,11 @@ class EngineContext:
             # 2. Marca na base de dados SQLite a conta ativa (e desativa todas as outras)
             self.profile_manager.set_active_profile(account_id)
             self.active_profile_id = account_id
+            if hasattr(self, "session_manager") and self.session_manager:
+                self.session_manager.active_account_id = account_id
+                self.session_manager.active_game_username = prof.name
+                if self.current_app_user:
+                    self.session_manager.active_user_id = self.current_app_user.id
 
             # 3. Atualiza BotConfig com as definições completas e agregadas do perfil no SQLite
             self.config = prof.to_bot_config()
@@ -3482,28 +3487,37 @@ class EngineContext:
             return {"status": "error", "message": "Autenticação requerida."}
 
         target_acc = None
-        if account_id:
+        if account_id and account_id != "default_main":
             target_acc = await self.game_account_repo.get_by_id(account_id)
         if not target_acc:
             target_acc = await self.game_account_repo.get_by_user_and_username(self.current_app_user.id, game_username)
 
         acc_id = target_acc.id if target_acc else account_id
+        if acc_id:
+            self.active_profile_id = acc_id
 
+        final_username = target_acc.game_username if target_acc else game_username
         session_status = await self.session_manager.switch_account(
             app_user_id=self.current_app_user.id,
-            game_username=game_username,
+            game_username=final_username,
             account_id=acc_id,
         )
         self.broadcast_sync("ACCOUNT_SWITCHED", session_status)
         return {
             "status": "success",
             "session": session_status,
-            "message": f"Conta ativa alterada para '{game_username}'.",
+            "message": f"Conta ativa alterada para '{final_username}'.",
         }
 
     async def list_game_worlds(self, account_id: Optional[str] = None) -> Dict[str, Any]:
         """Lista os mundos associados à conta ativa e respetivo status dos workers."""
-        acc_id = account_id or self.session_manager.active_account_id
+        acc_id = account_id or self.session_manager.active_account_id or self.active_profile_id
+        if acc_id == "default_main":
+            acc_id = None
+        if not acc_id and self.current_app_user:
+            accs = await self.game_account_repo.list_by_user(self.current_app_user.id)
+            if accs:
+                acc_id = accs[0].id
         if not acc_id:
             return {"status": "error", "message": "Nenhuma conta de jogo selecionada."}
 
@@ -3527,7 +3541,13 @@ class EngineContext:
 
     async def add_game_world(self, world_code: str, is_active: bool = True) -> Dict[str, Any]:
         """Adiciona um mundo à conta de jogo ativa no Cloud SQL."""
-        acc_id = self.session_manager.active_account_id
+        acc_id = self.session_manager.active_account_id or self.active_profile_id
+        if acc_id == "default_main":
+            acc_id = None
+        if not acc_id and self.current_app_user:
+            accs = await self.game_account_repo.list_by_user(self.current_app_user.id)
+            if accs:
+                acc_id = accs[0].id
         if not acc_id:
             return {"status": "error", "message": "Nenhuma conta de jogo ativa no momento."}
 
@@ -3560,10 +3580,30 @@ class EngineContext:
     async def list_world_villages(self, world_code: str) -> Dict[str, Any]:
         """Lista todas as aldeias da tabela 'villages' para o mundo especificado."""
         await self.ensure_current_app_user()
-        acc_id = self.session_manager.active_account_id or self.active_profile_id
+        if not self.current_app_user:
+            return {
+                "status": "success",
+                "world_code": world_code,
+                "game_world_id": None,
+                "villages": [],
+                "message": "Autenticação Cloud SQL requerida.",
+            }
 
-        # 1. Se não tiver acc_id direto, tenta obter a partir do username ativo ou das contas do utilizador
-        if not acc_id and self.current_app_user:
+        # 1. Procura o registo de GameAccount real na Cloud SQL pertencente ao utilizador autenticado
+        acc = None
+        candidate_ids = [self.session_manager.active_account_id, self.active_profile_id]
+        for cid in candidate_ids:
+            if cid and cid != "default_main":
+                try:
+                    candidate = await self.game_account_repo.get_by_id(str(cid))
+                    if candidate and candidate.app_user_id == self.current_app_user.id:
+                        acc = candidate
+                        break
+                except Exception:
+                    pass
+
+        # 2. Se não encontrou por ID, tenta por username ativo
+        if not acc:
             runtime_name = None
             if self.account:
                 runtime_name = getattr(self.account, "player_name", None)
@@ -3575,46 +3615,35 @@ class EngineContext:
             target_username = self.session_manager.active_game_username or runtime_name
             if target_username:
                 acc = await self.game_account_repo.get_by_user_and_username(self.current_app_user.id, target_username)
-                if acc:
-                    acc_id = acc.id
-                    self.session_manager.active_account_id = acc.id
-                    self.session_manager.active_game_username = acc.game_username
 
-            if not acc_id:
-                user_accounts = await self.game_account_repo.list_by_user(self.current_app_user.id)
-                if user_accounts:
-                    acc_id = user_accounts[0].id
-                    self.session_manager.active_account_id = acc_id
-                    self.session_manager.active_game_username = user_accounts[0].game_username
+        # 3. Se ainda não encontrou, usa a primeira conta registada deste app_user
+        if not acc:
+            user_accounts = await self.game_account_repo.list_by_user(self.current_app_user.id)
+            if user_accounts:
+                acc = user_accounts[0]
 
-        # 2. Se o runtime do bot tiver uma conta conectada em memória, assegura no Cloud SQL
-        runtime_p = None
-        if self.account:
+        # 4. Se o runtime do bot tiver uma conta conectada em memória mas ainda não existir na Cloud SQL, assegura-a
+        if not acc and self.account:
             runtime_p = getattr(self.account, "player_name", None)
             if not runtime_p and getattr(self.account, "player", None):
                 runtime_p = getattr(self.account.player, "name", None)
             if not runtime_p:
                 runtime_p = getattr(self.account, "username", None)
 
-        if not acc_id and self.current_app_user and runtime_p:
-            p_name = str(runtime_p).strip()
-            acc = await self.game_account_repo.create_or_update(
-                app_user_id=self.current_app_user.id,
-                game_username=p_name,
-                credentials_data={
-                    "sid": getattr(self.account, "sid", "") or self.config.sid or "",
-                    "domain": self.config.domain,
-                    "world": world_code,
-                },
-            )
-            acc_id = acc.id
-            self.session_manager.active_account_id = acc.id
-            self.session_manager.active_game_username = p_name
-            self.session_manager.active_account_id = acc.id
-            self.session_manager.active_game_username = p_name
+            if runtime_p:
+                p_name = str(runtime_p).strip()
+                acc = await self.game_account_repo.create_or_update(
+                    app_user_id=self.current_app_user.id,
+                    game_username=p_name,
+                    credentials_data={
+                        "sid": getattr(self.account, "sid", "") or self.config.sid or "",
+                        "domain": self.config.domain,
+                        "world": world_code,
+                    },
+                )
 
-        # 3. Se realmente não existir nenhuma conta ainda, retorna lista vazia de aldeias graciosamente
-        if not acc_id:
+        # 5. Se após todas as tentativas não houver conta Cloud SQL válida, retorna lista vazia graciosamente
+        if not acc:
             return {
                 "status": "success",
                 "world_code": world_code,
@@ -3623,6 +3652,12 @@ class EngineContext:
                 "message": "Nenhuma conta de jogo ativa configurada no momento.",
             }
 
+        # Atualiza ponteiros ativos com o UUID real da Cloud SQL
+        self.session_manager.active_account_id = acc.id
+        self.session_manager.active_game_username = acc.game_username
+        self.active_profile_id = acc.id
+        acc_id = acc.id
+
         target_world = (world_code or getattr(self.account, "world", "") or self.config.world or "pt117").lower()
         gw = await self.game_world_repo.get_or_create(game_account_id=acc_id, world_code=target_world)
         villages = await self.village_repo.list_by_world(gw.id)
@@ -3630,6 +3665,7 @@ class EngineContext:
         # Se a tabela 'villages' na Cloud SQL estiver vazia mas tivermos aldeias em memória no bot, sincroniza-as!
         if not villages and self.account and self.account.villages:
             await self.sync_account_villages_to_cloud(
+                game_username=acc.game_username,
                 world_code=target_world,
                 villages_dict=self.account.villages,
             )

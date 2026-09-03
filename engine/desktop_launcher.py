@@ -384,7 +384,9 @@ class DesktopApp:
         # Sincroniza e persiste o perfil de conta no ProfileManager
         if hasattr(self.context, "profile_manager") and self.context.profile_manager:
             from engine.core.profile_manager import AccountProfile
-            p_id = self.context.active_profile_id or "default_main"
+            p_id = self.context.active_profile_id
+            if not p_id or p_id == "default_main":
+                p_id = f"acc_{self.context.config.world}"
             existing = self.context.profile_manager.get_profile(p_id)
             if existing:
                 existing.session_cookie = sid
@@ -432,12 +434,19 @@ class DesktopApp:
                         if not player_name:
                             return  # Não persistir se ainda não tem identificação válida
 
-                        await self.context.add_user_game_account(
+                        res = await self.context.add_user_game_account(
                             game_username=player_name,
                             sid=sid,
                             domain=self.context.config.domain,
                             world=self.context.config.world,
                         )
+                        if res and res.get("status") == "success" and res.get("account"):
+                            cloud_id = res["account"]["id"]
+                            self.context.active_profile_id = cloud_id
+                            if hasattr(self.context, "session_manager") and self.context.session_manager:
+                                self.context.session_manager.active_account_id = cloud_id
+                                self.context.session_manager.active_game_username = player_name
+
                         await self.context.sync_account_villages_to_cloud(
                             game_username=player_name,
                             world_code=self.context.config.world,
