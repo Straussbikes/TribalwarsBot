@@ -7723,8 +7723,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
 
     // 5. Botão Sincronizar Aldeias do Cloud SQL
-    document.getElementById("btn-sync-cloud-villages")?.addEventListener("click", () => {
-      loadAndRenderCloudVillages(state.account?.world || "pt117");
+    document.getElementById("btn-sync-cloud-villages")?.addEventListener("click", async () => {
+      const btn = document.getElementById("btn-sync-cloud-villages");
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = "<span>⏳</span> A sincronizar...";
+      }
+      try {
+        if (window.api && window.api.refreshVillage) {
+          await window.api.refreshVillage();
+        }
+      } catch (err) {
+        console.warn("Aviso ao ler aldeias do bot:", err);
+      }
+      await loadAndRenderCloudVillages(state.account?.world || "pt117");
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = "<span>🔄</span> Sincronizar Aldeias";
+      }
     });
   }
 

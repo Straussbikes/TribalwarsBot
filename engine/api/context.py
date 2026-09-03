@@ -3431,15 +3431,71 @@ class EngineContext:
 
     async def list_world_villages(self, world_code: str) -> Dict[str, Any]:
         """Lista todas as aldeias da tabela 'villages' para o mundo especificado."""
-        acc_id = self.session_manager.active_account_id
-        if not acc_id:
-            return {"status": "error", "message": "Nenhuma conta de jogo ativa."}
+        await self.ensure_current_app_user()
+        acc_id = self.session_manager.active_account_id or self.active_profile_id
 
-        gw = await self.game_world_repo.get_or_create(game_account_id=acc_id, world_code=world_code)
+        # 1. Se não tiver acc_id direto, tenta obter a partir do username ativo ou das contas do utilizador
+        if not acc_id and self.current_app_user:
+            target_username = (
+                self.session_manager.active_game_username or
+                (self.account.player_name if self.account else None) or
+                (self.account.username if self.account else None)
+            )
+            if target_username:
+                acc = await self.game_account_repo.get_by_user_and_username(self.current_app_user.id, target_username)
+                if acc:
+                    acc_id = acc.id
+                    self.session_manager.active_account_id = acc.id
+                    self.session_manager.active_game_username = acc.game_username
+
+            if not acc_id:
+                user_accounts = await self.game_account_repo.list_by_user(self.current_app_user.id)
+                if user_accounts:
+                    acc_id = user_accounts[0].id
+                    self.session_manager.active_account_id = acc_id
+                    self.session_manager.active_game_username = user_accounts[0].game_username
+
+        # 2. Se o runtime do bot tiver uma conta conectada em memória, assegura no Cloud SQL
+        if not acc_id and self.current_app_user and self.account and (self.account.player_name or getattr(self.account, "username", None)):
+            p_name = self.account.player_name or self.account.username
+            acc = await self.game_account_repo.create_or_update(
+                app_user_id=self.current_app_user.id,
+                game_username=p_name,
+                credentials_data={
+                    "sid": getattr(self.account, "sid", "") or self.config.sid or "",
+                    "domain": self.config.domain,
+                    "world": world_code,
+                },
+            )
+            acc_id = acc.id
+            self.session_manager.active_account_id = acc.id
+            self.session_manager.active_game_username = p_name
+
+        # 3. Se realmente não existir nenhuma conta ainda, retorna lista vazia de aldeias graciosamente
+        if not acc_id:
+            return {
+                "status": "success",
+                "world_code": world_code,
+                "game_world_id": None,
+                "villages": [],
+                "message": "Nenhuma conta de jogo ativa configurada no momento.",
+            }
+
+        target_world = (world_code or getattr(self.account, "world", "") or self.config.world or "pt117").lower()
+        gw = await self.game_world_repo.get_or_create(game_account_id=acc_id, world_code=target_world)
         villages = await self.village_repo.list_by_world(gw.id)
+
+        # Se a tabela 'villages' na Cloud SQL estiver vazia mas tivermos aldeias em memória no bot, sincroniza-as!
+        if not villages and self.account and self.account.villages:
+            await self.sync_account_villages_to_cloud(
+                world_code=target_world,
+                villages_dict=self.account.villages,
+            )
+            villages = await self.village_repo.list_by_world(gw.id)
+
         return {
             "status": "success",
-            "world_code": world_code,
+            "world_code": target_world,
             "game_world_id": gw.id,
             "villages": [v.to_dict() for v in villages],
         }

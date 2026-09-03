@@ -146,7 +146,7 @@ class AccountsDatabase:
                 json.dumps(DEFAULT_BUILD_PLAN),
                 now,
             ))
-            logger.info("Modelo padrão oficial de construção ('default_plan') semeado com sucesso no SQLite.")
+            logger.debug("Modelo padrão oficial de construção ('default_plan') assegurado na cache em memória.")
         else:
             conn.execute("""
                 UPDATE building_templates
@@ -214,7 +214,7 @@ class AccountsDatabase:
                     WHERE id = ? AND is_default = 0
                 """, (rec["id"],))
 
-        logger.info("Modelos padrão de tropas (Ataque e Defesa) assegurados no SQLite para todas as contas.")
+        logger.debug("Modelos padrão de tropas (Ataque e Defesa) assegurados na cache em memória para todas as contas.")
 
     # ==========================================
     # GESTÃO DE CONTAS (ACCOUNTS)

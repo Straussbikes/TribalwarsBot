@@ -1720,6 +1720,7 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
     @router.get("/worlds/{world_code}/villages")
     async def list_world_villages(world_code: str):
         """Lista as aldeias sincronizadas para o mundo especificado."""
+        await context.ensure_current_app_user()
         res = await context.list_world_villages(world_code=world_code)
         if res.get("status") == "error":
             raise HTTPException(status_code=400, detail=res.get("message"))
