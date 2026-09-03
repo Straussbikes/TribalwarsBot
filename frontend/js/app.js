@@ -1723,7 +1723,25 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
     } catch (e) {
       console.error("Erro ao carregar contas:", e);
-      grid.innerHTML = `<div style="color: var(--neon-rose); font-size: 0.82rem; padding: 20px;">Falha ao carregar contas: ${e.message}</div>`;
+      grid.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 36px 20px; background: rgba(15,23,42,0.6); border: 1px solid rgba(244,63,94,0.3); border-radius: 16px; max-width: 580px; margin: 20px auto;">
+          <div style="font-size: 2.5rem; margin-bottom: 10px;">⚠️</div>
+          <h4 style="color: var(--neon-rose); font-family: var(--font-title); font-size: 1.1rem; margin-bottom: 8px;">Aviso ao Sincronizar Contas</h4>
+          <p style="color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; margin-bottom: 20px;">
+            Não foi possível carregar as contas guardadas da Cloud (${e.message}). Podes tentar novamente ou adicionar/autenticar uma conta agora.
+          </p>
+          <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <button class="btn btn-primary" id="btn-hub-retry" style="background: var(--gradient-primary); padding: 8px 16px; font-size: 0.85rem; font-weight: 600;">
+              <span>🔄</span> Tentar Novamente
+            </button>
+            <button class="btn btn-secondary" id="btn-hub-create-manual-fallback" style="padding: 8px 14px; font-size: 0.85rem; font-weight: 600;">
+              <span>➕</span> Adicionar Manualmente
+            </button>
+          </div>
+        </div>
+      `;
+      document.getElementById("btn-hub-retry")?.addEventListener("click", () => loadAndRenderAccounts());
+      document.getElementById("btn-hub-create-manual-fallback")?.addEventListener("click", openAddAccountModal);
     }
   }
 
