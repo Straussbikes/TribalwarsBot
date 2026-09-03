@@ -272,7 +272,12 @@ class BotConfig:
         if tmpl in ("custom", "custom_plan") and custom_plan:
             return custom_plan
 
-        if tmpl in ("default_plan", "rush_resources", "balanced", "military_rush"):
+        from engine.config.templates import DEFAULT_BUILD_TEMPLATES
+        for official_t in DEFAULT_BUILD_TEMPLATES:
+            if official_t.get("id", "").lower() == tmpl:
+                return official_t.get("priority_list", DEFAULT_BUILD_PLAN)
+
+        if tmpl in ("default_plan", "default", "ee02gd68de", "rush_resources", "balanced", "military_rush"):
             return DEFAULT_BUILD_PLAN
 
         try:
@@ -343,7 +348,7 @@ class BotConfig:
         Retorna o identificador do template de construção ativo para a aldeia
         (ex: 'DEFAULT_PLAN', 'CUSTOM').
         """
-        tmpl = self.building.template.lower().strip()
+        tmpl = (self.building.template or "default_plan").lower().strip()
         if village_id and str(village_id) in self.villages:
             v_cfg = self.villages[str(village_id)]
             if v_cfg.building_template:

@@ -2557,6 +2557,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   async function loadBuildingData(villageId = null) {
     try {
+      if (!cachedBuildingTemplates || cachedBuildingTemplates.length === 0) {
+        await loadBuildingTemplatesList();
+      }
       const vId = villageId || (state.village && state.village.id);
       const res = await window.api.getBuildingState(vId);
       if (!res || res.status !== "success") return;
@@ -2579,10 +2582,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     if (elements.bldTemplateBadge) {
-      elements.bldTemplateBadge.textContent = (data.template || "custom").toUpperCase();
+      elements.bldTemplateBadge.textContent = (data.template || "ee02gd68de").toUpperCase();
     }
-    if (elements.bldTemplateSelect && data.template) {
-      elements.bldTemplateSelect.value = data.template;
+    if (elements.bldTemplateSelect) {
+      let tmplVal = String(data.template || "ee02gd68de").toLowerCase().trim();
+      if (tmplVal === "default_plan") tmplVal = "ee02gd68de";
+      const matched = Array.from(elements.bldTemplateSelect.options).find(opt => opt.value.toLowerCase() === tmplVal);
+      if (matched) {
+        elements.bldTemplateSelect.value = matched.value;
+      } else if (elements.bldTemplateSelect.options.length > 0 && !elements.bldTemplateSelect.value) {
+        elements.bldTemplateSelect.selectedIndex = 0;
+      }
     }
 
     const queue = data.queue || [];
@@ -2870,13 +2880,17 @@ document.addEventListener("DOMContentLoaded", async () => {
         
         // Atualiza Dropdown da Aba de Edifícios
         if (elements.bldTemplateSelect) {
-          const currentVal = selectedId || elements.bldTemplateSelect.value || "default_plan";
+          let currentVal = (selectedId || elements.bldTemplateSelect.value || state.building?.template || "ee02gd68de").toLowerCase().trim();
+          if (currentVal === "default_plan") currentVal = "ee02gd68de";
           elements.bldTemplateSelect.innerHTML = cachedBuildingTemplates.map(t => {
             const label = t.name + (t.is_default ? " (Padrão)" : "");
             return `<option value="${t.id}">${label}</option>`;
           }).join("");
-          if (cachedBuildingTemplates.some(t => t.id === currentVal)) {
-            elements.bldTemplateSelect.value = currentVal;
+          const matched = cachedBuildingTemplates.find(t => t.id.toLowerCase() === currentVal);
+          if (matched) {
+            elements.bldTemplateSelect.value = matched.id;
+          } else if (cachedBuildingTemplates.length > 0) {
+            elements.bldTemplateSelect.value = cachedBuildingTemplates[0].id;
           }
         }
 
@@ -2886,6 +2900,9 @@ document.addEventListener("DOMContentLoaded", async () => {
             const label = t.name + (t.is_default ? " (Padrão)" : "");
             return `<option value="${t.id}">${label}</option>`;
           }).join("");
+          if (cachedBuildingTemplates.length > 0 && !elements.inputAccTemplate.value) {
+            elements.inputAccTemplate.value = cachedBuildingTemplates[0].id;
+          }
         }
       }
     } catch (err) {
