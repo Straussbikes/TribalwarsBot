@@ -1869,8 +1869,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
 
+      const worldClean = worldDomain.split(".")[0].trim().toLowerCase();
+      const domainClean = worldDomain.includes(".") ? worldDomain.split(".").slice(1).join(".") : "tribalwars.com.pt";
       const payload = {
         name,
+        game_username: name,
+        world: worldClean,
+        domain: domainClean,
         world_domain: worldDomain,
         session_cookie: sid,
         sid: sid,

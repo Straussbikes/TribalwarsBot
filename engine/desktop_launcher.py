@@ -413,6 +413,31 @@ class DesktopApp:
                 inst.account.sid = sid
                 inst.config.sid = sid
 
+        def _sync_cloud_session():
+            async def _run_cloud_sync():
+                try:
+                    await self.context.ensure_current_app_user()
+                    if self.context.current_app_user and self.context.account:
+                        player_name = (
+                            getattr(self.context.account, "player_name", "") or
+                            getattr(self.context.account, "username", "") or
+                            f"Jogador_{self.context.config.world.upper()}"
+                        ).strip()
+                        await self.context.add_user_game_account(
+                            game_username=player_name,
+                            sid=sid,
+                            domain=self.context.config.domain,
+                            world=self.context.config.world,
+                        )
+                        await self.context.sync_account_villages_to_cloud(
+                            game_username=player_name,
+                            world_code=self.context.config.world,
+                        )
+                except Exception as ex:
+                    logger.warning(f"Aviso ao persistir login de jogo no Cloud SQL: {ex}")
+
+            asyncio.run_coroutine_threadsafe(_run_cloud_sync(), self.loop)
+
         if self.context.account:
             self.context.account.stats_tracker = self.context.get_stats_tracker(self.context.config.world)
             self.context.account._broadcast_sync = self.context.broadcast_sync
@@ -430,6 +455,7 @@ class DesktopApp:
                 asyncio.run_coroutine_threadsafe(
                     self.context.account.discover_active_worlds(), self.loop
                 )
+                _sync_cloud_session()
             except Exception as e:
                 logger.warning(f"Erro ao sincronizar nova sessão da conta: {e}")
         else:
@@ -458,6 +484,7 @@ class DesktopApp:
                 asyncio.run_coroutine_threadsafe(
                     account.discover_active_worlds(), self.loop
                 )
+                _sync_cloud_session()
             except Exception as e:
                 logger.warning(f"Erro ao inicializar nova conta: {e}")
 

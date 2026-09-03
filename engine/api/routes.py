@@ -482,7 +482,8 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         active_username = context.session_manager.active_game_username
         active_id = context.active_profile_id
 
-        # 1. Contas no Cloud SQL (se utilizador autenticado)
+        # 1. Assegura utilizador autenticado no Cloud SQL
+        await context.ensure_current_app_user()
         if context.current_app_user:
             try:
                 cloud_res = await context.list_user_game_accounts()
@@ -522,6 +523,19 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
                     "is_active": True,
                     "last_used": time.time(),
                 })
+                # Persiste em segundo plano no Cloud SQL se estiver autenticado
+                if context.current_app_user:
+                    try:
+                        asyncio.create_task(
+                            context.add_user_game_account(
+                                game_username=runtime_player,
+                                sid=getattr(context.account, "sid", "") or context.config.sid or "",
+                                domain=context.config.domain,
+                                world=context.config.world,
+                            )
+                        )
+                    except Exception:
+                        pass
 
         # 4. Assegura marcação de is_active_session correta
         for a in accounts:
@@ -545,16 +559,20 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
 
     @router.post("/accounts")
     async def create_account(payload: AccountCreateRequest):
-        """Cria uma conta de jogo no Cloud SQL ou um novo perfil de conta local."""
+        """Cria uma conta de jogo no Cloud SQL com cofre seguro e mundo associado."""
         username = payload.game_username or payload.name or payload.username
         if not username:
             raise HTTPException(status_code=400, detail="Nome ou game_username é obrigatório.")
 
+        await context.ensure_current_app_user()
         if context.current_app_user:
+            world_val = payload.world or (payload.world_domain.split(".")[0] if payload.world_domain else "pt117")
+            domain_val = payload.domain or (".".join(payload.world_domain.split(".")[1:]) if payload.world_domain and "." in payload.world_domain else "tribalwars.com.pt")
             res = await context.add_user_game_account(
                 game_username=username,
                 sid=payload.sid or payload.session_cookie or "",
-                domain=payload.domain or "tribalwars.com.pt",
+                domain=domain_val,
+                world=world_val,
                 proxy=payload.proxy,
                 password=payload.password,
             )
@@ -570,6 +588,7 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
     @router.post("/accounts/switch")
     async def switch_game_account(payload: GameAccountSwitchRequest):
         """Troca a conta de jogo ativa com exclusão mútua e paragem graciosa."""
+        await context.ensure_current_app_user()
         try:
             res = await context.switch_active_game_account(
                 game_username=payload.game_username,
@@ -583,28 +602,80 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
 
     @router.get("/accounts/active")
     def get_active_account_status():
-        """Retorna o estado do singleton AccountSessionManager."""
+        """Retorna os dados da conta que detém a posse do motor e o respetivo status."""
+        active_username = context.session_manager.active_game_username
+        active_id = context.active_profile_id
+        session_status = context.session_manager.get_status()
         return {
             "status": "success",
-            "session": context.session_manager.get_status(),
+            "session": session_status,
+            "active_username": active_username,
+            "active_id": active_id,
+            "state": context.session_manager.state.value,
+            "session_start_time": context.session_manager.session_start_time,
         }
 
     @router.get("/accounts/{account_id}")
-    def get_account(account_id: str):
-        """Obtém detalhes de uma conta específica."""
+    async def get_account(account_id: str):
+        """Obtém detalhes de uma conta específica do Cloud SQL ou local."""
+        await context.ensure_current_app_user()
+        if context.current_app_user:
+            try:
+                acc = await context.game_account_repo.get_by_id(account_id)
+                if acc:
+                    creds = context.game_account_repo.decrypt_credentials(acc)
+                    worlds = await context.game_world_repo.list_by_account(acc.id)
+                    w_code = worlds[0].world_code if worlds else creds.get("world", "pt117")
+                    d = acc.to_dict()
+                    d["name"] = acc.game_username
+                    d["world"] = w_code
+                    d["world_domain"] = f"{w_code}.{creds.get('domain', 'tribalwars.com.pt')}"
+                    d["session_cookie"] = creds.get("sid", "")
+                    return d
+            except Exception:
+                pass
+
         acc = context.get_account(account_id)
         if not acc:
             raise HTTPException(status_code=404, detail="Conta não encontrada.")
         return acc
 
     @router.put("/accounts/{account_id}")
-    def update_account(account_id: str, payload: AccountUpdateRequest):
-        """Atualiza configurações de uma conta existente."""
-        return context.update_account(account_id, payload.model_dump(exclude_unset=True))
+    async def update_account(account_id: str, payload: AccountUpdateRequest):
+        """Atualiza configurações de uma conta existente no Cloud SQL e localmente."""
+        await context.ensure_current_app_user()
+        data = payload.model_dump(exclude_unset=True)
+        if context.current_app_user:
+            try:
+                acc = await context.game_account_repo.get_by_id(account_id)
+                if acc:
+                    creds = context.game_account_repo.decrypt_credentials(acc)
+                    if "sid" in data or "session_cookie" in data:
+                        creds["sid"] = data.get("sid") or data.get("session_cookie")
+                    if "domain" in data:
+                        creds["domain"] = data["domain"]
+                    if "world" in data or "world_domain" in data:
+                        w_val = data.get("world") or data.get("world_domain", "").split(".")[0]
+                        creds["world"] = w_val
+                        await context.game_world_repo.get_or_create(acc.id, w_val)
+                    await context.game_account_repo.create_or_update(
+                        app_user_id=context.current_app_user.id,
+                        game_username=data.get("name") or acc.game_username,
+                        credentials_data=creds,
+                    )
+            except Exception as e:
+                logger.warning(f"Aviso ao atualizar conta no Cloud SQL: {e}")
+        return context.update_account(account_id, data)
 
     @router.delete("/accounts/{account_id}")
-    def delete_account(account_id: str):
-        """Remove o perfil da conta."""
+    async def delete_account(account_id: str):
+        """Remove o perfil da conta no Cloud SQL e localmente."""
+        await context.ensure_current_app_user()
+        if context.current_app_user:
+            try:
+                await context.game_account_repo.delete_account(account_id)
+            except Exception as e:
+                logger.warning(f"Aviso ao eliminar conta no Cloud SQL: {e}")
         return context.delete_account(account_id)
 
     @router.post("/accounts/{account_id}/activate")

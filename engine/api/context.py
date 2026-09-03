@@ -701,6 +701,11 @@ class EngineContext:
             await self.account.refresh_state()
             # 2. Atualiza tropas disponíveis via screen=place
             await self.account.refresh_village_details()
+            # 3. Persiste o estado atualizado das aldeias na Cloud SQL
+            try:
+                await self.sync_account_villages_to_cloud()
+            except Exception as se:
+                logger.debug(f"Aviso ao sincronizar aldeias com Cloud SQL: {se}")
             status_dict = self.get_status_dict()
             await self.broadcast("VILLAGE_UPDATED", status_dict)
             await self.broadcast("STATUS_UPDATE", status_dict)
@@ -1950,9 +1955,36 @@ class EngineContext:
         """
         Ativa uma conta específica com bloqueio monousuário estrito (Single-Active Session).
         Encerra qualquer sessão anterior de forma limpa antes de instanciar a nova.
+        Suporta contas armazenadas no Cloud SQL ou em memória.
         """
         async with self._account_lock:
             prof = self.profile_manager.get_profile(account_id)
+            if not prof:
+                # Tenta carregar do Cloud SQL
+                await self.ensure_current_app_user()
+                if self.current_app_user:
+                    try:
+                        cloud_acc = await self.game_account_repo.get_by_id(account_id)
+                        if not cloud_acc:
+                            cloud_acc = await self.game_account_repo.get_by_user_and_username(self.current_app_user.id, account_id)
+                        if cloud_acc:
+                            creds = self.game_account_repo.decrypt_credentials(cloud_acc)
+                            worlds = await self.game_world_repo.list_by_account(cloud_acc.id)
+                            w_code = worlds[0].world_code if worlds else creds.get("world", "pt117")
+                            from engine.core.profile_manager import AccountProfile
+                            prof = AccountProfile(
+                                id=cloud_acc.id,
+                                name=cloud_acc.game_username,
+                                world=w_code,
+                                domain=creds.get("domain", "tribalwars.com.pt"),
+                                world_domain=f"{w_code}.{creds.get('domain', 'tribalwars.com.pt')}",
+                                session_cookie=creds.get("sid", ""),
+                                is_active=True,
+                            )
+                            self.profile_manager.save_profile(prof)
+                    except Exception as ce:
+                        logger.warning(f"Erro ao carregar conta do Cloud SQL para ativação: {ce}")
+
             if not prof:
                 return {"status": "error", "message": f"Conta com ID '{account_id}' não encontrada."}
 
@@ -1991,6 +2023,10 @@ class EngineContext:
                     await account.refresh_state()
                     await account.fetch_all_villages_overview()
                     await account.discover_active_worlds()
+                    await self.sync_account_villages_to_cloud(
+                        game_username=prof.name,
+                        world_code=prof.world,
+                    )
                 except Exception as e:
                     logger.warning(f"Aviso na inicialização da conta ativada '{prof.name}': {e}")
 
@@ -3198,8 +3234,23 @@ class EngineContext:
             "message": f"Sessão iniciada como {user.email}.",
         }
 
+    async def ensure_current_app_user(self):
+        """Assegura que self.current_app_user está carregado a partir do token_storage se for None."""
+        if not self.current_app_user:
+            try:
+                from engine.storage.token_storage import token_storage
+                saved_token = token_storage.load_token()
+                if saved_token:
+                    user = await self.user_repo.get_by_id(saved_token)
+                    if user:
+                        self.current_app_user = user
+            except Exception as e:
+                logger.debug(f"Aviso ao tentar restaurar sessão do Cloud SQL: {e}")
+        return self.current_app_user
+
     async def get_current_app_user(self) -> Dict[str, Any]:
         """Retorna o utilizador da aplicação atualmente autenticado."""
+        await self.ensure_current_app_user()
         if not self.current_app_user:
             return {"status": "error", "message": "Nenhum utilizador autenticado."}
         return {
@@ -3208,21 +3259,48 @@ class EngineContext:
         }
 
     async def list_user_game_accounts(self) -> Dict[str, Any]:
-        """Lista todas as contas de jogo do utilizador autenticado."""
+        """Lista todas as contas de jogo do utilizador autenticado com mundos e cofres."""
+        await self.ensure_current_app_user()
         if not self.current_app_user:
             return {"status": "error", "message": "Autenticação requerida."}
         accounts = await self.game_account_repo.list_by_user(self.current_app_user.id)
         active_user = self.session_manager.active_game_username
+
+        result = []
+        for acc in accounts:
+            a_dict = acc.to_dict()
+            a_dict["name"] = acc.game_username
+            a_dict["is_active_session"] = bool(active_user and active_user.lower() == acc.game_username.lower())
+
+            # Consulta mundos associados no Cloud SQL
+            try:
+                worlds = await self.game_world_repo.list_by_account(acc.id)
+                world_codes = [w.world_code for w in worlds]
+                a_dict["worlds"] = world_codes
+                a_dict["world"] = world_codes[0] if world_codes else "pt117"
+                a_dict["world_domain"] = f"{a_dict['world']}.tribalwars.com.pt"
+            except Exception:
+                a_dict["worlds"] = ["pt117"]
+                a_dict["world"] = "pt117"
+                a_dict["world_domain"] = "pt117.tribalwars.com.pt"
+
+            try:
+                creds = self.game_account_repo.decrypt_credentials(acc)
+                a_dict["session_cookie"] = creds.get("sid", "")
+                a_dict["sid"] = creds.get("sid", "")
+                if creds.get("domain"):
+                    a_dict["domain"] = creds.get("domain")
+                    a_dict["world_domain"] = f"{a_dict['world']}.{creds.get('domain')}"
+                if creds.get("world"):
+                    a_dict["world"] = creds.get("world")
+            except Exception:
+                pass
+            result.append(a_dict)
+
         return {
             "status": "success",
             "active_username": active_user,
-            "accounts": [
-                {
-                    **acc.to_dict(),
-                    "is_active_session": bool(active_user and active_user.lower() == acc.game_username.lower()),
-                }
-                for acc in accounts
-            ],
+            "accounts": result,
         }
 
     async def add_user_game_account(
@@ -3230,16 +3308,20 @@ class EngineContext:
         game_username: str,
         sid: str = "",
         domain: str = "tribalwars.com.pt",
+        world: Optional[str] = None,
         proxy: Optional[str] = None,
         password: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Regista ou atualiza uma conta de jogo encriptando as credenciais no cofre."""
+        """Regista ou atualiza uma conta de jogo encriptando as credenciais no cofre e persistindo o mundo."""
+        await self.ensure_current_app_user()
         if not self.current_app_user:
             return {"status": "error", "message": "Autenticação requerida."}
 
+        target_world = (world.split(".")[0].strip().lower() if world else "pt117")
         creds = {
             "sid": sid.strip(),
             "domain": domain.strip(),
+            "world": target_world,
             "proxy": proxy.strip() if proxy else None,
             "password": password.strip() if password else None,
         }
@@ -3248,10 +3330,20 @@ class EngineContext:
             game_username=game_username.strip(),
             credentials_data=creds,
         )
+
+        gw_obj = None
+        if target_world:
+            gw_obj = await self.game_world_repo.get_or_create(
+                game_account_id=acc.id,
+                world_code=target_world,
+                is_active=True,
+            )
+
         return {
             "status": "success",
             "account": acc.to_dict(),
-            "message": f"Conta de jogo '{game_username}' gravada com cofre seguro!",
+            "world": gw_obj.to_dict() if gw_obj else None,
+            "message": f"Conta de jogo '{game_username}' gravada com cofre seguro no Cloud SQL!",
         }
 
     async def switch_active_game_account(self, game_username: str, account_id: Optional[str] = None) -> Dict[str, Any]:
@@ -3365,6 +3457,85 @@ class EngineContext:
             "village": updated.to_dict(),
             "message": f"Modelo '{active_build_model_id}' atribuído com sucesso!",
         }
+
+    async def sync_account_villages_to_cloud(
+        self,
+        game_username: Optional[str] = None,
+        world_code: Optional[str] = None,
+        villages_dict: Optional[Dict[int, Any]] = None,
+    ) -> int:
+        """
+        Persiste todas as aldeias sincronizadas em memória na tabela 'villages' do Cloud SQL.
+        Garante que a hierarquia GameAccount -> GameWorld -> Village está íntegra e persistida.
+        """
+        await self.ensure_current_app_user()
+        if not self.current_app_user:
+            return 0
+
+        target_username = game_username or self.session_manager.active_game_username
+        if not target_username and self.account and self.account.player_name:
+            target_username = self.account.player_name
+
+        if not target_username:
+            return 0
+
+        # Obtém ou cria a GameAccount no Cloud SQL
+        target_acc = await self.game_account_repo.get_by_user_and_username(
+            self.current_app_user.id, target_username
+        )
+        sid_val = getattr(self.account, "sid", "") or self.config.sid or ""
+        target_world = (world_code or getattr(self.account, "world", "") or self.config.world or "pt117").lower()
+
+        if not target_acc:
+            target_acc = await self.game_account_repo.create_or_update(
+                app_user_id=self.current_app_user.id,
+                game_username=target_username,
+                credentials_data={"sid": sid_val, "domain": self.config.domain, "world": target_world},
+            )
+        elif sid_val:
+            try:
+                creds = self.game_account_repo.decrypt_credentials(target_acc)
+                if creds.get("sid") != sid_val or creds.get("world") != target_world:
+                    creds["sid"] = sid_val
+                    creds["world"] = target_world
+                    await self.game_account_repo.create_or_update(
+                        app_user_id=self.current_app_user.id,
+                        game_username=target_username,
+                        credentials_data=creds,
+                    )
+            except Exception:
+                pass
+
+        # Garante a existência do GameWorld
+        gw = await self.game_world_repo.get_or_create(
+            game_account_id=target_acc.id,
+            world_code=target_world,
+            is_active=True,
+        )
+
+        # Mapeia as aldeias a persistir
+        vills = villages_dict if villages_dict is not None else (getattr(self.account, "villages", {}) if self.account else {})
+        count = 0
+        for vid, vdata in vills.items():
+            try:
+                name = getattr(vdata, "name", "") or f"Aldeia {vid}"
+                x = getattr(vdata, "x", 0) or 0
+                y = getattr(vdata, "y", 0) or 0
+                await self.village_repo.upsert_village(
+                    game_world_id=gw.id,
+                    village_game_id=int(vid),
+                    village_name=name,
+                    coord_x=int(x),
+                    coord_y=int(y),
+                )
+                count += 1
+            except Exception as e:
+                logger.warning(f"Erro ao persistir aldeia {vid} no Cloud SQL: {e}")
+
+        if count > 0:
+            logger.info(f"[Cloud SQL] Sincronizadas {count} aldeias no mundo '{target_world}' para '{target_username}'.")
+        return count
+
 
 
 
