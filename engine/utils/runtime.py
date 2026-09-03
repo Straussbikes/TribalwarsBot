@@ -49,27 +49,30 @@ class SafeStreamWriter(io.TextIOBase):
 
 def suppress_console_and_redirect_streams(logger_func=None) -> None:
     """
-    Configura o runtime para execução pura em modo janela:
-    1. Redireciona sys.stdout e sys.stderr se forem None ou se estiver em modo frozen
-    2. No Windows, oculta qualquer janela de consola residual alocada
+    Configura o runtime para execução pura em modo janela.
+    Apenas oculta consola e redireciona streams quando em modo standalone (frozen / executável)
+    ou quando executado sem consola alocada (sys.stdout is None).
+    Em ambiente de desenvolvimento (python ...), mantém o terminal visível e streams intactos.
     """
-    # 1. Redirecionamento seguro de streams
-    if sys.stdout is None or getattr(sys, "frozen", False):
+    is_frozen = getattr(sys, "frozen", False)
+
+    # 1. Redirecionamento seguro de streams apenas se None ou se frozen (executável)
+    if sys.stdout is None or is_frozen:
         try:
             devnull = open(os.devnull, "w", encoding="utf-8")
             sys.stdout = devnull
         except Exception:
             sys.stdout = SafeStreamWriter(logger_func=logger_func)
 
-    if sys.stderr is None or getattr(sys, "frozen", False):
+    if sys.stderr is None or is_frozen:
         try:
             devnull = open(os.devnull, "w", encoding="utf-8")
             sys.stderr = devnull
         except Exception:
             sys.stderr = SafeStreamWriter(logger_func=logger_func)
 
-    # 2. Supressão de janela de consola residual no Windows
-    if sys.platform == "win32":
+    # 2. Supressão de janela de consola residual no Windows APENAS se for executável (frozen)
+    if is_frozen and sys.platform == "win32":
         try:
             import ctypes
             hwnd = ctypes.windll.kernel32.GetConsoleWindow()

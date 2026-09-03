@@ -35,11 +35,26 @@ def setup_production_logging(
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
-    # 1. Se estiver em modo silencioso, remove handlers de consola residuais
+    # 1. Se estiver em modo executável (silent_console=True), remove handlers de consola
     if silent_console:
         for handler in list(root_logger.handlers):
             if isinstance(handler, logging.StreamHandler) and not isinstance(handler, RotatingFileHandler):
                 root_logger.removeHandler(handler)
+    else:
+        # Em modo desenvolvimento, assegura que existe um StreamHandler na consola
+        has_console_handler = any(
+            isinstance(h, logging.StreamHandler) and not isinstance(h, RotatingFileHandler)
+            for h in root_logger.handlers
+        )
+        if not has_console_handler:
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setLevel(level)
+            console_formatter = logging.Formatter(
+                fmt="%(asctime)s [%(levelname)s] (%(name)s) %(message)s",
+                datefmt="%H:%M:%S",
+            )
+            console_handler.setFormatter(console_formatter)
+            root_logger.addHandler(console_handler)
 
     # 2. Verifica se já existe um RotatingFileHandler para este ficheiro
     has_file_handler = False
