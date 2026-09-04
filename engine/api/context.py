@@ -7,6 +7,7 @@ import asyncio
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
+import re
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -964,6 +965,240 @@ class EngineContext:
         except Exception as e:
             logger.error(f"Erro ao descobrir mundos: {e}")
             return {"status": "error", "message": str(e), "worlds": [self.config.world] if self.config.world else []}
+
+    async def get_account_available_worlds(self) -> Dict[str, Any]:
+        """
+        Deteta todos os mundos ativos da conta de jogo através do portal oficial
+        e sinaliza quais já estão abertos/ativos na barra superior (Top Bar)
+        ou disponíveis para conexão e sincronização.
+        """
+        prof = self.profile_manager.get_profile(self.active_profile_id) if self.active_profile_id else None
+        current_world = (self.config.world or (prof.world if prof else "pt117")).lower().strip()
+        acc = self.account
+
+        discovered_set = set()
+        if current_world:
+            discovered_set.add(current_world)
+
+        # 1. Adiciona mundos já registados no perfil local
+        if prof and getattr(prof, "worlds", None):
+            for w in prof.worlds.keys():
+                discovered_set.add(str(w).lower().strip())
+
+        # 2. Adiciona mundos registados no Cloud SQL
+        acc_id = self.session_manager.active_account_id or self.active_profile_id
+        if acc_id and acc_id != "default_main":
+            try:
+                cloud_worlds = await self.game_world_repo.list_by_account(acc_id)
+                for cw in cloud_worlds:
+                    discovered_set.add(cw.world_code.lower().strip())
+            except Exception as e:
+                logger.debug(f"Falha suave ao listar mundos da cloud: {e}")
+
+        # 3. Consulta portal oficial via sessão ativa
+        if acc and acc.sid:
+            try:
+                portal_worlds = await acc.discover_active_worlds()
+                for pw in portal_worlds:
+                    discovered_set.add(pw.lower().strip())
+            except Exception as e:
+                logger.debug(f"Aviso ao descobrir mundos no portal: {e}")
+
+        # 4. Mundos atualmente presentes na Top Bar / MultiWorldManager
+        top_bar_worlds = set()
+        for w_code in self.world_manager.instances.keys():
+            top_bar_worlds.add(w_code.lower().strip())
+        if self.config.world:
+            top_bar_worlds.add(self.config.world.lower().strip())
+
+        # 5. Mapeia metadados enriquecidos para o seletor da UI
+        worlds_meta = []
+        for w in sorted(list(discovered_set)):
+            is_in_top_bar = (w in top_bar_worlds)
+            num_match = re.search(r'\d+', w)
+            world_label = f"Mundo {num_match.group(0)}" if num_match else w.upper()
+
+            # Obtém status do worker se disponível
+            worker_active = True
+            if w in self.world_manager.instances:
+                worker_active = self.world_manager.instances[w].is_active
+            elif prof and getattr(prof, "worlds", None) and w in prof.worlds:
+                worker_active = prof.worlds[w].get("is_active", True)
+
+            worlds_meta.append({
+                "world": w,
+                "label": world_label,
+                "is_in_top_bar": is_in_top_bar,
+                "is_current": (w == current_world),
+                "is_active": worker_active,
+                "status": "in_top_bar" if is_in_top_bar else "available",
+            })
+
+        return {
+            "status": "success",
+            "account_name": prof.name if prof else (getattr(acc, "player_name", "") or "Conta Atual"),
+            "current_world": current_world,
+            "worlds": worlds_meta,
+        }
+
+    async def activate_and_persist_world(
+        self,
+        world_code: str,
+        sid: Optional[str] = None,
+        domain: Optional[str] = None,
+        proxy: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Conecta a um novo mundo ativo da conta, carrega todas as informações (aldeias,
+        coordenadas, tropas, edifícios), persiste no Cloud SQL e SQLite local,
+        adiciona à barra superior e inicializa automação.
+        """
+        world_key = world_code.strip().lower()
+        if not world_key:
+            return {"status": "error", "message": "Código de mundo inválido."}
+
+        # Se o mundo já estiver no MultiWorldManager, apenas alterna o foco
+        if world_key in self.world_manager.instances:
+            await self.switch_world(world_key)
+            return {
+                "status": "success",
+                "message": f"Mundo '{world_key.upper()}' já estava ativo. Foco alternado com sucesso.",
+                "world": self.world_manager.instances[world_key].to_dict(),
+            }
+
+        target_domain = domain or self.config.domain or "tribalwars.com.pt"
+        target_proxy = proxy or self.config.proxy
+
+        # 1. Determina o cookie 'sid' para o mundo alvo
+        target_sid = sid.strip() if sid else ""
+        if not target_sid:
+            if self.account:
+                target_sid = await self.account.obtain_session_for_world(world_key)
+            if not target_sid and self.config.sid:
+                target_sid = self.config.sid
+
+        if not target_sid:
+            return {
+                "status": "error",
+                "message": f"Não foi possível obter sessão para o mundo '{world_key.upper()}'. Forneça o cookie 'sid' manualmente."
+            }
+
+        # 2. Inicializa e valida acesso ao mundo através do TribalAccount
+        logger.info(f"A validar e carregar informações da conta para o mundo '{world_key.upper()}'...")
+        world_account = TribalAccount(
+            world=world_key,
+            sid=target_sid,
+            domain=target_domain,
+            proxy=target_proxy,
+        )
+
+        try:
+            await world_account.init_session()
+            await world_account.refresh_state()
+            await world_account.fetch_overview_villages()
+
+            if not world_account.current_village_id and not world_account.villages:
+                await world_account.close()
+                return {
+                    "status": "error",
+                    "message": f"A tua conta não possui aldeias no mundo '{world_key.upper()}'. Verifica se estás registado e tens acesso ativo a este mundo."
+                }
+        except Exception as e:
+            try:
+                await world_account.close()
+            except Exception:
+                pass
+            logger.error(f"Falha ao conectar ao mundo '{world_key}': {e}")
+            return {
+                "status": "error",
+                "message": f"Erro ao aceder ao mundo '{world_key.upper()}': {e}"
+            }
+
+        # 3. Persistência na Base de Dados Cloud SQL (PostgreSQL)
+        acc_id = self.session_manager.active_account_id or self.active_profile_id
+        if acc_id == "default_main":
+            acc_id = None
+        if not acc_id and self.current_app_user:
+            accs = await self.game_account_repo.list_by_user(self.current_app_user.id)
+            if accs:
+                acc_id = accs[0].id
+
+        if acc_id:
+            try:
+                gw = await self.game_world_repo.get_or_create(
+                    game_account_id=acc_id,
+                    world_code=world_key,
+                    is_active=True,
+                )
+                for v in world_account.villages.values():
+                    await self.village_repo.upsert_village(
+                        game_world_id=gw.id,
+                        village_game_id=v.id,
+                        village_name=v.name,
+                        coord_x=v.x,
+                        coord_y=v.y,
+                    )
+                logger.info(f"Cloud SQL: Mundo '{world_key}' e {len(world_account.villages)} aldeias guardadas com sucesso.")
+            except Exception as e:
+                logger.warning(f"Aviso ao persistir no Cloud SQL para '{world_key}': {e}")
+
+        # 4. Persistência no Perfil Local (SQLite / JSON)
+        prof = self.profile_manager.get_profile(self.active_profile_id) if self.active_profile_id else None
+        if prof:
+            if not getattr(prof, "worlds", None):
+                prof.worlds = {}
+            prof.worlds[world_key] = {
+                "world": world_key,
+                "is_active": True,
+                "village_id": world_account.current_village_id,
+                "villages_count": len(world_account.villages),
+                "updated_at": datetime.now().isoformat(),
+            }
+            self.profile_manager.save_profile(prof)
+
+        # 5. Registo no MultiWorldManager
+        inst = await self.world_manager.register_world(
+            world=world_key,
+            sid=target_sid,
+            domain=target_domain,
+            proxy=target_proxy,
+            config=None,
+            auto_start=True,
+        )
+        inst.account = world_account
+
+        # 6. Registo no WorldWorkerOrchestrator se ativo
+        orch = self.session_manager.orchestrator
+        if orch and acc_id:
+            try:
+                await orch.register_and_start_worker(
+                    world_code=world_key,
+                    is_active=True,
+                    account_id=acc_id,
+                )
+            except Exception as e:
+                logger.debug(f"Aviso ao orquestrar worker para {world_key}: {e}")
+
+        # 7. Alterna foco ativo para o novo mundo
+        self.world_manager.set_active_world(world_key)
+        self.account = inst.account
+        self.scheduler = inst.scheduler
+        self.config = inst.config
+        self.update_config_and_save({"world": world_key, "sid": target_sid})
+
+        # 8. Transmissão de eventos em tempo real
+        status = self.get_status_dict()
+        self.broadcast_sync("WORLDS_UPDATED", {"worlds": self.world_manager.list_worlds()})
+        self.broadcast_sync("WORLD_SWITCHED", {"active_world": world_key, "status": status})
+        self.broadcast_sync("ACCOUNTS_UPDATED", {"accounts": self.list_accounts()})
+        self.broadcast_sync("STATUS_UPDATE", status)
+
+        return {
+            "status": "success",
+            "message": f"Mundo '{world_key.upper()}' conectado com sucesso! {len(world_account.villages)} aldeias sincronizadas e guardadas na base de dados.",
+            "world": inst.to_dict(),
+            "villages_count": len(world_account.villages),
+        }
 
     # --- Rotas Multi-Aldeia & Categorização ---
 
@@ -3650,16 +3885,64 @@ class EngineContext:
             "message": f"Mundo '{world_code}' adicionado e orquestrado!",
         }
 
-    async def toggle_game_world_worker(self, world_code: str, is_active: bool) -> Dict[str, Any]:
-        """Ativa ou desativa as rotinas de background de um mundo individual."""
+    async def toggle_game_world_worker(
+        self,
+        world_code: str,
+        is_active: bool,
+        account_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Ativa ou desativa as rotinas de background de um mundo individual (na UI, Cloud SQL e instâncias locais)."""
+        w_code = world_code.strip().lower()
+        acc_id = account_id or self.session_manager.active_account_id or self.active_profile_id
+
+        # 1. Atualiza no WorldManager e pausa/retoma agendador da instância se existir
+        if w_code in self.world_manager.instances:
+            inst = self.world_manager.instances[w_code]
+            inst.is_active = is_active
+            if not is_active and inst.scheduler and inst.scheduler.is_running:
+                inst.scheduler.stop()
+                logger.info(f"Agendador do mundo '{w_code.upper()}' pausado.")
+            elif is_active and inst.scheduler and not inst.scheduler.is_running:
+                inst.scheduler.start()
+                logger.info(f"Agendador do mundo '{w_code.upper()}' retomado.")
+
+        # 2. Atualiza no Perfil Local (SQLite / JSON)
+        prof = None
+        if acc_id and acc_id != "default_main":
+            prof = self.profile_manager.get_profile(acc_id)
+        if not prof:
+            prof = self.profile_manager.get_profile(self.active_profile_id) if self.active_profile_id else None
+        if not prof:
+            prof = self.profile_manager.get_active_profile()
+
+        if prof:
+            if not getattr(prof, "worlds", None):
+                prof.worlds = {}
+            if w_code not in prof.worlds:
+                prof.worlds[w_code] = {"world": w_code, "is_active": is_active}
+            else:
+                prof.worlds[w_code]["is_active"] = is_active
+            self.profile_manager.save_profile(prof)
+
+        # 3. Atualiza no Orchestrator & Cloud SQL
         orch = self.session_manager.orchestrator
         if orch:
-            await orch.toggle_world_worker(world_code=world_code, is_active=is_active)
+            await orch.toggle_world_worker(world_code=w_code, is_active=is_active)
+        elif acc_id and acc_id != "default_main":
+            try:
+                await self.game_world_repo.toggle_active(game_account_id=acc_id, world_code=w_code, is_active=is_active)
+            except Exception as e:
+                logger.debug(f"Aviso ao persistir toggle no Cloud SQL: {e}")
+
+        # 4. Transmissão de eventos para manter a UI e a Top Bar perfeitamente sincronizadas
+        self.broadcast_sync("WORLDS_UPDATED", {"worlds": self.world_manager.list_worlds()})
+        self.broadcast_sync("ACCOUNTS_UPDATED", {"accounts": self.list_accounts()})
+
         return {
             "status": "success",
-            "world_code": world_code,
+            "world_code": w_code,
             "is_active": is_active,
-            "message": f"Mundo '{world_code}' {'ativado' if is_active else 'pausado'}.",
+            "message": f"Automação do mundo '{w_code.upper()}' {'ativada' if is_active else 'pausada'}.",
         }
 
     async def list_world_villages(self, world_code: str) -> Dict[str, Any]:

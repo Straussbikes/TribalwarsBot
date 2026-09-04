@@ -439,21 +439,39 @@ def extract_player_worlds(html: str, domain: str = "tribalwars.com.pt") -> List[
         return []
     
     worlds = set()
-    # Padrão: https://pt117.tribalwars.com.pt ou links com mundo
+    ignored = {
+        "www", "forum", "help", "blog", "api", "support", "static",
+        "login", "logout", "admin", "wiki", "assets", "cdn", "play"
+    }
+
+    # Padrão 1: https://pt117.tribalwars.com.pt ou links com mundo
     pattern = re.compile(
         r'https?://(?P<world>[a-z0-9_]+)\.' + re.escape(domain),
         re.IGNORECASE,
     )
     for m in pattern.finditer(html):
         w = m.group("world").lower()
-        if w not in ("www", "forum", "help", "blog", "api"):
+        if w not in ignored:
             worlds.add(w)
 
-    # Padrão: data-world="pt117" ou class="world_button... data-id="pt117"
-    attr_pattern = re.compile(r'data-world=["\'](?P<world>[a-z0-9_]+)["\']', re.I)
+    # Padrão 2: data-world="pt117" ou data-id="pt117"
+    attr_pattern = re.compile(r'data-(?:world|id)=["\'](?P<world>[a-z0-9_]+)["\']', re.I)
     for m in attr_pattern.finditer(html):
         w = m.group("world").lower()
-        if w not in ("www", "forum", "help"):
+        if w not in ignored and not w.isdigit():
+            worlds.add(w)
+
+    # Padrão 3: links do portal /page/play/pt118 ou /page/play?world=pt118
+    play_pattern = re.compile(r'/(?:page/)?play/(?P<world>[a-z0-9_]+)', re.I)
+    for m in play_pattern.finditer(html):
+        w = m.group("world").lower()
+        if w not in ignored:
+            worlds.add(w)
+
+    play_query_pattern = re.compile(r'[?&]world=(?P<world>[a-z0-9_]+)', re.I)
+    for m in play_query_pattern.finditer(html):
+        w = m.group("world").lower()
+        if w not in ignored:
             worlds.add(w)
 
     return sorted(list(worlds))

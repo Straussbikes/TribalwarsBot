@@ -760,6 +760,11 @@ class TribalAccount:
             logger.debug(f"[{self.world}] overview_villages indisponível ou suavemente falhada: {e}")
         return self.villages
 
+    @property
+    def session(self) -> Optional[AsyncSession]:
+        """Acesso à sessão HTTP curl_cffi ativa."""
+        return self._session
+
     async def discover_active_worlds(self) -> List[str]:
         """
         Consulta o portal oficial do jogo para detetar quais mundos
@@ -771,13 +776,50 @@ class TribalAccount:
             async with self._lock:
                 if self._session is None:
                     await self.init_session()
-                resp = await self.session.get(portal_url)
+                # Garante que o cookie sid está associado ao domínio principal
+                if self.sid and self._session is not None:
+                    self._session.cookies.set("sid", self.sid, domain=self.domain)
+                    self._session.cookies.set("sid", self.sid, domain=f".{self.domain}")
+                resp = await self._session.get(portal_url, follow_redirects=True)
                 if resp.status_code == 200:
                     found = extract_player_worlds(resp.text, domain=self.domain)
                     for w in found:
                         if w not in discovered:
                             discovered.append(w)
+                    logger.info(f"[{self.world}] Mundos detetados no portal ({portal_url}): {discovered}")
+                else:
+                    logger.debug(f"[{self.world}] Portal /page/play respondeu status HTTP {resp.status_code}")
         except Exception as e:
             logger.debug(f"[{self.world}] Falha suave ao descobrir mundos da conta: {e}")
         return discovered
+
+    async def obtain_session_for_world(self, target_world: str) -> str:
+        """
+        Obtém o token/cookie de sessão (sid) para um mundo alvo a partir da sessão ativa.
+        Visita https://{domain}/page/play/{target_world} e segue redirecionamentos
+        para capturar o cookie específico do mundo, ou reutiliza o sid existente.
+        """
+        target = target_world.strip().lower()
+        if not self.sid:
+            return ""
+
+        portal_play_url = f"https://{self.domain}/page/play/{target}"
+        try:
+            async with self._lock:
+                if self._session is None:
+                    await self.init_session()
+                if self._session is not None:
+                    self._session.cookies.set("sid", self.sid, domain=self.domain)
+                    self._session.cookies.set("sid", self.sid, domain=f".{self.domain}")
+                    resp = await self._session.get(portal_play_url, follow_redirects=True)
+                    target_host = f"{target}.{self.domain}"
+                    for cookie in self._session.cookies.jar:
+                        if cookie.name == "sid" and target in (cookie.domain or ""):
+                            logger.info(f"[{self.world}] Cookie sid específico capturado para {target_host}: {cookie.value[:8]}...")
+                            return cookie.value
+        except Exception as e:
+            logger.debug(f"[{self.world}] Falha suave ao obter sessão para o mundo {target}: {e}")
+
+        # Fallback: a maioria dos mundos da mesma conta aceita o mesmo cookie de sessão mestre
+        return self.sid
 

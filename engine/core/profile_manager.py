@@ -82,6 +82,7 @@ class AccountProfile:
     last_used: Optional[str] = None
     created_at: Optional[str] = None
     is_active: bool = False
+    worlds: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self):
         # Sincroniza sid e session_cookie
@@ -109,6 +110,15 @@ class AccountProfile:
                 self.world_domain = f"{self.world}.{self.domain}"
         elif self.world and self.domain:
             self.world_domain = f"{self.world}.{self.domain}"
+
+        if not self.worlds:
+            self.worlds = {}
+        if self.world and self.world not in self.worlds:
+            self.worlds[self.world] = {
+                "world": self.world,
+                "is_active": True,
+                "village_id": self.village_id,
+            }
 
         if not self.created_at:
             self.created_at = datetime.now().isoformat()

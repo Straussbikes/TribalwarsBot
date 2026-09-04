@@ -866,6 +866,24 @@ class SidecarApi {
     return await this.request(`/api/worlds/${encodeURIComponent(worldCode)}/villages`);
   }
 
+  async getAvailableWorldsToAdd() {
+    return await this.request("/api/worlds/available-to-add");
+  }
+
+  async activateGameWorld(world, sid = null, domain = null, proxy = null) {
+    return await this.request("/api/worlds/activate", {
+      method: "POST",
+      body: JSON.stringify({ world, sid, domain, proxy }),
+    });
+  }
+
+  async toggleAccountWorld(accountId, worldCode, isActive) {
+    return await this.request(`/api/accounts/${encodeURIComponent(accountId)}/worlds/${encodeURIComponent(worldCode)}/toggle`, {
+      method: "POST",
+      body: JSON.stringify({ is_active: isActive }),
+    });
+  }
+
   async updateVillageModel(villageId, activeBuildModelId) {
     return await this.request(`/api/villages/${encodeURIComponent(villageId)}/model`, {
       method: "PATCH",

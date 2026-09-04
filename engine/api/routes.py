@@ -119,6 +119,13 @@ class GameWorldToggleRequest(BaseModel):
     is_active: bool
 
 
+class WorldActivateRequest(BaseModel):
+    world: str
+    sid: Optional[str] = None
+    domain: Optional[str] = None
+    proxy: Optional[str] = None
+
+
 class VillageUpdateModelRequest(BaseModel):
     active_build_model_id: str
 
@@ -1760,6 +1767,30 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         if res.get("status") == "error":
             raise HTTPException(status_code=400, detail=res.get("message"))
         return res
+
+    @router.get("/worlds/available-to-add")
+    async def get_available_worlds_to_add():
+        """Deteta os mundos ativos da conta no servidor e indica quais já estão na barra superior."""
+        return await context.get_account_available_worlds()
+
+    @router.post("/worlds/activate")
+    async def activate_world(payload: WorldActivateRequest):
+        """Conecta ao mundo selecionado, obtém aldeias e guarda na base de dados."""
+        res = await context.activate_and_persist_world(
+            world_code=payload.world,
+            sid=payload.sid,
+            domain=payload.domain,
+            proxy=payload.proxy,
+        )
+        if res.get("status") == "error":
+            raise HTTPException(status_code=400, detail=res.get("message"))
+        return res
+
+    @router.patch("/accounts/{account_id}/worlds/{world_code}/toggle")
+    @router.post("/accounts/{account_id}/worlds/{world_code}/toggle")
+    async def toggle_account_world(account_id: str, world_code: str, payload: GameWorldToggleRequest):
+        """Ativa ou pausa a automação para um mundo específico da conta."""
+        return await context.toggle_game_world_worker(world_code=world_code, is_active=payload.is_active, account_id=account_id)
 
     return router
 

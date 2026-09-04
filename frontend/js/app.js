@@ -1041,6 +1041,28 @@ document.addEventListener("DOMContentLoaded", async () => {
       const lastUsedStr = acc.last_used ? new Date(acc.last_used).toLocaleString("pt-PT") : "Nunca";
       const hasSid = Boolean(acc.session_cookie || acc.sid);
 
+      // Renderiza a lista de mundos vinculados à conta com toggles individuais de automação
+      const rawWorlds = (acc.worlds && typeof acc.worlds === "object" && Object.keys(acc.worlds).length > 0)
+        ? acc.worlds
+        : { [acc.world || "pt117"]: { world: acc.world || "pt117", is_active: true, village_id: acc.village_id } };
+
+      const worldsHtml = Object.entries(rawWorlds).map(([wCode, wData]) => {
+        const isWorldActive = Boolean(wData.is_active !== false);
+        const wUpper = wCode.toUpperCase();
+        return `
+          <div class="account-world-chip" style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: rgba(0,0,0,0.35); border-radius: 6px; border: 1px solid var(--border-subtle);">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-weight: 700; font-family: var(--font-mono); color: var(--neon-cyan); font-size: 0.78rem;">${wUpper}</span>
+              ${wData.villages_count ? `<span style="font-size: 0.68rem; color: var(--text-muted); font-family: var(--font-mono);">(${wData.villages_count} aldeias)</span>` : ''}
+            </div>
+            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; margin: 0;" title="Ativar ou pausar a automação deste mundo individual">
+              <span style="font-size: 0.68rem; font-weight: 600; color: ${isWorldActive ? 'var(--neon-emerald)' : 'var(--text-muted)'};">${isWorldActive ? 'ON' : 'OFF'}</span>
+              <input type="checkbox" class="account-world-toggle" data-account-id="${acc.id}" data-world="${wCode}" ${isWorldActive ? 'checked' : ''} style="cursor: pointer; accent-color: var(--neon-emerald); transform: scale(0.85);" />
+            </label>
+          </div>
+        `;
+      }).join("");
+
       return `
         <div class="account-card ${isActive ? 'active' : ''}" style="background: rgba(15,23,42,0.85); border: 1px solid ${isActive ? 'var(--neon-purple)' : 'var(--border-glass)'}; border-radius: 12px; padding: 20px; box-shadow: ${isActive ? '0 8px 24px rgba(168,85,247,0.2)' : 'none'}; position: relative; display: flex; flex-direction: column; justify-content: space-between; transition: all 0.2s ease;">
           <div>
@@ -1061,11 +1083,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
             <div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 18px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px;">
               <div style="display: flex; justify-content: space-between;">
-                <span>🌐 Mundo:</span>
+                <span>🌐 Mundo Principal:</span>
                 <span style="font-weight: 600; color: var(--neon-cyan);">${worldName}</span>
               </div>
               <div style="display: flex; justify-content: space-between;">
-                <span>🏰 Aldeia Principal:</span>
+                <span>🏰 Aldeia:</span>
                 <span style="font-family: var(--font-mono); color: #e2e8f0;">${acc.village_id || 'Auto-detetada'}</span>
               </div>
               <div style="display: flex; justify-content: space-between;">
@@ -1075,6 +1097,17 @@ document.addEventListener("DOMContentLoaded", async () => {
               <div style="display: flex; justify-content: space-between;">
                 <span>⏳ Último Acesso:</span>
                 <span style="color: #cbd5e1;">${lastUsedStr}</span>
+              </div>
+
+              <!-- Lista de Mundos e Toggles de Automação da Conta -->
+              <div style="margin-top: 8px; border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Automação por Mundo:</span>
+                  <button type="button" class="btn-card-add-world" data-account-id="${acc.id}" style="background: none; border: none; color: var(--neon-cyan); font-size: 0.72rem; cursor: pointer; padding: 0; font-weight: 700;" title="Adicionar ou detetar novos mundos ativos para esta conta">➕ Adicionar Mundo</button>
+                </div>
+                <div class="account-worlds-container" style="display: flex; flex-direction: column; gap: 5px;">
+                  ${worldsHtml}
+                </div>
               </div>
             </div>
           </div>
@@ -1116,6 +1149,33 @@ document.addEventListener("DOMContentLoaded", async () => {
         } finally {
           btn.disabled = false;
         }
+      });
+    });
+
+    // Wire Card World Automation Toggles
+    elements.accountsGrid.querySelectorAll(".account-world-toggle").forEach(toggleEl => {
+      toggleEl.addEventListener("change", async (e) => {
+        e.stopPropagation();
+        const accId = toggleEl.getAttribute("data-account-id");
+        const worldCode = toggleEl.getAttribute("data-world");
+        const isActive = toggleEl.checked;
+        try {
+          await window.api.toggleAccountWorld(accId, worldCode, isActive);
+          addLogEntry("INFO", "account", `Automação da conta '${accId}' para o mundo ${worldCode.toUpperCase()} alterada para ${isActive ? 'ATIVA' : 'PAUSADA'}.`);
+          await loadAndRenderAccounts();
+          await loadAndRenderWorlds();
+        } catch (err) {
+          alert(`Erro ao alterar automação do mundo ${worldCode}: ${err.message}`);
+          toggleEl.checked = !isActive;
+        }
+      });
+    });
+
+    // Wire Card Add World Buttons
+    elements.accountsGrid.querySelectorAll(".btn-card-add-world").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openWorldSelectionModal();
       });
     });
 
@@ -1172,6 +1232,188 @@ document.addEventListener("DOMContentLoaded", async () => {
     } catch (err) {
       alert(`Erro ao carregar detalhes da conta: ${err.message}`);
     }
+  }
+
+  // --- Funções de Seleção de Mundo Ativo & Modal de Conexão ---
+  async function openWorldSelectionModal() {
+    const modal = document.getElementById("add-world-modal");
+    if (!modal) return;
+
+    modal.style.display = "flex";
+    if (elements.worldDropdownMenu) elements.worldDropdownMenu.style.display = "none";
+
+    await renderDetectedWorldsList();
+  }
+
+  async function renderDetectedWorldsList() {
+    const listEl = document.getElementById("detected-worlds-list");
+    if (!listEl) return;
+
+    listEl.innerHTML = `
+      <div style="text-align: center; padding: 24px; color: var(--text-muted); font-size: 0.82rem;">
+        <span style="font-size: 1.3rem; display: inline-block; margin-bottom: 6px;">⏳</span><br>
+        A contactar o servidor oficial para detetar os mundos da tua conta...
+      </div>
+    `;
+
+    try {
+      const res = await window.api.getAvailableWorldsToAdd();
+      const worlds = res?.worlds || [];
+
+      if (!worlds || worlds.length === 0) {
+        listEl.innerHTML = `
+          <div style="text-align: center; padding: 18px; color: var(--text-muted); font-size: 0.8rem; background: rgba(0,0,0,0.2); border-radius: 8px;">
+            Nenhum mundo adicional detetado automaticamente no portal.<br>
+            Podes utilizar a <strong style="color: var(--neon-cyan);">Configuração Manual Avançada</strong> abaixo para conectar qualquer mundo diretamente.
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = worlds.map(w => {
+        const isInTopBar = Boolean(w.is_in_top_bar);
+        const isCurrent = Boolean(w.is_current);
+        const worldCode = w.world.toLowerCase();
+        const worldUpper = worldCode.toUpperCase();
+        const label = w.label || `Mundo ${worldUpper}`;
+
+        let badgeHtml = "";
+        let actionBtnHtml = "";
+
+        if (isInTopBar) {
+          badgeHtml = `<span style="font-size: 0.68rem; font-weight: 700; color: var(--neon-emerald); background: rgba(34,197,94,0.15); padding: 2px 8px; border-radius: 12px;">${isCurrent ? '🟢 Ativo Agora' : '✓ Já Aberto na Barra'}</span>`;
+          actionBtnHtml = `<button class="btn btn-secondary btn-sm" disabled style="padding: 4px 10px; font-size: 0.75rem; opacity: 0.6; cursor: not-allowed;">Já na Top Bar</button>`;
+        } else {
+          badgeHtml = `<span style="font-size: 0.68rem; font-weight: 700; color: var(--neon-cyan); background: rgba(6,182,212,0.15); padding: 2px 8px; border-radius: 12px;">⚡ Disponível na Conta</span>`;
+          actionBtnHtml = `<button class="btn btn-primary btn-sm btn-activate-detected-world" data-world="${worldCode}" style="padding: 5px 12px; font-size: 0.78rem; font-weight: 600; background: var(--gradient-primary);">⚡ Conectar & Sincronizar</button>`;
+        }
+
+        return `
+          <div class="detected-world-item" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(15,23,42,0.7); border: 1px solid ${isInTopBar ? 'rgba(34,197,94,0.3)' : 'var(--border-glass)'}; border-radius: 8px; transition: border-color 0.2s ease;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div style="font-size: 1.3rem;">🌐</div>
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-weight: 700; font-family: var(--font-mono); color: #fff; font-size: 0.9rem;">${worldUpper}</span>
+                  <span style="font-size: 0.78rem; color: var(--text-muted);">${label}</span>
+                </div>
+                <div style="margin-top: 2px;">
+                  ${badgeHtml}
+                </div>
+              </div>
+            </div>
+            <div>
+              ${actionBtnHtml}
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      // Wire activation buttons
+      listEl.querySelectorAll(".btn-activate-detected-world").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const targetWorld = btn.getAttribute("data-world");
+          btn.disabled = true;
+          btn.innerHTML = `<span>⏳</span> A conectar...`;
+          try {
+            addLogEntry("INFO", "orchestrator", `A ligar ao novo mundo ${targetWorld.toUpperCase()} e a carregar aldeias...`);
+            const res = await window.api.activateGameWorld(targetWorld);
+            if (res && res.status === "success") {
+              addLogEntry("SUCCESS", "orchestrator", res.message || `Mundo ${targetWorld.toUpperCase()} conectado e guardado.`);
+              document.getElementById("add-world-modal").style.display = "none";
+              await loadAndRenderWorlds();
+              await loadAndRenderAccounts();
+              if (document.querySelector(".main-workspace")?.style.display !== "none") {
+                await loadAndRenderCloudVillages(targetWorld);
+                await refreshStatus();
+              }
+            } else {
+              const errMsg = res?.message || `Erro ao conectar ao mundo ${targetWorld}`;
+              addLogEntry("ERROR", "orchestrator", errMsg);
+              alert(errMsg);
+              btn.disabled = false;
+              btn.innerHTML = `⚡ Conectar & Sincronizar`;
+            }
+          } catch (err) {
+            addLogEntry("ERROR", "orchestrator", `Falha ao conectar ao mundo ${targetWorld}: ${err.message}`);
+            alert(`Falha ao conectar ao mundo ${targetWorld}: ${err.message}`);
+            btn.disabled = false;
+            btn.innerHTML = `⚡ Conectar & Sincronizar`;
+          }
+        });
+      });
+
+    } catch (e) {
+      console.error("Erro ao detetar mundos:", e);
+      listEl.innerHTML = `
+        <div style="text-align: center; padding: 18px; color: var(--neon-crimson); font-size: 0.8rem; background: rgba(239,68,68,0.1); border-radius: 8px;">
+          Não foi possível consultar os mundos do servidor: ${e.message}<br>
+          Utilize o formulário manual abaixo.
+        </div>
+      `;
+    }
+  }
+
+  function setupWorldSelectionUi() {
+    const btnAddWorld = document.getElementById("btn-add-world");
+    const btnDropdownAddWorld = document.getElementById("btn-dropdown-add-world");
+    const addWorldModal = document.getElementById("add-world-modal");
+    const btnCancelAddWorld = document.getElementById("btn-cancel-add-world");
+    const btnConfirmAddWorld = document.getElementById("btn-confirm-add-world");
+    const btnRefreshDetected = document.getElementById("btn-refresh-detected-worlds");
+
+    btnAddWorld?.addEventListener("click", openWorldSelectionModal);
+    btnDropdownAddWorld?.addEventListener("click", openWorldSelectionModal);
+    btnCancelAddWorld?.addEventListener("click", () => {
+      if (addWorldModal) addWorldModal.style.display = "none";
+    });
+    btnRefreshDetected?.addEventListener("click", renderDetectedWorldsList);
+
+    // Botões de seleção rápida no accordion manual
+    document.querySelectorAll(".btn-quick-world").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const w = btn.getAttribute("data-world");
+        const inputW = document.getElementById("input-world-id");
+        if (inputW && w) inputW.value = w;
+      });
+    });
+
+    btnConfirmAddWorld?.addEventListener("click", async () => {
+      const worldInput = document.getElementById("input-world-id")?.value.trim().toLowerCase();
+      const sidInput = document.getElementById("input-world-sid")?.value.trim();
+      const domainInput = document.getElementById("input-world-domain")?.value.trim() || "tribalwars.com.pt";
+      const proxyInput = document.getElementById("input-world-proxy")?.value.trim() || null;
+
+      if (!worldInput) {
+        alert("Introduza o código do mundo (ex: pt118).");
+        return;
+      }
+
+      btnConfirmAddWorld.disabled = true;
+      btnConfirmAddWorld.innerHTML = "<span>⏳</span> A conectar...";
+
+      try {
+        addLogEntry("INFO", "orchestrator", `A ligar manualmente ao mundo ${worldInput.toUpperCase()}...`);
+        const res = await window.api.activateGameWorld(worldInput, sidInput || null, domainInput, proxyInput);
+        if (res && res.status === "success") {
+          addLogEntry("SUCCESS", "orchestrator", res.message || `Mundo ${worldInput.toUpperCase()} ativado.`);
+          if (addWorldModal) addWorldModal.style.display = "none";
+          await loadAndRenderWorlds();
+          await loadAndRenderAccounts();
+          if (document.querySelector(".main-workspace")?.style.display !== "none") {
+            await loadAndRenderCloudVillages(worldInput);
+            await refreshStatus();
+          }
+        } else {
+          alert(res?.message || "Erro ao conectar ao mundo.");
+        }
+      } catch (err) {
+        alert(`Falha ao conectar: ${err.message}`);
+      } finally {
+        btnConfirmAddWorld.disabled = false;
+        btnConfirmAddWorld.innerHTML = "⚡ Conectar Manualmente";
+      }
+    });
   }
 
   // --- Funções de Renderização Multi-Mundo & Dropdown ---
@@ -7924,6 +8166,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupSnobEventListeners();
   setupInventoryEventListeners();
   setupCloudSqlUi();
+  setupWorldSelectionUi();
 
   let initialLoaded = false;
 
