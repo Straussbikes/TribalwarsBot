@@ -216,8 +216,8 @@ class WorldWorker:
                 logger.debug(f"[{world}] Aviso no ciclo de farm: {e}")
             finally:
                 if sched.is_running and not self.cancellation_token.is_set() and self.is_active:
-                    min_sec = float(getattr(cfg.farm, "min_interval_seconds", 45))
-                    max_sec = float(getattr(cfg.farm, "max_interval_seconds", 90))
+                    min_sec = float(getattr(cfg.farm, "min_interval_seconds", 120))
+                    max_sec = float(getattr(cfg.farm, "max_interval_seconds", 240))
                     base_sec = (min_sec + max_sec) / 2.0
                     sched.schedule_human_like(
                         name=f"AutoFarm [{world}]",

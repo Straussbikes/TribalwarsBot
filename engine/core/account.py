@@ -74,7 +74,7 @@ class TribalAccount:
         domain: str = "tribalwars.com.pt",
         proxy: Optional[str] = None,
         impersonate: str = "chrome124",
-        timeout: float = 20.0,
+        timeout: float = 35.0,
         max_network_retries: int = 3,
         retry_backoff_base: float = 1.0,
     ):

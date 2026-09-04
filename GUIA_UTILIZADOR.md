@@ -90,7 +90,11 @@ O bot utiliza o cookie de autenticação de sessão `sid` oficial da sua conta.
 - **Teto de População:** O bot respeita o limite percentual configurado para a Fazenda (ex.: parar ao atingir 95% da população máxima).
 
 ### 5.3 Assistente de Saque & Farm de Bárbaras
-- **Aba `#tab-farm`:**
+- **Aba `#tab-farm` e `#tab-settings`:**
+  - **Presets Rápidos de Ritmo (Anti-Timeout):**
+    - 🛡️ **Furtivo / Seguro (Recomendado):** Intervalo entre rondas de 120s a 240s e atraso de 500ms a 1100ms entre saques individuais. Elimina timeouts de rede causados por tarpitting / proteções da InnoGames.
+    - ⚖️ **Equilibrado:** Intervalo de 90s a 180s com 400ms a 900ms por ataque.
+    - ⚡ **Acelerado:** Intervalo de 45s a 90s com 350ms a 700ms por ataque.
   - **Modelos A e B:** Configure a composição exata de tropas enviadas por clique (ex.: Modelo A = 2 Cavalaria Leve; Modelo B = 5 Bárbaros + 1 Espião).
   - **Raio de Varredura:** Defina o raio máximo em campos (ex.: 25 campos de distância).
   - **Ataques Simultâneos:** Ative `Evitar Ataques Concorrentes` para não enviar tropas para aldeias que já tenham comandos a caminho.

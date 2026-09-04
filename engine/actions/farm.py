@@ -123,10 +123,10 @@ def allocate_dynamic_squads(
     return allocations
 
 
-def get_gaussian_delay(min_ms: int = 350, max_ms: int = 950) -> float:
+def get_gaussian_delay(min_ms: int = 500, max_ms: int = 1100) -> float:
     """
     Gera um atraso estocástico gaussiano (em segundos) centrado na média do intervalo
-    com dispersão normal delimitada estritamente entre min_ms e max_ms para evasão anti-bot.
+    com dispersão normal delimitada estritamente entre min_ms e max_ms para evasão anti-bot e anti-timeout.
     """
     min_s = max(0.05, min_ms / 1000.0)
     max_s = max(min_s, max_ms / 1000.0)
@@ -442,6 +442,8 @@ class FarmManager:
         max_attacks: int = 30,
         village_id: Optional[int] = None,
         allow_fallback: bool = False,
+        min_delay_ms: int = 500,
+        max_delay_ms: int = 1100,
     ) -> int:
         """
         Executa uma onda de saques pelo Assistente de Farm:
@@ -534,8 +536,8 @@ class FarmManager:
                     f"[{account.world}] Saque #{sent_count} (Modelo {chosen_letter}) enviado -> {target.target_name} "
                     f"({target.target_coords}) [Dist: {target.distance:.1f} campos]"
                 )
-                # Jitter humano gaussiano realista entre cliques sucessivos de farm
-                await asyncio.sleep(get_gaussian_delay(200, 550))
+                # Jitter humano gaussiano realista entre cliques sucessivos de farm (aliviado anti-timeout)
+                await asyncio.sleep(get_gaussian_delay(min_delay_ms, max_delay_ms))
 
         logger.info(
             f"[{account.world}] Onda de Farm concluída: {sent_count} saques enviados."
@@ -1348,16 +1350,28 @@ class FarmManager:
                 except Exception:
                     pass
 
-                # Reagenda para o próximo ciclo de farm com delay estocástico gaussiano
+                # Reagenda para o próximo ciclo de farm com delay estocástico gaussiano dinâmico
                 if scheduler.is_running and not scheduler.is_paused:
+                    cur_min_int = getattr(farm_config, "min_interval_seconds", None)
+                    cur_max_int = getattr(farm_config, "max_interval_seconds", None)
+                    if cur_min_int is not None and cur_max_int is not None and cur_min_int > 0:
+                        cur_base = (cur_min_int + cur_max_int) / 2.0
+                        cur_min = float(cur_min_int)
+                        cur_max = float(cur_max_int)
+                    else:
+                        cur_inv_m = getattr(farm_config, "interval_minutes", 10.0)
+                        cur_base = cur_inv_m * 60.0
+                        cur_min = max(30.0, cur_base * 0.5)
+                        cur_max = cur_base * 1.5
+
                     scheduler.schedule_human_like(
                         name=f"AutoFarm-Village-{village_id or 'active'}",
                         priority=TaskPriority.FARM,
                         action=auto_farm_task,
-                        base_seconds=base_interval_seconds,
-                        std_dev=max(10.0, (max_sec - min_sec) / 6.0),
-                        min_seconds=min_sec,
-                        max_seconds=max_sec,
+                        base_seconds=cur_base,
+                        std_dev=max(10.0, (cur_max - cur_min) / 6.0),
+                        min_seconds=cur_min,
+                        max_seconds=cur_max,
                     )
 
         # Agenda a primeira onda de farm após um delay inicial humano (ex.: 15 segundos)

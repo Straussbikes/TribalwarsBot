@@ -60,11 +60,17 @@ class ConfigUpdateRequest(BaseModel):
     world: Optional[str] = None
     sid: Optional[str] = None
     domain: Optional[str] = None
+    proxy: Optional[str] = None
+    auth: Optional[Dict[str, Any]] = None
     building: Optional[Dict[str, Any]] = None
     farm: Optional[Dict[str, Any]] = None
     recruitment: Optional[Dict[str, Any]] = None
     quest: Optional[Dict[str, Any]] = None
     market: Optional[Dict[str, Any]] = None
+    defense: Optional[Dict[str, Any]] = None
+    combat: Optional[Dict[str, Any]] = None
+    scavenge: Optional[Dict[str, Any]] = None
+    snob: Optional[Dict[str, Any]] = None
     villages: Optional[Dict[str, Any]] = None
 
 

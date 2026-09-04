@@ -4528,6 +4528,61 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   // --- 7. Painel de Definições ---
+  window.applyRhythmPreset = function(mode) {
+    const fMin = document.getElementById("cfg-farm-min-interval");
+    const fMax = document.getElementById("cfg-farm-max-interval");
+    const dMin = document.getElementById("cfg-farm-min-delay");
+    const dMax = document.getElementById("cfg-farm-max-delay");
+    const defInt = document.getElementById("cfg-defense-interval");
+
+    if (mode === "stealth") {
+      if (fMin) fMin.value = 120;
+      if (fMax) fMax.value = 240;
+      if (dMin) dMin.value = 500;
+      if (dMax) dMax.value = 1100;
+      if (defInt) defInt.value = 45;
+    } else if (mode === "balanced") {
+      if (fMin) fMin.value = 90;
+      if (fMax) fMax.value = 180;
+      if (dMin) dMin.value = 400;
+      if (dMax) dMax.value = 900;
+      if (defInt) defInt.value = 30;
+    } else if (mode === "aggressive") {
+      if (fMin) fMin.value = 45;
+      if (fMax) fMax.value = 90;
+      if (dMin) dMin.value = 350;
+      if (dMax) dMax.value = 700;
+      if (defInt) defInt.value = 20;
+    }
+    document.querySelectorAll(".preset-speed-btn").forEach(b => b.classList.remove("active"));
+    const activeBtn = document.getElementById(`btn-preset-${mode}`);
+    if (activeBtn) activeBtn.classList.add("active");
+  };
+
+  window.applyFarmPreset = function(mode) {
+    const minInt = document.getElementById("farm-cfg-min-interval");
+    const maxInt = document.getElementById("farm-cfg-max-interval");
+    const minDelay = document.getElementById("farm-cfg-min-delay");
+    const maxDelay = document.getElementById("farm-cfg-max-delay");
+
+    if (mode === "stealth") {
+      if (minInt) minInt.value = 120;
+      if (maxInt) maxInt.value = 240;
+      if (minDelay) minDelay.value = 500;
+      if (maxDelay) maxDelay.value = 1100;
+    } else if (mode === "balanced") {
+      if (minInt) minInt.value = 90;
+      if (maxInt) maxInt.value = 180;
+      if (minDelay) minDelay.value = 400;
+      if (maxDelay) maxDelay.value = 900;
+    } else if (mode === "fast") {
+      if (minInt) minInt.value = 45;
+      if (maxInt) maxInt.value = 90;
+      if (minDelay) minDelay.value = 350;
+      if (maxDelay) maxDelay.value = 700;
+    }
+  };
+
   async function loadSettingsIntoForm() {
     try {
       const config = await window.api.getConfig();
@@ -4542,6 +4597,20 @@ document.addEventListener("DOMContentLoaded", async () => {
         document.getElementById("cfg-username").value = config.auth.username || "";
         document.getElementById("cfg-auto-login").checked = !!config.auth.auto_login;
         document.getElementById("cfg-keep-alive").checked = config.auth.keep_alive !== false;
+      }
+      if (config.farm) {
+        const fMin = document.getElementById("cfg-farm-min-interval");
+        if (fMin) fMin.value = config.farm.min_interval_seconds || 120;
+        const fMax = document.getElementById("cfg-farm-max-interval");
+        if (fMax) fMax.value = config.farm.max_interval_seconds || 240;
+        const dMin = document.getElementById("cfg-farm-min-delay");
+        if (dMin) dMin.value = config.farm.min_delay_per_attack_ms || 500;
+        const dMax = document.getElementById("cfg-farm-max-delay");
+        if (dMax) dMax.value = config.farm.max_delay_per_attack_ms || 1100;
+      }
+      if (config.defense) {
+        const dInt = document.getElementById("cfg-defense-interval");
+        if (dInt) dInt.value = config.defense.check_interval_seconds || 45;
       }
       if (config.building) {
         document.getElementById("cfg-building-template").value = config.building.template || "default_plan";
@@ -4558,6 +4627,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
       const pwdVal = document.getElementById("cfg-password").value.trim();
       const proxyVal = document.getElementById("cfg-proxy") ? document.getElementById("cfg-proxy").value.trim() : "";
+      const farmPayload = {
+        min_interval_seconds: parseFloat(document.getElementById("cfg-farm-min-interval")?.value || "120"),
+        max_interval_seconds: parseFloat(document.getElementById("cfg-farm-max-interval")?.value || "240"),
+        min_delay_per_attack_ms: parseInt(document.getElementById("cfg-farm-min-delay")?.value || "500", 10),
+        max_delay_per_attack_ms: parseInt(document.getElementById("cfg-farm-max-delay")?.value || "1100", 10),
+      };
+      const defPayload = {
+        check_interval_seconds: parseFloat(document.getElementById("cfg-defense-interval")?.value || "45"),
+      };
       const payload = {
         world: document.getElementById("cfg-world").value.trim(),
         sid: document.getElementById("cfg-sid").value.trim(),
@@ -4567,6 +4645,8 @@ document.addEventListener("DOMContentLoaded", async () => {
           auto_login: document.getElementById("cfg-auto-login").checked,
           keep_alive: document.getElementById("cfg-keep-alive").checked,
         },
+        farm: farmPayload,
+        defense: defPayload,
         building: {
           template: document.getElementById("cfg-building-template").value,
           max_queue: parseInt(document.getElementById("cfg-max-queue").value, 10),
@@ -5780,9 +5860,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         const maxDist = document.getElementById("farm-cfg-max-distance");
         if (maxDist) maxDist.value = statusRes.max_distance || 25;
         const minInt = document.getElementById("farm-cfg-min-interval");
-        if (minInt) minInt.value = statusRes.min_interval_seconds || 45;
+        if (minInt) minInt.value = statusRes.min_interval_seconds || 120;
         const maxInt = document.getElementById("farm-cfg-max-interval");
-        if (maxInt) maxInt.value = statusRes.max_interval_seconds || 90;
+        if (maxInt) maxInt.value = statusRes.max_interval_seconds || 240;
+        const minDelay = document.getElementById("farm-cfg-min-delay");
+        if (minDelay) minDelay.value = statusRes.min_delay_per_attack_ms || 500;
+        const maxDelay = document.getElementById("farm-cfg-max-delay");
+        if (maxDelay) maxDelay.value = statusRes.max_delay_per_attack_ms || 1100;
         const avoidConc = document.getElementById("farm-cfg-avoid-concurrent");
         if (avoidConc) avoidConc.checked = statusRes.avoid_concurrent_attacks !== false;
         const bootUnl = document.getElementById("farm-cfg-bootstrap-unlisted");
@@ -6009,10 +6093,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       const payload = {
         default_template: document.getElementById("farm-cfg-default-template")?.value || "A",
         max_distance: parseFloat(document.getElementById("farm-cfg-max-distance")?.value || "25"),
-        min_interval_seconds: parseFloat(document.getElementById("farm-cfg-min-interval")?.value || "45"),
-        max_interval_seconds: parseFloat(document.getElementById("farm-cfg-max-interval")?.value || "90"),
-        min_delay_per_attack_ms: parseInt(document.getElementById("farm-cfg-min-delay")?.value || "250", 10),
-        max_delay_per_attack_ms: parseInt(document.getElementById("farm-cfg-max-delay")?.value || "650", 10),
+        min_interval_seconds: parseFloat(document.getElementById("farm-cfg-min-interval")?.value || "120"),
+        max_interval_seconds: parseFloat(document.getElementById("farm-cfg-max-interval")?.value || "240"),
+        min_delay_per_attack_ms: parseInt(document.getElementById("farm-cfg-min-delay")?.value || "500", 10),
+        max_delay_per_attack_ms: parseInt(document.getElementById("farm-cfg-max-delay")?.value || "1100", 10),
         avoid_concurrent_attacks: !!document.getElementById("farm-cfg-avoid-concurrent")?.checked,
         bootstrap_unlisted_barbarians: !!document.getElementById("farm-cfg-bootstrap-unlisted")?.checked,
         stop_on_losses: !!document.getElementById("farm-cfg-stop-on-losses")?.checked,
@@ -6476,6 +6560,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       escapeCoordsInput.value = defenseData.escape_coords || "";
     }
 
+    const checkIntervalInput = document.getElementById("input-defense-check-interval");
+    if (checkIntervalInput && document.activeElement !== checkIntervalInput && defenseData.check_interval_seconds) {
+      checkIntervalInput.value = defenseData.check_interval_seconds;
+    }
+
     const incomings = defenseData.active_incomings || [];
     const count = defenseData.incomings_count !== undefined ? defenseData.incomings_count : incomings.length;
     updateDefenseIncomings(incomings, count);
@@ -6823,6 +6912,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         const lead = parseInt(document.getElementById("input-dodge-lead-time")?.value, 10) || 30;
         const cancelDelay = parseInt(document.getElementById("input-dodge-cancel-delay")?.value, 10) || 5;
         const escapeCoords = document.getElementById("input-dodge-escape-coords")?.value || "";
+        const checkInterval = parseFloat(document.getElementById("input-defense-check-interval")?.value || "45");
 
         btnSaveDodge.disabled = true;
         btnSaveDodge.textContent = "A guardar...";
@@ -6831,10 +6921,11 @@ document.addEventListener("DOMContentLoaded", async () => {
             dodge_lead_time_seconds: lead,
             dodge_cancel_delay_seconds: cancelDelay,
             escape_coords: escapeCoords,
+            check_interval_seconds: checkInterval,
           });
-          addLogEntry("SUCCESS", "defense", `Parâmetros de Auto-Dodge guardados: antecedência ${lead}s, cancelamento ${cancelDelay}s.`);
+          addLogEntry("SUCCESS", "defense", `Parâmetros de Defesa guardados: radar a cada ${checkInterval}s, dodge ${lead}s.`);
         } catch (e) {
-          addLogEntry("CRITICAL", "defense", `Erro ao guardar parâmetros de dodge: ${e.message}`);
+          addLogEntry("CRITICAL", "defense", `Erro ao guardar parâmetros de defesa: ${e.message}`);
         } finally {
           btnSaveDodge.disabled = false;
           btnSaveDodge.textContent = "💾 Guardar Parâmetros";

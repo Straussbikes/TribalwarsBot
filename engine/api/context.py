@@ -2425,8 +2425,10 @@ class EngineContext:
             "max_distance": getattr(cfg.farm, "max_distance", 25.0),
             "scan_all_radius_barbarians": getattr(cfg.farm, "scan_all_radius_barbarians", True),
             "bootstrap_unlisted_barbarians": getattr(cfg.farm, "bootstrap_unlisted_barbarians", True),
-            "min_interval_seconds": getattr(cfg.farm, "min_interval_seconds", 45.0),
-            "max_interval_seconds": getattr(cfg.farm, "max_interval_seconds", 90.0),
+            "min_interval_seconds": getattr(cfg.farm, "min_interval_seconds", 120.0),
+            "max_interval_seconds": getattr(cfg.farm, "max_interval_seconds", 240.0),
+            "min_delay_per_attack_ms": getattr(cfg.farm, "min_delay_per_attack_ms", 500),
+            "max_delay_per_attack_ms": getattr(cfg.farm, "max_delay_per_attack_ms", 1100),
             "avoid_concurrent_attacks": getattr(cfg.farm, "avoid_concurrent_attacks", True),
             "stop_on_losses": getattr(cfg.farm, "stop_on_losses", True),
             "custom_targets": getattr(cfg.farm, "custom_targets", []),
@@ -2510,7 +2512,8 @@ class EngineContext:
         cfg = inst.config if inst else self.config
         sch = inst.scheduler if inst else self.scheduler
 
-        farm_dict = cfg.farm.to_dict() if hasattr(cfg.farm, "to_dict") else {}
+        from dataclasses import asdict
+        farm_dict = asdict(cfg.farm) if hasattr(cfg.farm, "__dataclass_fields__") else (cfg.farm.to_dict() if hasattr(cfg.farm, "to_dict") else {})
         for k, v in payload.items():
             if hasattr(cfg.farm, k) and v is not None:
                 setattr(cfg.farm, k, v)

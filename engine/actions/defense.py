@@ -555,11 +555,12 @@ class DefenseManager:
                 logger.error(f"[{account.world}] Erro no ciclo de monitorização de defesa: {e}")
             finally:
                 if scheduler and getattr(config, "enabled", True):
+                    next_inv = getattr(config, "check_interval_seconds", inv) or inv
                     self.schedule_defense_monitor(
                         scheduler=scheduler,
                         account=account,
                         config=config,
-                        interval_seconds=inv,
+                        interval_seconds=next_inv,
                     )
 
         return scheduler.schedule(

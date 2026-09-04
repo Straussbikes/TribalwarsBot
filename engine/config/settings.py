@@ -38,10 +38,10 @@ class FarmConfig:
     skip_losses: bool = True           # Alias compatível
     skip_wall: bool = True             # Ignorar aldeias com muralha > 0
     skip_active_targets: bool = True   # Alias compatível
-    min_interval_seconds: int = 45     # Intervalo mínimo entre ciclos de varredura
-    max_interval_seconds: int = 90     # Intervalo máximo entre ciclos de varredura
-    min_delay_per_attack_ms: int = 350 # Atraso mínimo entre ataques individuais
-    max_delay_per_attack_ms: int = 950 # Atraso máximo entre ataques individuais
+    min_interval_seconds: int = 120    # Intervalo mínimo entre ciclos de varredura (aliviado anti-timeout)
+    max_interval_seconds: int = 240    # Intervalo máximo entre ciclos de varredura (aliviado anti-timeout)
+    min_delay_per_attack_ms: int = 500 # Atraso mínimo entre ataques individuais (aliviado anti-timeout)
+    max_delay_per_attack_ms: int = 1100 # Atraso máximo entre ataques individuais (aliviado anti-timeout)
     interval_minutes: float = 10.0     # Frequência de envio de ondas em minutos (compatibilidade)
     custom_targets: List[Any] = field(default_factory=list)
     custom_troops: Dict[str, int] = field(default_factory=lambda: {"spear": 5, "spy": 1})
@@ -188,7 +188,7 @@ class DefenseConfig:
     escape_coords: Optional[str] = None # Coordenadas de fuga (None = bárbara mais próxima)
     auto_dodge_all_units: bool = True  # True: todas as tropas; False: apenas ofensivas
     alarm_sound_enabled: bool = True   # Alarme sonoro em caso de ataque a chegar
-    check_interval_seconds: float = 20.0 # Intervalo do ciclo de verificação de incomings
+    check_interval_seconds: float = 45.0 # Intervalo do ciclo de verificação de incomings (aliviado anti-timeout)
 
 
 @dataclass
@@ -434,6 +434,10 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
     f_skip_losses = bool(f_data.get("skip_losses", True))
     f_skip_wall = bool(f_data.get("skip_wall", True))
     f_interval = float(f_data.get("interval_minutes", 10.0))
+    f_min_interval = int(f_data.get("min_interval_seconds", 120))
+    f_max_interval = int(f_data.get("max_interval_seconds", 240))
+    f_min_delay = int(f_data.get("min_delay_per_attack_ms", 500))
+    f_max_delay = int(f_data.get("max_delay_per_attack_ms", 1100))
 
     raw_targets = f_data.get("custom_targets", [])
     custom_targets = []
@@ -459,6 +463,10 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
         max_distance=f_max_dist,
         skip_losses=f_skip_losses,
         skip_wall=f_skip_wall,
+        min_interval_seconds=f_min_interval,
+        max_interval_seconds=f_max_interval,
+        min_delay_per_attack_ms=f_min_delay,
+        max_delay_per_attack_ms=f_max_delay,
         interval_minutes=f_interval,
         custom_targets=custom_targets,
         custom_troops=custom_troops,
@@ -572,7 +580,7 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
         escape_coords=def_data.get("escape_coords"),
         auto_dodge_all_units=bool(def_data.get("auto_dodge_all_units", True)),
         alarm_sound_enabled=bool(def_data.get("alarm_sound_enabled", True)),
-        check_interval_seconds=float(def_data.get("check_interval_seconds", 20.0)),
+        check_interval_seconds=float(def_data.get("check_interval_seconds", 45.0)),
     )
 
     # 8. Configurações de Combate & Sincronização ao Milissegundo (Item 2.9)

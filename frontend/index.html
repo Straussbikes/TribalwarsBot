@@ -936,11 +936,18 @@
 
             <!-- Painel de Configurações Operacionais de Farm -->
             <div class="card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 16px 18px;">
-              <div style="font-size: 0.88rem; font-weight: 700; color: var(--text-main); margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+              <div style="font-size: 0.88rem; font-weight: 700; color: var(--text-main); margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
                 <span style="display: flex; align-items: center; gap: 8px;">⚙️ Parâmetros de Automação do Farm</span>
-                <button class="btn btn-secondary btn-sm" id="btn-save-farm-settings" style="padding: 4px 12px; font-size: 0.78rem;">
-                  <span>💾</span> Guardar Parâmetros
-                </button>
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <div style="display: flex; gap: 4px;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="applyFarmPreset('stealth')" title="120-240s | 500-1100ms (Anti-Timeout)" style="font-size: 0.72rem; padding: 2px 8px; border-color: rgba(34,197,94,0.4); color: #4ade80;">🛡️ Furtivo</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="applyFarmPreset('balanced')" title="90-180s | 400-900ms" style="font-size: 0.72rem; padding: 2px 8px; border-color: rgba(56,189,248,0.4); color: #38bdf8;">⚖️ Normal</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="applyFarmPreset('fast')" title="45-90s | 350-700ms" style="font-size: 0.72rem; padding: 2px 8px; border-color: rgba(245,158,11,0.4); color: #fbbf24;">⚡ Rápido</button>
+                  </div>
+                  <button class="btn btn-secondary btn-sm" id="btn-save-farm-settings" style="padding: 4px 12px; font-size: 0.78rem;">
+                    <span>💾</span> Guardar Parâmetros
+                  </button>
+                </div>
               </div>
 
               <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; font-size: 0.82rem;">
@@ -960,18 +967,18 @@
                 <div>
                   <label style="color: var(--text-muted); display: block; margin-bottom: 4px;">Intervalo Ciclos (Segundos):</label>
                   <div style="display: flex; gap: 6px; align-items: center;">
-                    <input type="number" id="farm-cfg-min-interval" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="45" min="10">
+                    <input type="number" id="farm-cfg-min-interval" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="120" min="20">
                     <span style="color: var(--text-muted);">-</span>
-                    <input type="number" id="farm-cfg-max-interval" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="90" min="20">
+                    <input type="number" id="farm-cfg-max-interval" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="240" min="30">
                   </div>
                 </div>
 
                 <div>
                   <label style="color: var(--text-muted); display: block; margin-bottom: 4px;">Atraso Entre Ataques (ms):</label>
                   <div style="display: flex; gap: 6px; align-items: center;">
-                    <input type="number" id="farm-cfg-min-delay" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="250" min="100">
+                    <input type="number" id="farm-cfg-min-delay" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="500" min="200">
                     <span style="color: var(--text-muted);">-</span>
-                    <input type="number" id="farm-cfg-max-delay" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="650" min="200">
+                    <input type="number" id="farm-cfg-max-delay" class="form-control" style="width: 50%; padding: 5px 8px; font-size: 0.82rem;" value="1100" min="300">
                   </div>
                 </div>
               </div>
@@ -2118,6 +2125,14 @@
 
                 <div class="form-group" style="margin-top: 10px;">
                   <label style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">
+                    Intervalo do Radar de Incomings (Segundos):
+                  </label>
+                  <input type="number" id="input-defense-check-interval" class="form-control" value="45" min="15" max="300" style="width: 100%; padding: 6px 10px; background: rgba(15,23,42,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff;">
+                  <small style="font-size: 0.68rem; color: var(--text-muted);">Padrão recomendado anti-timeout: 45s a 60s</small>
+                </div>
+
+                <div class="form-group" style="margin-top: 10px;">
+                  <label style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">
                     Coordenadas de Escape:
                   </label>
                   <input type="text" id="input-dodge-escape-coords" class="form-control" placeholder="Automático: Aldeia Bárbara mais próxima" style="width: 100%; padding: 6px 10px; background: rgba(15,23,42,0.8); border: 1px solid var(--border-glass); border-radius: 6px; color: #fff;">
@@ -2814,6 +2829,50 @@
               </div>
             </div>
 
+
+            <div class="settings-section">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                  <span>⏱️</span> Ritmo Operacional & Prevenção de Bloqueios (Anti-Timeout)
+                </h3>
+                <div class="preset-pill-group" style="display: flex; gap: 6px; flex-wrap: wrap;">
+                  <button type="button" class="btn btn-secondary btn-sm preset-speed-btn" id="btn-preset-stealth" onclick="applyRhythmPreset('stealth')" style="border-color: rgba(34,197,94,0.4); color: #4ade80;" title="Máxima segurança contra detecção e timeouts de rede">
+                    🛡️ Furtivo / Seguro (Recomendado)
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-sm preset-speed-btn" id="btn-preset-balanced" onclick="applyRhythmPreset('balanced')" style="border-color: rgba(56,189,248,0.4); color: #38bdf8;" title="Ritmo equilibrado para sessões ativas">
+                    ⚖️ Equilibrado
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-sm preset-speed-btn" id="btn-preset-aggressive" onclick="applyRhythmPreset('aggressive')" style="border-color: rgba(245,158,11,0.4); color: #fbbf24;" title="Frequência alta de saques e verificações rápidas">
+                    ⚡ Acelerado
+                  </button>
+                </div>
+              </div>
+              <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">
+                Ajuste os intervalos entre ondas e o atraso entre cliques individuais para evitar sobrecarregar o servidor do Tribal Wars e eliminar erros de timeout.
+              </p>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label for="cfg-farm-min-interval">Farm: Intervalo Mínimo (Segundos)</label>
+                  <input type="number" id="cfg-farm-min-interval" class="form-control" min="20" max="600" value="120">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-farm-max-interval">Farm: Intervalo Máximo (Segundos)</label>
+                  <input type="number" id="cfg-farm-max-interval" class="form-control" min="30" max="1200" value="240">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-farm-min-delay">Atraso Mín. por Ataque (ms)</label>
+                  <input type="number" id="cfg-farm-min-delay" class="form-control" min="200" max="5000" value="500">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-farm-max-delay">Atraso Máx. por Ataque (ms)</label>
+                  <input type="number" id="cfg-farm-max-delay" class="form-control" min="300" max="10000" value="1100">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-defense-interval">Radar Incomings: Intervalo (Segundos)</label>
+                  <input type="number" id="cfg-defense-interval" class="form-control" min="15" max="300" value="45">
+                </div>
+              </div>
+            </div>
 
             <div class="settings-section">
               <h3>Edifício Principal (Auto-Build)</h3>
