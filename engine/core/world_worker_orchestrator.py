@@ -51,7 +51,7 @@ class WorldWorker:
         self.cancellation_token = cancellation_token
         self.db = db or get_cloud_db()
         self.is_active = is_active
-        self.scheduler = TaskScheduler()
+        self.scheduler = TaskScheduler(name=f"Scheduler [{self.world_code}]")
 
         # Gestores de ecrã/ações isolados para esta instância
         self.main_building_manager = MainBuildingManager()
@@ -298,7 +298,7 @@ class WorldWorkerOrchestrator:
     associados ao 'game_username' atualmente ativo no AccountSessionManager.
     """
 
-    def __init__(self, db: Optional[CloudDatabase] = None, broadcast_callback: Optional[Any] = None):
+    def __init__(self, db: Optional[CloudDatabase] = None, broadcast_callback: Optional[Any] = None, context: Optional[Any] = None):
         self.db = db or get_cloud_db()
         self.workers: Dict[str, WorldWorker] = {}
         self.active_game_username: Optional[str] = None
@@ -306,6 +306,7 @@ class WorldWorkerOrchestrator:
         self.cancellation_token: Optional[asyncio.Event] = None
         self.active_focus_world: Optional[str] = None
         self.broadcast_callback: Optional[Any] = broadcast_callback
+        self.context: Optional[Any] = context
 
     async def on_account_switched(
         self,
@@ -380,12 +381,21 @@ class WorldWorkerOrchestrator:
         cfg.sid = sid
         cfg.proxy = proxy
 
-        account = TribalAccount(
-            world=w_code,
-            sid=sid,
-            domain=domain,
-            proxy=proxy,
-        )
+        # Garante que só há uma instância de TribalAccount para o mesmo mundo
+        account = None
+        if self.context:
+            existing = getattr(self.context, "_account", None)
+            if existing and existing.world.strip().lower() == w_code:
+                account = existing
+                if sid:
+                    account.sid = sid
+        if not account:
+            account = TribalAccount(
+                world=w_code,
+                sid=sid,
+                domain=domain,
+                proxy=proxy,
+            )
         if account_id or self.active_account_id:
             account.account_id = account_id or self.active_account_id
 
@@ -401,6 +411,8 @@ class WorldWorkerOrchestrator:
         )
 
         self.workers[w_code] = worker
+        if self.context:
+            self.context._account = account
         if not self.active_focus_world:
             self.active_focus_world = w_code
 

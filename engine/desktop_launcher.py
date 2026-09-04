@@ -510,14 +510,6 @@ class DesktopApp:
         if self.context and self.context.scheduler:
             self.context.scheduler.resume()
             logger.info("Motor de agendamento retomado com nova sessão.")
-            # Ativa as rotinas configuradas
-            cfg = self.context.config
-            if cfg.building.enabled:
-                self.context.toggle_building_module(enabled=True)
-            if cfg.recruitment.enabled:
-                self.context.toggle_recruitment_module(enabled=True)
-            if cfg.quest.enabled:
-                self.context.toggle_quest_module(enabled=True)
 
         time.sleep(1.5)
         # Prepara a transição direta para a aba Dashboard no regresso do login

@@ -67,7 +67,7 @@ class EngineContext:
     ):
         self.scheduler = scheduler or TaskScheduler()
         self.config = config or BotConfig()
-        self.account = account
+        self._account: Optional[TribalAccount] = account
         self.config_path = config_path or Path("config.json")
 
         # Gestores de ecrãs/ações da Fase 2 e Fase 3
@@ -122,6 +122,7 @@ class EngineContext:
         if self.session_manager.orchestrator:
             self.session_manager.orchestrator.db = self.cloud_db
             self.session_manager.orchestrator.broadcast_callback = self.broadcast_sync
+            self.session_manager.orchestrator.context = self
         self.user_repo = AppUserRepository(self.cloud_db)
         self.game_account_repo = GameAccountRepository(self.cloud_db)
         self.game_world_repo = GameWorldRepository(self.cloud_db)
@@ -180,6 +181,30 @@ class EngineContext:
     @property
     def uptime_seconds(self) -> float:
         return time.time() - self.start_time
+
+    def get_account_for_world(self, world: Optional[str] = None) -> Optional[TribalAccount]:
+        """Retorna a instância canónica única de TribalAccount para o mundo especificado."""
+        target_world = (world or (self.config.world if self.config else "")).strip().lower()
+        if hasattr(self, "session_manager") and self.session_manager and self.session_manager.orchestrator:
+            orch = self.session_manager.orchestrator
+            if target_world and target_world in orch.workers:
+                return orch.workers[target_world].account
+            if not target_world and orch.active_focus_world and orch.active_focus_world in orch.workers:
+                return orch.workers[orch.active_focus_world].account
+        return self._account
+
+    @property
+    def account(self) -> Optional[TribalAccount]:
+        return self.get_account_for_world()
+
+    @account.setter
+    def account(self, val: Optional[TribalAccount]) -> None:
+        self._account = val
+        if val and hasattr(self, "session_manager") and self.session_manager and self.session_manager.orchestrator:
+            orch = self.session_manager.orchestrator
+            w_code = val.world.strip().lower()
+            if w_code in orch.workers:
+                orch.workers[w_code].account = val
 
     # --- Gestão de Conexões WebSocket ---
 
@@ -1362,7 +1387,14 @@ class EngineContext:
             self.config.building.max_queue = int(max_queue)
 
         self.update_config_and_save({"building": update_data})
-        if self.config.building.enabled and self.account and self.scheduler:
+        w_code = (self.config.world or "").strip().lower()
+        has_worker = (
+            hasattr(self, "session_manager")
+            and self.session_manager
+            and self.session_manager.orchestrator
+            and w_code in self.session_manager.orchestrator.workers
+        )
+        if not has_worker and self.config.building.enabled and self.account and self.scheduler:
             plan = self.config.get_active_build_plan()
             self.main_building_manager.schedule_auto_build(
                 scheduler=self.scheduler,
@@ -1406,7 +1438,14 @@ class EngineContext:
             self.config.recruitment.max_queue_elements = int(max_queue_elements)
 
         self.update_config_and_save({"recruitment": update_data})
-        if self.config.recruitment.enabled and self.account and self.scheduler:
+        w_code = (self.config.world or "").strip().lower()
+        has_worker = (
+            hasattr(self, "session_manager")
+            and self.session_manager
+            and self.session_manager.orchestrator
+            and w_code in self.session_manager.orchestrator.workers
+        )
+        if not has_worker and self.config.recruitment.enabled and self.account and self.scheduler:
             self.recruitment_manager.schedule_auto_recruit(
                 scheduler=self.scheduler,
                 account=self.account,
