@@ -513,6 +513,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     loadMarketData();
   });
 
+  window.wsClient.on("FARM_CYCLE_DONE", (data) => {
+    const total = data.total_attacks != null ? data.total_attacks : ((data.am_farm_attacks_sent || 0) + (data.bootstrap_attacks_sent || 0));
+    const msg = data.message || `Varredura de auto-farm concluída: ${total} ataques enviados.`;
+    if (total > 0) {
+      showToast("success", msg);
+      addLogEntry("SUCCESS", "farm", msg);
+    } else {
+      addLogEntry("INFO", "farm", msg);
+    }
+    const farmTab = document.getElementById("tab-farm");
+    if (farmTab && farmTab.classList.contains("active")) {
+      loadAmFarmView().catch(() => {});
+    }
+  });
+
   window.wsClient.on("STATS_UPDATED", (statsData) => {
     updateDashboardStats(statsData);
     const statsTab = document.getElementById("tab-stats");
@@ -5437,7 +5452,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (statusRes && statusRes.status === "success") {
         // Toggle Master
         const toggleMaster = document.getElementById("toggle-farm-master");
-        if (toggleMaster) toggleMaster.checked = !!statusRes.enabled;
+        if (toggleMaster) {
+          toggleMaster.checked = !!statusRes.enabled;
+          if (typeof updateFarmAutoIndicator === "function") {
+            updateFarmAutoIndicator(toggleMaster.checked);
+          }
+        }
 
         // Village Badge
         const vCoordsBadge = document.getElementById("farm-village-coords-badge");
@@ -5684,23 +5704,39 @@ document.addEventListener("DOMContentLoaded", async () => {
   };
 
   // Event Listeners da Aba Farm
-  document.getElementById("toggle-farm-master")?.addEventListener("change", async (e) => {
+  const toggleFarmMaster = document.getElementById("toggle-farm-master");
+  const farmAutoIndicator = document.getElementById("farm-auto-indicator");
+  function updateFarmAutoIndicator(active) {
+    const indicator = document.getElementById("farm-auto-indicator");
+    if (!indicator) return;
+    if (active) {
+      indicator.style.background = "rgba(34, 197, 94, 0.15)";
+      indicator.style.borderColor = "rgba(34, 197, 94, 0.35)";
+      indicator.style.color = "#4ade80";
+      indicator.innerHTML = `
+        <span style="display: inline-block; width: 8px; height: 8px; background: #22c55e; border-radius: 50%; box-shadow: 0 0 8px #22c55e; animation: pulse 2s infinite;"></span>
+        <span>Varredura Automática Ativa</span>
+      `;
+    } else {
+      indicator.style.background = "rgba(148, 163, 184, 0.1)";
+      indicator.style.borderColor = "rgba(148, 163, 184, 0.25)";
+      indicator.style.color = "#94a3b8";
+      indicator.innerHTML = `
+        <span style="display: inline-block; width: 8px; height: 8px; background: #94a3b8; border-radius: 50%;"></span>
+        <span>Auto-Farm em Pausa</span>
+      `;
+    }
+  }
+  window.updateFarmAutoIndicator = updateFarmAutoIndicator;
+
+  toggleFarmMaster?.addEventListener("change", async (e) => {
     try {
-      await window.api.toggleFarm(e.target.checked);
-      showToast("info", `Auto-Farm ${e.target.checked ? "ativado" : "desativado"}.`);
+      const active = e.target.checked;
+      await window.api.toggleFarm(active);
+      updateFarmAutoIndicator(active);
+      showToast("info", `Auto-Farm ${active ? "ativado" : "desativado"}.`);
     } catch (err) {
       showToast("error", `Falha ao alternar farm: ${err.message}`);
-    }
-  });
-
-  document.getElementById("btn-trigger-farm-wave")?.addEventListener("click", async () => {
-    try {
-      showToast("info", "A disparar ronda de saques do Assistente de Saque...");
-      const res = await window.api.triggerFarmWave(true);
-      showToast("success", res.message || "Ronda de farm concluída com sucesso!");
-      await loadAmFarmView();
-    } catch (err) {
-      showToast("error", `Erro ao disparar saques: ${err.message}`);
     }
   });
 

@@ -73,7 +73,7 @@ class EngineContext:
         # Gestores de ecrãs/ações da Fase 2 e Fase 3
         self.main_building_manager = MainBuildingManager()
         self.place_manager = PlaceManager()
-        self.farm_manager = FarmManager()
+        self.farm_manager = FarmManager(broadcast_callback=self.broadcast_sync)
         self.recruitment_manager = RecruitmentManager(place_manager=self.place_manager)
         self.quest_manager = QuestManager()
         self.market_manager = MarketManager()
@@ -121,6 +121,7 @@ class EngineContext:
         self.session_manager = AccountSessionManager.get_instance()
         if self.session_manager.orchestrator:
             self.session_manager.orchestrator.db = self.cloud_db
+            self.session_manager.orchestrator.broadcast_callback = self.broadcast_sync
         self.user_repo = AppUserRepository(self.cloud_db)
         self.game_account_repo = GameAccountRepository(self.cloud_db)
         self.game_world_repo = GameWorldRepository(self.cloud_db)

@@ -8,6 +8,7 @@ import asyncio
 from dataclasses import dataclass, field
 import logging
 import random
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from engine.actions.map import MapManager, calculate_distance
@@ -204,10 +205,13 @@ class FarmManager:
         self,
         place_manager: Optional[PlaceManager] = None,
         map_manager: Optional[Any] = None,
+        broadcast_callback: Optional[Any] = None,
     ):
         self.place_manager = place_manager or PlaceManager()
         self.map_manager = map_manager
+        self.broadcast_callback = broadcast_callback
         self._recent_farm_targets: Set[str] = set()
+        self._target_last_farmed: Dict[str, float] = {}
 
     async def get_am_farm_state(
         self, account: TribalAccount, village_id: Optional[int] = None
@@ -750,11 +754,42 @@ class FarmManager:
             "skipped_losses": 0,
             "skipped_wall": 0,
             "errors": 0,
+            "targets_with_resources": 0,
+            "new_barbarians": 0,
         }
 
         if not all_targets:
             logger.info(f"[{account.world}] Nenhuma aldeia bárbara detetada no raio de {cfg.max_distance} campos.")
             return results
+
+        # 2. Algoritmo de Priorização Inteligente:
+        # Prioriza bárbaras com recursos confirmados ('full' -> 100), parciais ('partial' -> 80),
+        # novas bárbaras não listadas ('none' -> 70), desconhecidas ('unknown' -> 50) e vazias em cooldown ('empty' -> 30/10).
+        # Critério secundário: proximidade da aldeia (distância ascendente).
+        now_ts = time.time()
+        for t in all_targets:
+            if t.loot_status in ("full", "partial"):
+                results["targets_with_resources"] += 1
+            elif not t.is_in_am_farm or t.report_color == "none":
+                results["new_barbarians"] += 1
+
+        def get_farm_target_priority(t: FarmTarget) -> Tuple[int, float]:
+            if t.loot_status == "full":
+                prio = 100
+            elif t.loot_status == "partial":
+                prio = 80
+            elif not t.is_in_am_farm or t.report_color == "none":
+                prio = 70
+            elif t.loot_status == "unknown":
+                prio = 50
+            elif t.loot_status == "empty":
+                last_time = self._target_last_farmed.get(t.target_coords, 0.0)
+                prio = 30 if (now_ts - last_time >= 600.0) else 10
+            else:
+                prio = 40
+            return (-prio, t.distance)
+
+        all_targets.sort(key=get_farm_target_priority)
 
         # Carregar templates A e B do AM Farm
         am_state = await self.get_am_farm_state(account, village_id=v_id)
@@ -778,6 +813,7 @@ class FarmManager:
         bootstrap_squad = UnitsCount.from_dict(active_tmpl_dict)
 
         total_sent = 0
+        consecutive_no_troops = 0
         for target in all_targets:
             if total_sent >= max_attacks:
                 break
@@ -806,8 +842,15 @@ class FarmManager:
                 )
 
                 if not t_id:
+                    consecutive_no_troops += 1
+                    if consecutive_no_troops >= 4:
+                        logger.info(
+                            f"[{account.world}] ⏸️ Tropas disponíveis na aldeia {v_id} esgotadas para modelos A/B. Ciclo pausado até ao regresso de tropas."
+                        )
+                        break
                     continue
 
+                consecutive_no_troops = 0
                 success = await self.send_am_farm_attack(
                     account=account,
                     target_id=target.target_id,
@@ -819,6 +862,7 @@ class FarmManager:
                     total_sent += 1
                     if target.target_coords:
                         self._recent_farm_targets.add(target.target_coords)
+                        self._target_last_farmed[target.target_coords] = time.time()
                     target.has_attack_in_transit = True
 
                     try:
@@ -841,7 +885,7 @@ class FarmManager:
 
                     logger.info(
                         f"[{account.world}] 🌾 [SAQUE DESPACHADO] Modelo {chosen_letter.upper()} enviado com sucesso para "
-                        f"{target.target_name} ({target.target_coords}) [Dist: {target.distance:.1f}c | Muralha: {target.wall_level if target.wall_level is not None else '?'}]"
+                        f"{target.target_name} ({target.target_coords}) [Loot: {target.loot_status.upper()} | Dist: {target.distance:.1f}c | Muralha: {target.wall_level if target.wall_level is not None else '?'}]"
                     )
 
                     # Jitter estocástico gaussiano configurável
@@ -861,6 +905,9 @@ class FarmManager:
                 if success:
                     results["bootstrap_attacks_sent"] += 1
                     total_sent += 1
+                    if target.target_coords:
+                        self._recent_farm_targets.add(target.target_coords)
+                        self._target_last_farmed[target.target_coords] = time.time()
                     delay = get_human_delay(1.5, 0.4, 0.8, 2.5)
                     await asyncio.sleep(delay)
                 else:
@@ -875,11 +922,31 @@ class FarmManager:
                     except Exception as e:
                         logger.debug(f"Aviso ao consultar tropas na Praça: {e}")
 
-        logger.info(
-            f"[{account.world}] Ciclo de Farm de Raio ({cfg.max_distance} campos) concluído: "
-            f"{results['am_farm_attacks_sent']} saques AM Farm, {results['bootstrap_attacks_sent']} bootstraps enviados "
-            f"(de {results['total_barbarians_in_radius']} bárbaras mapeadas no raio)."
-        )
+        total_attacks = results["am_farm_attacks_sent"] + results["bootstrap_attacks_sent"]
+        results["total_attacks"] = total_attacks
+        results["world"] = account.world
+        results["village_id"] = v_id
+        if total_attacks > 0:
+            results["message"] = (
+                f"🌾 Auto-Farm: {total_attacks} saques despachados "
+                f"({results['am_farm_attacks_sent']} AM Farm com recursos, "
+                f"{results['bootstrap_attacks_sent']} novas bárbaras no raio)."
+            )
+        else:
+            results["message"] = (
+                f"🌾 Auto-Farm: Varredura concluída ({results['total_barbarians_in_radius']} bárbaras mapeadas no raio). "
+                f"Todos os alvos prioritários já possuem ataques a caminho."
+            )
+
+        # Dispara broadcast de telemetria e notificações para o frontend
+        broadcast_fn = getattr(account, "_broadcast_sync", None) or self.broadcast_callback
+        if broadcast_fn:
+            try:
+                broadcast_fn("FARM_CYCLE_DONE", results)
+            except Exception as e_bc:
+                logger.debug(f"Aviso ao emitir broadcast FARM_CYCLE_DONE: {e_bc}")
+
+        logger.info(f"[{account.world}] {results['message']}")
         return results
 
     async def run_place_farm_wave(

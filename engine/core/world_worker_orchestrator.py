@@ -43,6 +43,7 @@ class WorldWorker:
         cancellation_token: asyncio.Event,
         db: Optional[CloudDatabase] = None,
         is_active: bool = True,
+        broadcast_callback: Optional[Any] = None,
     ):
         self.world_code = world_code.strip().lower()
         self.account = account
@@ -55,7 +56,9 @@ class WorldWorker:
         # Gestores de ecrã/ações isolados para esta instância
         self.main_building_manager = MainBuildingManager()
         self.recruitment_manager = RecruitmentManager()
-        self.farm_manager = FarmManager()
+        self.farm_manager = FarmManager(broadcast_callback=broadcast_callback)
+        if broadcast_callback and not getattr(self.account, "_broadcast_sync", None):
+            self.account._broadcast_sync = broadcast_callback
         self.quest_manager = QuestManager()
         self.market_manager = MarketManager()
         self.coordinator = MultiVillageCoordinator(
@@ -199,8 +202,10 @@ class WorldWorker:
 
             try:
                 if cfg.farm.enabled and acc.current_village_id:
-                    await self.farm_manager.run_place_farm_wave(
+                    await self.farm_manager.run_comprehensive_radius_farm_cycle(
                         account=acc,
+                        radius=cfg.farm.max_distance,
+                        default_template=cfg.farm.default_template,
                         custom_targets=cfg.farm.custom_targets,
                         custom_troops=cfg.farm.custom_troops,
                         village_id=acc.current_village_id,
@@ -211,15 +216,17 @@ class WorldWorker:
                 logger.debug(f"[{world}] Aviso no ciclo de farm: {e}")
             finally:
                 if sched.is_running and not self.cancellation_token.is_set() and self.is_active:
-                    interval_sec = cfg.farm.interval_minutes * 60.0
+                    min_sec = float(getattr(cfg.farm, "min_interval_seconds", 45))
+                    max_sec = float(getattr(cfg.farm, "max_interval_seconds", 90))
+                    base_sec = (min_sec + max_sec) / 2.0
                     sched.schedule_human_like(
                         name=f"AutoFarm [{world}]",
                         priority=TaskPriority.FARM,
                         action=farm_cycle_task,
-                        base_seconds=interval_sec,
-                        std_dev=interval_sec * 0.15,
-                        min_seconds=60.0,
-                        max_seconds=interval_sec * 2.0,
+                        base_seconds=base_sec,
+                        std_dev=max(5.0, (max_sec - min_sec) * 0.2),
+                        min_seconds=min_sec,
+                        max_seconds=max_sec,
                     )
 
         # 4. Rotina de Recrutamento
@@ -259,11 +266,11 @@ class WorldWorker:
         # Agenda as tarefas iniciais com ligeiro stagger para evitar concorrência no arranque
         sched.schedule(name=f"PollRecursos [{world}]", priority=TaskPriority.REFRESH, action=poll_resources_task, delay_seconds=2.0)
         if cfg.building.enabled:
-            sched.schedule(name=f"AutoBuild [{world}]", priority=TaskPriority.BUILD, action=building_cycle_task, delay_seconds=8.0)
+            sched.schedule(name=f"AutoBuild [{world}]", priority=TaskPriority.BUILD, action=building_cycle_task, delay_seconds=6.0)
         if cfg.farm.enabled:
-            sched.schedule(name=f"AutoFarm [{world}]", priority=TaskPriority.FARM, action=farm_cycle_task, delay_seconds=14.0)
+            sched.schedule(name=f"AutoFarm [{world}]", priority=TaskPriority.FARM, action=farm_cycle_task, delay_seconds=10.0)
         if cfg.recruitment.enabled:
-            sched.schedule(name=f"AutoRecruit [{world}]", priority=TaskPriority.RECRUIT, action=recruit_cycle_task, delay_seconds=20.0)
+            sched.schedule(name=f"AutoRecruit [{world}]", priority=TaskPriority.RECRUIT, action=recruit_cycle_task, delay_seconds=16.0)
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializa o status do worker."""
@@ -291,13 +298,14 @@ class WorldWorkerOrchestrator:
     associados ao 'game_username' atualmente ativo no AccountSessionManager.
     """
 
-    def __init__(self, db: Optional[CloudDatabase] = None):
+    def __init__(self, db: Optional[CloudDatabase] = None, broadcast_callback: Optional[Any] = None):
         self.db = db or get_cloud_db()
         self.workers: Dict[str, WorldWorker] = {}
         self.active_game_username: Optional[str] = None
         self.active_account_id: Optional[str] = None
         self.cancellation_token: Optional[asyncio.Event] = None
         self.active_focus_world: Optional[str] = None
+        self.broadcast_callback: Optional[Any] = broadcast_callback
 
     async def on_account_switched(
         self,
@@ -389,6 +397,7 @@ class WorldWorkerOrchestrator:
             cancellation_token=token,
             db=self.db,
             is_active=is_active,
+            broadcast_callback=self.broadcast_callback,
         )
 
         self.workers[w_code] = worker

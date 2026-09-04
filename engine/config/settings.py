@@ -26,7 +26,7 @@ class BuildingConfig:
 @dataclass
 class FarmConfig:
     """Configurações da rotina de Micro-Farming e Assistente de Saque."""
-    enabled: bool = False
+    enabled: bool = True
     mode: str = "am_farm"              # 'am_farm' (Assistente de Farm), 'place' (Praça de Reunião) ou 'radar' (Radar de Bárbaras)
     template: str = "A"                # 'A' ou 'B'
     default_template: str = "A"        # 'A' ou 'B' (alias)
@@ -38,8 +38,8 @@ class FarmConfig:
     skip_losses: bool = True           # Alias compatível
     skip_wall: bool = True             # Ignorar aldeias com muralha > 0
     skip_active_targets: bool = True   # Alias compatível
-    min_interval_seconds: int = 180    # Intervalo mínimo entre ciclos de varredura
-    max_interval_seconds: int = 420    # Intervalo máximo entre ciclos de varredura
+    min_interval_seconds: int = 45     # Intervalo mínimo entre ciclos de varredura
+    max_interval_seconds: int = 90     # Intervalo máximo entre ciclos de varredura
     min_delay_per_attack_ms: int = 350 # Atraso mínimo entre ataques individuais
     max_delay_per_attack_ms: int = 950 # Atraso máximo entre ataques individuais
     interval_minutes: float = 10.0     # Frequência de envio de ondas em minutos (compatibilidade)
