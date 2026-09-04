@@ -593,24 +593,39 @@ class MapManager:
         cached_villages, timestamp = self.load_cache(account.world)
         cache_age_hours = (time.time() - timestamp) / 3600.0
 
+        need_fetch = False
+        villages = []
         if use_cache and cached_villages and cache_age_hours < 12.0:
             for v in cached_villages:
                 v.distance = self.calculate_distance(center_x, center_y, v.x, v.y)
             villages = [v for v in cached_villages if radius <= 0 or v.distance <= radius]
             villages.sort(key=lambda v: v.distance)
+            # Se a cache local não cobrir este setor (0 aldeias ou 0 bárbaras no raio solicitado)
+            if len(villages) == 0 or (radius >= 5.0 and not any(v.is_barbarian for v in villages)):
+                need_fetch = True
         else:
-            villages = await self.fetch_map_data(
+            need_fetch = True
+
+        if need_fetch:
+            new_villages = await self.fetch_map_data(
                 account=account,
                 center_x=center_x,
                 center_y=center_y,
                 radius=radius,
                 village_id=village_id,
             )
-            if villages:
+            if new_villages:
                 existing_dict = {v.id: v for v in cached_villages}
-                for v in villages:
+                for v in new_villages:
                     existing_dict[v.id] = v
-                self.save_cache(account.world, list(existing_dict.values()))
+                merged_list = list(existing_dict.values())
+                self.save_cache(account.world, merged_list)
+                for v in merged_list:
+                    v.distance = self.calculate_distance(center_x, center_y, v.x, v.y)
+                villages = [v for v in merged_list if radius <= 0 or v.distance <= radius]
+                villages.sort(key=lambda v: v.distance)
+            elif not villages:
+                villages = new_villages
 
         return MapData(
             center_x=center_x,
@@ -637,32 +652,45 @@ class MapManager:
         cached_villages, timestamp = self.load_cache(account.world)
         cache_age_hours = (time.time() - timestamp) / 3600.0
 
+        need_fetch = False
         all_villages: List[MapVillage] = []
 
         if use_cache and cached_villages and cache_age_hours < cache_ttl_hours:
-            logger.debug(
-                f"[{account.world}] Utilizando cache local do mapa ({len(cached_villages)} aldeias, idade: {cache_age_hours:.1f}h)."
-            )
-            # Recalcula distâncias para o centro atual
             for v in cached_villages:
                 v.distance = self.calculate_distance(center_x, center_y, v.x, v.y)
             all_villages = cached_villages
+            in_radius_barbs = [v for v in all_villages if v.is_barbarian and v.distance <= radius and not (v.x == center_x and v.y == center_y)]
+            if len(in_radius_barbs) == 0:
+                need_fetch = True
+            else:
+                logger.debug(
+                    f"[{account.world}] Utilizando cache local do mapa ({len(cached_villages)} aldeias, idade: {cache_age_hours:.1f}h)."
+                )
         else:
+            need_fetch = True
+
+        if need_fetch:
             logger.info(
                 f"[{account.world}] A efetuar varredura ativa do mapa em torno de ({center_x}|{center_y}) num raio de {radius:.0f}..."
             )
-            all_villages = await self.fetch_map_data(
+            fetched = await self.fetch_map_data(
                 account=account,
                 center_x=center_x,
                 center_y=center_y,
                 radius=radius,
                 village_id=village_id,
             )
-            if all_villages:
+            if fetched:
                 existing_dict = {v.id: v for v in cached_villages}
-                for v in all_villages:
+                for v in fetched:
                     existing_dict[v.id] = v
-                self.save_cache(account.world, list(existing_dict.values()))
+                merged_list = list(existing_dict.values())
+                self.save_cache(account.world, merged_list)
+                for v in merged_list:
+                    v.distance = self.calculate_distance(center_x, center_y, v.x, v.y)
+                all_villages = merged_list
+            elif not all_villages:
+                all_villages = fetched
 
         # Filtra apenas bárbaras no raio e ordena por proximidade
         barbarians = [

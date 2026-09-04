@@ -2177,6 +2177,9 @@ class EngineContext:
         troops_raw = getattr(curr_v, "troops", None) if curr_v else None
         troops = troops_raw.to_dict() if hasattr(troops_raw, "to_dict") else (troops_raw or {})
 
+        tmpl_a = getattr(cfg.farm, "template_a_troops", {}) if cfg and hasattr(cfg, "farm") else {}
+        tmpl_b = getattr(cfg.farm, "template_b_troops", {}) if cfg and hasattr(cfg, "farm") else {}
+
         return {
             "status": "success",
             "world": acc.world if acc else cfg.world,
@@ -2193,6 +2196,8 @@ class EngineContext:
             "stop_on_losses": getattr(cfg.farm, "stop_on_losses", True),
             "custom_targets": getattr(cfg.farm, "custom_targets", []),
             "available_troops": troops,
+            "template_a": tmpl_a,
+            "template_b": tmpl_b,
             "is_scheduler_running": sch.is_running and not sch.is_paused if sch else False,
         }
 
@@ -2351,7 +2356,7 @@ class EngineContext:
 
         try:
             # 1. Carrega o estado do AM Farm (modelos A/B)
-            am_state = await self.farm_manager.get_am_farm_state(acc, village_id=target_v_id)
+            am_state = await self.farm_manager.get_am_farm_state(acc, village_id=target_v_id, config=cfg.farm)
             max_dist = radius or cfg.farm.max_distance
 
             # 2. Descobre TODAS as bárbaras no raio configurado (AM Farm + Mapa + Cache local)
@@ -2360,6 +2365,7 @@ class EngineContext:
                 max_distance=max_dist,
                 village_id=target_v_id,
                 custom_targets=cfg.farm.custom_targets,
+                config=cfg.farm,
             )
 
             targets_data = []
@@ -2384,11 +2390,16 @@ class EngineContext:
                 if len(targets_data) >= limit:
                     break
 
+            curr_v_ref = acc.villages.get(target_v_id) if acc and target_v_id else None
+            t_raw = getattr(curr_v_ref, "troops", None) if curr_v_ref else None
+            t_dict = t_raw.to_dict() if hasattr(t_raw, "to_dict") else (t_raw or {})
+
             return {
                 "status": "success",
                 "count": len(targets_data),
                 "template_a": am_state.template_a_troops,
                 "template_b": am_state.template_b_troops,
+                "available_troops": t_dict,
                 "targets": targets_data,
             }
         except Exception as e:

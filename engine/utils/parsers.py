@@ -925,6 +925,39 @@ def parse_available_units(html: str) -> Dict[str, int]:
             except ValueError:
                 pass
 
+    # 4. Suporte a ecrã do Assistente de Farm (screen=am_farm) e tabelas de unidades
+    # (ex.: <td id="spear">150</td>, <strong id="spear">150</strong>, <span id="spear">150</span>, <a id="spear">150</a>)
+    for unit_key in ALL_UNITS:
+        rgx_tag = re.compile(
+            rf'<(?:td|strong|span|a|div)\b[^>]*id=["\'](?:units_entry_all_{unit_key}|unit_input_{unit_key}_all|units_home_{unit_key}|{unit_key})["\'][^>]*>\s*\(?(\d+)\)?\s*</(?:td|strong|span|a|div)>',
+            re.IGNORECASE,
+        )
+        m_tag = rgx_tag.search(normalized)
+        if m_tag:
+            try:
+                units[unit_key] = max(units[unit_key], int(m_tag.group(1)))
+            except ValueError:
+                pass
+
+    # 5. Suporte a JavaScript nativo do Assistente de Saque: Accountmanager.farm.units
+    js_units_obj_m = re.search(r'Accountmanager\.farm\.units\s*=\s*(\{.*?\});', normalized, re.DOTALL)
+    if js_units_obj_m:
+        try:
+            for u_m in re.finditer(r'["\']?([a-z_]+)["\']?\s*:\s*(\d+)', js_units_obj_m.group(1), re.IGNORECASE):
+                u_name = u_m.group(1).lower().strip()
+                if u_name in units:
+                    units[u_name] = max(units[u_name], int(u_m.group(2)))
+        except Exception:
+            pass
+
+    for js_u_m in re.finditer(r'Accountmanager\.farm\.units\[[\'\"]([a-z_]+)[\'\"]\]\s*=\s*(\d+)', normalized, re.IGNORECASE):
+        u_name = js_u_m.group(1).lower().strip()
+        if u_name in units:
+            try:
+                units[u_name] = max(units[u_name], int(js_u_m.group(2)))
+            except ValueError:
+                pass
+
     return units
 
 
@@ -1552,6 +1585,29 @@ def parse_am_farm_templates(html: str) -> Dict[str, Any]:
 
     # 2. Extração / Reforço via JavaScript nativo Accountmanager.farm.templates['t_...']
     js_matches = re.findall(r'Accountmanager\.farm\.templates\[[\'\"]t_(\d+)[\'\"]\]\[[\'\"](\w+)[\'\"]\]\s*=\s*(\d+)', normalized)
+
+    # Identificação de IDs dos templates a partir de botões se ausentes do formulário
+    if not templates["template_ids"]["a"] or not templates["template_ids"]["b"]:
+        btn_a_m = re.search(r'class=["\'][^"\']*farm_icon_a[^"\']*["\'][^>]*template_id=(\d+)|sendUnits\([^,]+,\s*\d+,\s*(\d+)\)[^>]*farm_icon_a|farm_icon_a[^>]*sendUnits\([^,]+,\s*\d+,\s*(\d+)\)', normalized, re.IGNORECASE)
+        if btn_a_m:
+            a_id = next(g for g in btn_a_m.groups() if g is not None)
+            templates["template_ids"]["a"] = a_id
+        btn_b_m = re.search(r'class=["\'][^"\']*farm_icon_b[^"\']*["\'][^>]*template_id=(\d+)|sendUnits\([^,]+,\s*\d+,\s*(\d+)\)[^>]*farm_icon_b|farm_icon_b[^>]*sendUnits\([^,]+,\s*\d+,\s*(\d+)\)', normalized, re.IGNORECASE)
+        if btn_b_m:
+            b_id = next(g for g in btn_b_m.groups() if g is not None)
+            templates["template_ids"]["b"] = b_id
+
+    # Se ainda faltarem IDs, mapeia ordenadamente os IDs distintos encontrados no JS
+    if js_matches and (not templates["template_ids"]["a"] or not templates["template_ids"]["b"]):
+        distinct_ids = []
+        for t_id, _, _ in js_matches:
+            if t_id not in distinct_ids:
+                distinct_ids.append(t_id)
+        if len(distinct_ids) >= 1 and not templates["template_ids"]["a"]:
+            templates["template_ids"]["a"] = distinct_ids[0]
+        if len(distinct_ids) >= 2 and not templates["template_ids"]["b"]:
+            templates["template_ids"]["b"] = distinct_ids[1]
+
     if js_matches:
         for t_id, u_key, val in js_matches:
             unit = u_key.lower().strip()
@@ -1561,6 +1617,32 @@ def parse_am_farm_templates(html: str) -> Dict[str, Any]:
                     if templates[tmpl][unit] == 0:
                         templates[tmpl][unit] = qty
                         templates["haul_capacity"][tmpl] += qty * UNIT_HAUL_CAPACITY.get(unit, 0)
+
+    # 2.1 Extração de templates em formato JSON direto: Accountmanager.farm.templates = {...}
+    js_tmpl_obj_m = re.search(r'Accountmanager\.farm\.templates\s*=\s*(\{.*?\});', normalized, re.DOTALL)
+    if js_tmpl_obj_m:
+        try:
+            parsed_json = json.loads(js_tmpl_obj_m.group(1))
+            if isinstance(parsed_json, dict):
+                t_keys = list(parsed_json.keys())
+                for i, tmpl in enumerate(("a", "b")):
+                    if i < len(t_keys):
+                        k = t_keys[i]
+                        t_data = parsed_json[k]
+                        t_clean_id = k.replace("t_", "")
+                        if not templates["template_ids"][tmpl]:
+                            templates["template_ids"][tmpl] = t_clean_id
+                        if isinstance(t_data, dict):
+                            total_cap = 0
+                            for u, q in t_data.items():
+                                u_lower = u.lower().strip()
+                                if u_lower in templates[tmpl]:
+                                    val = int(q)
+                                    templates[tmpl][u_lower] = val
+                                    total_cap += val * UNIT_HAUL_CAPACITY.get(u_lower, 0)
+                            templates["haul_capacity"][tmpl] = total_cap
+        except Exception:
+            pass
 
     # 3. Fallback tradicional: name="a[unit]" ou name="template_a[unit]"
     if sum(templates["a"].values()) == 0 and sum(templates["b"].values()) == 0:

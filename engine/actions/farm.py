@@ -206,15 +206,20 @@ class FarmManager:
         place_manager: Optional[PlaceManager] = None,
         map_manager: Optional[Any] = None,
         broadcast_callback: Optional[Any] = None,
+        config: Optional[Any] = None,
     ):
         self.place_manager = place_manager or PlaceManager()
         self.map_manager = map_manager
         self.broadcast_callback = broadcast_callback
+        self.config = config
         self._recent_farm_targets: Set[str] = set()
         self._target_last_farmed: Dict[str, float] = {}
 
     async def get_am_farm_state(
-        self, account: TribalAccount, village_id: Optional[int] = None
+        self,
+        account: TribalAccount,
+        village_id: Optional[int] = None,
+        config: Optional[Any] = None,
     ) -> FarmAssistantState:
         """
         Carrega o ecrã 'screen=am_farm' e extrai a lista de aldeias bárbaras e modelos A/B.
@@ -253,7 +258,9 @@ class FarmManager:
         haul_caps = raw_templates.get("haul_capacity", {"a": 0, "b": 0}).copy()
 
         # Fallback para modelos configurados na app caso a resposta HTML do jogo não forneça valores
-        cfg_farm = getattr(getattr(self, "config", None), "farm", None)
+        cfg_farm = getattr(config, "farm", None) or getattr(getattr(self, "config", None), "farm", None)
+        if not cfg_farm and hasattr(config, "template_a_troops"):
+            cfg_farm = config
         if cfg_farm:
             from engine.utils.parsers import UNIT_HAUL_CAPACITY
             if sum(tmpl_a.values()) == 0 and getattr(cfg_farm, "template_a_troops", None) and sum(cfg_farm.template_a_troops.values()) > 0:
@@ -541,6 +548,7 @@ class FarmManager:
         max_distance: float = 25.0,
         village_id: Optional[int] = None,
         custom_targets: Optional[List[Any]] = None,
+        config: Optional[Any] = None,
     ) -> List[FarmTarget]:
         """
         Descobre e unifica TODAS as aldeias bárbaras/abandonadas num raio de X campos em redor da aldeia ativa.
@@ -556,7 +564,7 @@ class FarmManager:
         origin_y = v_data.y if v_data else 500
 
         # 1. Carrega o estado atual do Assistente de Saque
-        am_state = await self.get_am_farm_state(account, village_id=v_id)
+        am_state = await self.get_am_farm_state(account, village_id=v_id, config=config)
         targets_by_coords: Dict[str, FarmTarget] = {}
         for t in am_state.targets:
             t.is_in_am_farm = True

@@ -5448,66 +5448,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   async function loadAmFarmView() {
     try {
-      const statusRes = await window.api.getFarmStatus();
-      if (statusRes && statusRes.status === "success") {
-        // Toggle Master
-        const toggleMaster = document.getElementById("toggle-farm-master");
-        if (toggleMaster) {
-          toggleMaster.checked = !!statusRes.enabled;
-          if (typeof updateFarmAutoIndicator === "function") {
-            updateFarmAutoIndicator(toggleMaster.checked);
-          }
-        }
-
-        // Village Badge
-        const vCoordsBadge = document.getElementById("farm-village-coords-badge");
-        if (vCoordsBadge) vCoordsBadge.textContent = `(${statusRes.village_coords || "0|0"})`;
-
-        // Available Troops Grid
-        const troopsGrid = document.getElementById("farm-available-troops-grid");
-        if (troopsGrid) {
-          const troops = statusRes.available_troops || {};
-          const unitIcons = {
-            spear: "🗡️ Lanceiros",
-            sword: "🛡️ Espadachins",
-            axe: "🪓 Vikings",
-            spy: "👁️ Espiões",
-            light: "🐎 Cavalaria Leve",
-            heavy: "🛡️ Cav. Pesada",
-          };
-          let html = "";
-          for (const [u, label] of Object.entries(unitIcons)) {
-            const count = troops[u] || 0;
-            const highlight = count > 0 ? "color: var(--neon-cyan); font-weight: 700;" : "color: var(--text-muted);";
-            html += `<div style="background: rgba(30, 41, 59, 0.5); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-subtle);">
-              ${label}: <span style="${highlight}">${count}</span>
-            </div>`;
-          }
-          troopsGrid.innerHTML = html;
-        }
-
-        // Config Inputs
-        const defTemp = document.getElementById("farm-cfg-default-template");
-        if (defTemp) defTemp.value = statusRes.default_template || "A";
-        const maxDist = document.getElementById("farm-cfg-max-distance");
-        if (maxDist) maxDist.value = statusRes.max_distance || 25;
-        const minInt = document.getElementById("farm-cfg-min-interval");
-        if (minInt) minInt.value = statusRes.min_interval_seconds || 45;
-        const maxInt = document.getElementById("farm-cfg-max-interval");
-        if (maxInt) maxInt.value = statusRes.max_interval_seconds || 90;
-        const avoidConc = document.getElementById("farm-cfg-avoid-concurrent");
-        if (avoidConc) avoidConc.checked = statusRes.avoid_concurrent_attacks !== false;
-        const bootUnl = document.getElementById("farm-cfg-bootstrap-unlisted");
-        if (bootUnl) bootUnl.checked = statusRes.bootstrap_unlisted_barbarians !== false;
-        const stopLoss = document.getElementById("farm-cfg-stop-on-losses");
-        if (stopLoss) stopLoss.checked = statusRes.stop_on_losses !== false;
-      }
-
-      // Carregar Alvos de Farm
-      const targetsRes = await window.api.getFarmTargets();
-      const tbody = document.getElementById("farm-targets-table-body");
       const templateASum = document.getElementById("farm-template-a-summary");
       const templateBSum = document.getElementById("farm-template-b-summary");
+      const tbody = document.getElementById("farm-targets-table-body");
       const totalBarbsEl = document.getElementById("farm-stats-total-targets");
       const inTransitEl = document.getElementById("farm-stats-in-transit");
 
@@ -5538,7 +5481,86 @@ document.addEventListener("DOMContentLoaded", async () => {
         return parts.length > 0 ? parts.join(" &bull; ") : "Vazio (0 tropas)";
       }
 
+      function renderTroopsGrid(troops) {
+        const troopsGrid = document.getElementById("farm-available-troops-grid");
+        if (!troopsGrid) return;
+        const tr = troops || {};
+        const unitIcons = {
+          spear: "🗡️ Lanceiros",
+          sword: "🛡️ Espadachins",
+          axe: "🪓 Vikings",
+          spy: "👁️ Espiões",
+          light: "🐎 Cavalaria Leve",
+          heavy: "🛡️ Cav. Pesada",
+        };
+        let html = "";
+        for (const [u, label] of Object.entries(unitIcons)) {
+          const count = tr[u] || 0;
+          const highlight = count > 0 ? "color: var(--neon-cyan); font-weight: 700;" : "color: var(--text-muted);";
+          html += `<div style="background: rgba(30, 41, 59, 0.5); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-subtle);">
+            ${label}: <span style="${highlight}">${count}</span>
+          </div>`;
+        }
+        troopsGrid.innerHTML = html;
+      }
+
+      const statusRes = await window.api.getFarmStatus();
+      if (statusRes && statusRes.status === "success") {
+        // Toggle Master
+        const toggleMaster = document.getElementById("toggle-farm-master");
+        if (toggleMaster) {
+          toggleMaster.checked = !!statusRes.enabled;
+          if (typeof updateFarmAutoIndicator === "function") {
+            updateFarmAutoIndicator(toggleMaster.checked);
+          }
+        }
+
+        // Village Badge
+        const vCoordsBadge = document.getElementById("farm-village-coords-badge");
+        if (vCoordsBadge) vCoordsBadge.textContent = `(${statusRes.village_coords || "0|0"})`;
+
+        // Render Available Troops Grid
+        renderTroopsGrid(statusRes.available_troops);
+
+        // Render Templates Iniciais (da config)
+        if (statusRes.template_a && Object.keys(statusRes.template_a).length > 0) {
+          farmModalTemplatesData.A = { ...farmModalTemplatesData.A, ...statusRes.template_a };
+          if (templateASum) templateASum.innerHTML = formatTemplateTroops(statusRes.template_a);
+        }
+        if (statusRes.template_b && Object.keys(statusRes.template_b).length > 0) {
+          farmModalTemplatesData.B = { ...farmModalTemplatesData.B, ...statusRes.template_b };
+          if (templateBSum) templateBSum.innerHTML = formatTemplateTroops(statusRes.template_b);
+        }
+
+        // Config Inputs
+        const defTemp = document.getElementById("farm-cfg-default-template");
+        if (defTemp) defTemp.value = statusRes.default_template || "A";
+        const maxDist = document.getElementById("farm-cfg-max-distance");
+        if (maxDist) maxDist.value = statusRes.max_distance || 25;
+        const minInt = document.getElementById("farm-cfg-min-interval");
+        if (minInt) minInt.value = statusRes.min_interval_seconds || 45;
+        const maxInt = document.getElementById("farm-cfg-max-interval");
+        if (maxInt) maxInt.value = statusRes.max_interval_seconds || 90;
+        const avoidConc = document.getElementById("farm-cfg-avoid-concurrent");
+        if (avoidConc) avoidConc.checked = statusRes.avoid_concurrent_attacks !== false;
+        const bootUnl = document.getElementById("farm-cfg-bootstrap-unlisted");
+        if (bootUnl) bootUnl.checked = statusRes.bootstrap_unlisted_barbarians !== false;
+        const stopLoss = document.getElementById("farm-cfg-stop-on-losses");
+        if (stopLoss) stopLoss.checked = statusRes.stop_on_losses !== false;
+      }
+
+      if (tbody && (!tbody.children.length || tbody.innerHTML.includes("Nenhuma aldeia"))) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 24px;"><span>⏳</span> A mapear aldeias bárbaras e modelos no raio configurado...</td></tr>`;
+      }
+
+      // Carregar Alvos de Farm e atualizar estado com screen=am_farm
+      const targetsRes = await window.api.getFarmTargets();
+
       if (targetsRes && targetsRes.status === "success") {
+        if (targetsRes.available_troops) {
+          renderTroopsGrid(targetsRes.available_troops);
+        }
+
         if (targetsRes.template_a) farmModalTemplatesData.A = { ...farmModalTemplatesData.A, ...targetsRes.template_a };
         if (targetsRes.template_b) farmModalTemplatesData.B = { ...farmModalTemplatesData.B, ...targetsRes.template_b };
 

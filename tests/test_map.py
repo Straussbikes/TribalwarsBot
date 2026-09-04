@@ -267,6 +267,13 @@ class TestMapManagerAndApi(unittest.TestCase):
     """Testes de integração para MapManager e rotas REST."""
 
     def setUp(self):
+        cache_file = Path(".map_cache") / "map_pt117.json"
+        if cache_file.exists():
+            try:
+                cache_file.unlink()
+            except Exception:
+                pass
+
         self.config = BotConfig(
             world="pt117",
             farm=FarmConfig(custom_targets=[(450, 550)]),
@@ -301,6 +308,14 @@ class TestMapManagerAndApi(unittest.TestCase):
         self.token = "test_token"
         self.app = create_app(self.context, token=self.token, attach_log_handler=False)
         self.client = TestClient(self.app, headers={"Authorization": f"Bearer {self.token}"})
+
+    def tearDown(self):
+        cache_file = Path(".map_cache") / "map_pt117.json"
+        if cache_file.exists():
+            try:
+                cache_file.unlink()
+            except Exception:
+                pass
 
     def _make_village_txt(self):
         """Cria um conteúdo village.txt de teste."""
