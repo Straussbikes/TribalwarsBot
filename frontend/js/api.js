@@ -75,12 +75,14 @@ class SidecarApi {
     return await this.request("/api/status");
   }
 
-  async getConfig() {
-    return await this.request("/api/config");
+  async getConfig(world) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/config${qs}`);
   }
 
-  async updateConfig(configData) {
-    return await this.request("/api/config", {
+  async updateConfig(configData, world) {
+    const qs = world ? `?world=${encodeURIComponent(world)}` : "";
+    return await this.request(`/api/config${qs}`, {
       method: "POST",
       body: JSON.stringify(configData),
     });
@@ -351,11 +353,12 @@ class SidecarApi {
     return await this.request("/api/recruitment/models");
   }
 
-  async saveRecruitmentModels(attack = null, defense = null, models = null) {
+  async saveRecruitmentModels(attack = null, defense = null, models = null, batchSizes = null) {
     const payload = {};
     if (attack !== null) payload.attack = attack;
     if (defense !== null) payload.defense = defense;
     if (models !== null) payload.models = models;
+    if (batchSizes !== null) payload.batch_sizes = batchSizes;
     return await this.request("/api/recruitment/models", {
       method: "POST",
       body: JSON.stringify(payload),

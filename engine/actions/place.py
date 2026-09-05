@@ -13,6 +13,7 @@ from engine.utils.parsers import (
     parse_available_units,
     parse_command_confirmation,
     parse_place_commands,
+    parse_place_units_screen,
 )
 
 logger = logging.getLogger(__name__)
@@ -255,6 +256,38 @@ class PlaceManager:
             f"{len(commands)} comandos ativos."
         )
         return PlaceState(village_id=v_id, units=units, commands=commands)
+
+    async def get_village_units_overview(
+        self, account: TribalAccount, village_id: Optional[int] = None
+    ) -> Dict[str, Dict[str, int]]:
+        """
+        Consulta o ecrã 'screen=place&mode=units' da Praça de Reunião e extrai a
+        discriminação oficial de tropas da aldeia (na aldeia, fora em apoio, em trânsito e total).
+        Atualiza também account.villages[v_id].own_troops e account.villages[v_id].troops_in_village.
+        """
+        html = await account.get_screen("place", village_id=village_id, mode="units", extra_params={"page": None})
+        v_id = village_id or account.current_village_id or 0
+        units_matrix = parse_place_units_screen(html)
+
+        target_v = account.villages.get(v_id) or account.current_village
+        if target_v:
+            if units_matrix.get("total"):
+                if not target_v.own_troops:
+                    target_v.own_troops = {}
+                target_v.own_troops.update(units_matrix["total"])
+            if units_matrix.get("in_village"):
+                if not target_v.troops_in_village:
+                    target_v.troops_in_village = {}
+                target_v.troops_in_village.update(units_matrix["in_village"])
+
+        logger.info(
+            f"[{account.world}] Tropas da Aldeia {v_id} (mode=units): "
+            f"{sum(units_matrix.get('total', {}).values())} no total "
+            f"({sum(units_matrix.get('in_village', {}).values())} presentes, "
+            f"{sum(units_matrix.get('outside', {}).values())} fora, "
+            f"{sum(units_matrix.get('in_transit', {}).values())} em trânsito)."
+        )
+        return units_matrix
 
     async def prepare_command(
         self,

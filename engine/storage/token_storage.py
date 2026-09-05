@@ -6,7 +6,6 @@ Gere a gravação e leitura do token JWT encriptado em 'auth.dat' com AES-256-GC
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os

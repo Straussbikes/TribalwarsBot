@@ -18,9 +18,6 @@ from engine.actions.combat_tactics import (
     CombatManager,
     NobleTrainPlan,
     BacktimePlan,
-    SnipePlan,
-    TacticalOperation,
-    TacticalOperationType,
     TacticalOperationStatus,
 )
 from engine.actions.defense import DefenseManager, DodgeOperation, IncomingAttack
@@ -34,7 +31,6 @@ from engine.actions.place import PlaceManager, UnitsCount
 from engine.actions.quest import QuestManager
 from engine.actions.recruitment import RecruitmentManager
 from engine.actions.scavenge import ScavengeManager
-from engine.actions.smith import SmithManager
 from engine.actions.snob import SnobManager
 from engine.actions.inventory import InventoryManager
 from engine.actions.village_coordinator import MultiVillageCoordinator
@@ -110,8 +106,17 @@ class EngineContext:
         self.snob_manager = SnobManager()
         self.inventory_manager = InventoryManager()
 
-        # Gestor de Perfis e Base de Dados SQLite (Single-Active Session)
-        self.profile_manager = ProfileManager(db=db) if db else ProfileManager()
+        # Gestor de Perfis e Base de Dados SQLite (Single-Active Session com Cache Local em data/accounts.db)
+        if db is not None:
+            self.profile_manager = ProfileManager(db=db)
+        else:
+            db_file = Path("data/accounts.db")
+            db_file.parent.mkdir(parents=True, exist_ok=True)
+            self.profile_manager = ProfileManager(db_path=db_file)
+        try:
+            self._main_loop: Optional[asyncio.AbstractEventLoop] = asyncio.get_running_loop()
+        except RuntimeError:
+            self._main_loop = None
         self._account_lock = asyncio.Lock()
         self.active_profile_id: Optional[str] = None
 
@@ -252,14 +257,36 @@ class EngineContext:
         for ws in dead_sockets:
             self.active_websockets.discard(ws)
 
+    @property
+    def main_loop(self) -> Optional[asyncio.AbstractEventLoop]:
+        if self._main_loop and not self._main_loop.is_closed():
+            return self._main_loop
+        try:
+            loop = asyncio.get_running_loop()
+            if not loop.is_closed():
+                self._main_loop = loop
+                return loop
+        except RuntimeError:
+            pass
+        return None
+
     def broadcast_sync(self, message_type: str, data: Dict[str, Any]) -> None:
         """Wrapper síncrono seguro para disparar broadcasts a partir de threads ou handlers síncronos."""
         try:
-            loop = asyncio.get_running_loop()
-            if loop.is_running():
-                asyncio.create_task(self.broadcast(message_type, data))
-        except RuntimeError:
-            pass
+            curr_loop = None
+            try:
+                curr_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+
+            target_loop = curr_loop or self.main_loop
+            if target_loop and target_loop.is_running():
+                if curr_loop == target_loop:
+                    asyncio.create_task(self.broadcast(message_type, data))
+                else:
+                    asyncio.run_coroutine_threadsafe(self.broadcast(message_type, data), target_loop)
+        except Exception as e:
+            logger.debug(f"broadcast_sync sem event loop ({message_type}): {e}")
 
     # --- Alertas e Eventos Específicos ---
 
@@ -408,7 +435,14 @@ class EngineContext:
             self.broadcast_sync("STATS_UPDATED", {"reason": "manual_recruit", "recruited": res})
             return res
 
-        self.scheduler.schedule(
+        w_code = (self.config.world or "").strip().lower()
+        worker = None
+        if hasattr(self, "session_manager") and self.session_manager and self.session_manager.orchestrator:
+            worker = self.session_manager.orchestrator.workers.get(w_code)
+
+        target_sched = worker.scheduler if worker and worker.scheduler else self.scheduler
+
+        target_sched.schedule(
             name=f"ManualRecruit-Village-{target_village}",
             priority=TaskPriority.RECRUIT,
             action=_run,
@@ -500,13 +534,16 @@ class EngineContext:
         return {"status": "error", "message": "Não foi possível capturar o cookie de sessão 'sid'."}
 
 
-    def update_config_and_save(self, new_data: Dict[str, Any]) -> Dict[str, Any]:
+    def update_config_and_save(self, new_data: Dict[str, Any], world: Optional[str] = None) -> Dict[str, Any]:
         """
-        Atualiza as configurações do bot em memória e grava as alterações agregadas à conta ativa no SQLite (data/accounts.db).
+        Atualiza as configurações do bot em memória e grava as alterações agregadas ao MUNDO específico
+        no Cloud SQL (tabela game_worlds com config_data) e no cache SQLite local (data/accounts.db).
         """
         try:
-            # 1. Obtém a configuração atual como dicionário
-            current_raw = self.get_config_dict()
+            target_world = (world or (new_data.get("world") if isinstance(new_data, dict) else None) or (self.config.world if self.config else "pt117")).strip().lower()
+
+            # 1. Obtém a configuração atual como dicionário para o mundo alvo
+            current_raw = self.get_config_dict(world=target_world)
 
             # Atualiza recursivamente campos permitidos com fusão profunda (deep merge)
             def _deep_merge(target: dict, source: dict) -> None:
@@ -517,21 +554,84 @@ class EngineContext:
                         target[k] = v
 
             _deep_merge(current_raw, new_data)
+            current_raw["world"] = target_world
 
-            # 2. Reconstrói BotConfig em memória
+            # 2. Reconstrói BotConfig em memória se for o mundo atualmente focado
             from engine.config.settings import parse_config_dict
-            self.config = parse_config_dict(current_raw)
+            is_active_world = (not self.config or not self.config.world or self.config.world.strip().lower() == target_world)
+            if is_active_world:
+                self.config = parse_config_dict(current_raw)
 
-            # 3. Se houver uma conta ativa, persiste diretamente no SQLite (data/accounts.db)
-            if self.active_profile_id:
-                self.profile_manager.save_account_config(self.active_profile_id, current_raw)
-                logger.info(f"Configurações persistidas no SQLite para a conta ativa '{self.active_profile_id}'.")
+            # 3. Atualiza instâncias em memória de multi-mundo e workers
+            if hasattr(self, "world_manager") and self.world_manager and target_world in self.world_manager.instances:
+                inst = self.world_manager.instances[target_world]
+                inst.config = parse_config_dict(current_raw)
 
-            self.broadcast_sync("CONFIG_UPDATED", {"config": self.get_config_dict()})
-            return {"status": "success", "message": "Configuração atualizada e persistida na base de dados SQLite."}
+            if hasattr(self, "session_manager") and self.session_manager and self.session_manager.orchestrator:
+                self.session_manager.orchestrator.update_worker_config(target_world, new_data)
+
+            # 4. Se houver uma conta ativa, persiste no SQLite local e na Cloud para este mundo
+            target_acc_id = self.active_profile_id or (getattr(self.session_manager, "active_account_id", None) if hasattr(self, "session_manager") else None)
+            if target_acc_id:
+                # 4.1 Cache local resiliente em SQLite
+                self.profile_manager.save_account_config(target_acc_id, current_raw)
+                logger.info(f"Configurações do mundo '{target_world}' persistidas no SQLite para a conta ativa '{target_acc_id}'.")
+
+                # 4.2 Cloud SQL (game_worlds -> config_data)
+                self._sync_world_config_to_cloud(target_acc_id, target_world, current_raw)
+
+            self.broadcast_sync("CONFIG_UPDATED", {"world": target_world, "config": current_raw})
+            return {"status": "success", "message": f"Configuração do mundo '{target_world.upper()}' atualizada e persistida na Cloud e Cache Local."}
         except Exception as e:
-            logger.error(f"Erro ao salvar configuração: {e}")
+            logger.error(f"Erro ao salvar configuração do mundo '{world}': {e}")
             return {"status": "error", "message": str(e)}
+
+    def _sync_world_config_to_cloud(self, account_id: str, world_code: str, config_data: Dict[str, Any]) -> None:
+        """Despacha a sincronização assíncrona das configurações do mundo para o Cloud SQL de forma thread-safe."""
+        try:
+            curr_loop = None
+            try:
+                curr_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+
+            target_loop = curr_loop or self.main_loop
+            if target_loop and target_loop.is_running():
+                if curr_loop == target_loop:
+                    asyncio.create_task(self._async_save_world_cloud_config(account_id, world_code, config_data))
+                else:
+                    asyncio.run_coroutine_threadsafe(
+                        self._async_save_world_cloud_config(account_id, world_code, config_data),
+                        target_loop,
+                    )
+            else:
+                logger.debug(f"[CloudConfig] Nenhum loop assíncrono ativo para sincronizar config do mundo '{world_code}'.")
+        except Exception as e:
+            logger.debug(f"[CloudConfig] Aviso ao agendar gravação na Cloud: {e}")
+
+    async def _async_save_world_cloud_config(self, account_id: str, world_code: str, config_data: Dict[str, Any]) -> None:
+        """Grava as configurações do mundo no Cloud SQL (game_worlds.config_data) e atualiza o cofre da conta."""
+        try:
+            from engine.storage.cloud_db import GameWorldRepository, GameAccountRepository
+            gw_repo = getattr(self, "game_world_repo", None)
+            acc_repo = getattr(self, "game_account_repo", None)
+
+            if self.cloud_db:
+                if not gw_repo or getattr(gw_repo, "db", None) != self.cloud_db:
+                    gw_repo = GameWorldRepository(self.cloud_db)
+                if not acc_repo or getattr(acc_repo, "db", None) != self.cloud_db:
+                    acc_repo = GameAccountRepository(self.cloud_db)
+
+            if gw_repo:
+                ok = await gw_repo.save_world_config(account_id, world_code, config_data)
+                if ok:
+                    logger.info(f"Configurações do mundo '{world_code}' sincronizadas no Cloud SQL para a conta '{account_id}'.")
+                else:
+                    logger.debug(f"[CloudConfig] Não foi possível salvar config do mundo '{world_code}' no Cloud SQL.")
+            if acc_repo:
+                await acc_repo.save_account_config(account_id, config_data)
+        except Exception as e:
+            logger.error(f"[CloudConfig] Erro ao sincronizar configurações na Cloud: {e}")
 
     # --- Dicionários de Estado Formatados ---
 
@@ -563,6 +663,8 @@ class EngineContext:
                     "points": curr_v.points,
                     "resources": resources_dict,
                     "troops": troops_dict,
+                    "troops_in_village": getattr(curr_v, "troops_in_village", None) or troops_dict,
+                    "own_troops": getattr(curr_v, "own_troops", None) or troops_dict,
                 }
 
             if self.account.player:
@@ -662,9 +764,13 @@ class EngineContext:
                 "recruitment": {
                     "enabled": self.config.recruitment.enabled,
                     "interval_minutes": self.config.recruitment.interval_minutes,
+                    "interval_seconds": self.config.recruitment.interval_minutes * 60.0,
                     "min_free_pop": self.config.recruitment.min_free_pop,
+                    "max_queue_elements": getattr(self.config.recruitment, "max_queue_elements", 3),
+                    "min_reserve_resources": getattr(self.config.recruitment, "min_reserve_resources", 500),
                     "targets": self.config.recruitment.targets,
                     "batch_sizes": self.config.recruitment.batch_sizes,
+                    "models": getattr(self.config.recruitment, "models", {}),
                 },
                 "quest": {
                     "enabled": self.config.quest.enabled,
@@ -769,61 +875,86 @@ class EngineContext:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    def get_config_dict(self) -> Dict[str, Any]:
-        """Retorna as configurações em formato serializável."""
+    def get_config_dict(self, world: Optional[str] = None) -> Dict[str, Any]:
+        """Retorna as configurações em formato serializável (para o mundo ativo ou mundo especificado)."""
+        cfg = self.config
+        if world:
+            w_code = world.strip().lower()
+            if hasattr(self, "session_manager") and self.session_manager and self.session_manager.orchestrator:
+                worker = self.session_manager.orchestrator.get_worker(w_code)
+                if worker and worker.config:
+                    cfg = worker.config
+            elif hasattr(self, "world_manager") and self.world_manager and w_code in self.world_manager.instances:
+                cfg = self.world_manager.instances[w_code].config
+
+        if not cfg:
+            return {}
+
         return {
-            "world": self.config.world,
-            "domain": self.config.domain,
-            "sid": self.config.sid[:12] + "..." if self.config.sid else "",
+            "world": cfg.world,
+            "domain": cfg.domain,
+            "sid": cfg.sid[:12] + "..." if cfg.sid else "",
             "auth": {
-                "username": self.config.auth.username,
-                "has_password": bool(self.config.auth.password),
-                "auto_login": self.config.auth.auto_login,
-                "keep_alive": self.config.auth.keep_alive,
-                "keep_alive_interval_minutes": self.config.auth.keep_alive_interval_minutes,
+                "username": cfg.auth.username,
+                "has_password": bool(cfg.auth.password),
+                "auto_login": cfg.auth.auto_login,
+                "keep_alive": cfg.auth.keep_alive,
+                "keep_alive_interval_minutes": cfg.auth.keep_alive_interval_minutes,
             },
             "building": {
-                "enabled": self.config.building.enabled,
-                "template": self.config.building.template,
-                "max_queue": self.config.building.max_queue,
-                "interval_seconds": self.config.building.interval_seconds,
-                "custom_plan": self.config.building.custom_plan,
+                "enabled": cfg.building.enabled,
+                "template": cfg.building.template,
+                "max_queue": cfg.building.max_queue,
+                "interval_seconds": cfg.building.interval_seconds,
+                "custom_plan": cfg.building.custom_plan,
             },
             "farm": {
-                "enabled": self.config.farm.enabled,
-                "mode": self.config.farm.mode,
-                "template": self.config.farm.template,
-                "max_distance": self.config.farm.max_distance,
-                "skip_losses": self.config.farm.skip_losses,
-                "skip_wall": self.config.farm.skip_wall,
-                "interval_minutes": self.config.farm.interval_minutes,
-                "custom_targets": self.config.farm.custom_targets,
-                "custom_troops": self.config.farm.custom_troops,
+                "enabled": cfg.farm.enabled,
+                "mode": cfg.farm.mode,
+                "template": cfg.farm.template,
+                "max_distance": cfg.farm.max_distance,
+                "skip_losses": cfg.farm.skip_losses,
+                "skip_wall": cfg.farm.skip_wall,
+                "interval_minutes": cfg.farm.interval_minutes,
+                "min_interval_seconds": getattr(cfg.farm, "min_interval_seconds", 120.0),
+                "max_interval_seconds": getattr(cfg.farm, "max_interval_seconds", 240.0),
+                "min_delay_per_attack_ms": getattr(cfg.farm, "min_delay_per_attack_ms", 500),
+                "max_delay_per_attack_ms": getattr(cfg.farm, "max_delay_per_attack_ms", 1100),
+                "custom_targets": cfg.farm.custom_targets,
+                "custom_troops": cfg.farm.custom_troops,
             },
             "recruitment": {
-                "enabled": self.config.recruitment.enabled,
-                "interval_minutes": self.config.recruitment.interval_minutes,
-                "min_free_pop": self.config.recruitment.min_free_pop,
-                "targets": self.config.recruitment.targets,
-                "batch_sizes": self.config.recruitment.batch_sizes,
+                "enabled": cfg.recruitment.enabled,
+                "interval_minutes": cfg.recruitment.interval_minutes,
+                "interval_seconds": cfg.recruitment.interval_minutes * 60.0,
+                "min_free_pop": cfg.recruitment.min_free_pop,
+                "max_queue_elements": getattr(cfg.recruitment, "max_queue_elements", 3),
+                "min_reserve_resources": getattr(cfg.recruitment, "min_reserve_resources", 500),
+                "targets": cfg.recruitment.targets,
+                "batch_sizes": cfg.recruitment.batch_sizes,
+                "models": getattr(cfg.recruitment, "models", {}),
             },
             "quest": {
-                "enabled": self.config.quest.enabled,
-                "auto_claim_quests": self.config.quest.auto_claim_quests,
-                "auto_daily_bonus": self.config.quest.auto_daily_bonus,
-                "safe_storage_margin": self.config.quest.safe_storage_margin,
-                "interval_minutes": self.config.quest.interval_minutes,
+                "enabled": cfg.quest.enabled,
+                "auto_claim_quests": cfg.quest.auto_claim_quests,
+                "auto_daily_bonus": cfg.quest.auto_daily_bonus,
+                "safe_storage_margin": cfg.quest.safe_storage_margin,
+                "interval_minutes": cfg.quest.interval_minutes,
             },
             "market": {
-                "enabled": getattr(self.config.market, "enabled", False),
-                "auto_balance": getattr(self.config.market, "auto_balance", True),
-                "auto_balance_enabled": getattr(self.config.market, "auto_balance", True),
-                "reserve_margin": getattr(self.config.market, "reserve_margin", 0.20),
-                "reserve_margin_percent": getattr(self.config.market, "reserve_margin", 0.20),
-                "interval_minutes": getattr(self.config.market, "interval_minutes", 30.0),
-                "min_transfer_amount": getattr(self.config.market, "min_transfer_amount", 1000),
-                "max_merchants_percent": getattr(self.config.market, "max_merchant_ratio", 0.80),
-                "max_merchant_ratio": getattr(self.config.market, "max_merchant_ratio", 0.80),
+                "enabled": getattr(cfg.market, "enabled", False),
+                "auto_balance": getattr(cfg.market, "auto_balance", True),
+                "auto_balance_enabled": getattr(cfg.market, "auto_balance", True),
+                "reserve_margin": getattr(cfg.market, "reserve_margin", 0.20),
+                "reserve_margin_percent": getattr(cfg.market, "reserve_margin", 0.20),
+                "interval_minutes": getattr(cfg.market, "interval_minutes", 30.0),
+                "min_transfer_amount": getattr(cfg.market, "min_transfer_amount", 1000),
+                "max_merchants_percent": getattr(cfg.market, "max_merchant_ratio", 0.80),
+                "max_merchant_ratio": getattr(cfg.market, "max_merchant_ratio", 0.80),
+            },
+            "defense": {
+                "check_interval_seconds": getattr(cfg.defense, "check_interval_seconds", 45.0),
+                "auto_dodge": getattr(cfg.defense, "auto_dodge", False),
             },
             "villages": {
                 str(vid): {
@@ -831,7 +962,7 @@ class EngineContext:
                     "building_template": getattr(vcfg, "building_template", None),
                     "recruitment_targets": getattr(vcfg, "recruitment_targets", None),
                 }
-                for vid, vcfg in self.config.villages.items()
+                for vid, vcfg in cfg.villages.items()
             },
         }
 
@@ -946,11 +1077,44 @@ class EngineContext:
         self.scheduler = inst.scheduler
         self.config = inst.config
 
-        # Atualiza e persiste o mundo ativo no config.json
-        self.update_config_and_save({"world": world_key})
+        # Sincroniza foco do orquestrador se existir worker para este mundo
+        if hasattr(self, "session_manager") and self.session_manager and self.session_manager.orchestrator:
+            self.session_manager.orchestrator.active_focus_world = world_key
+            worker = self.session_manager.orchestrator.get_worker(world_key)
+            if worker:
+                self.account = worker.account
+                self.config = worker.config
+
+        # Carrega as configurações persistidas deste mundo na Cloud se existirem
+        target_acc_id = self.active_profile_id or (getattr(self.session_manager, "active_account_id", None) if hasattr(self, "session_manager") else None)
+        if target_acc_id and hasattr(self, "game_world_repo") and self.game_world_repo:
+            try:
+                cloud_world_cfg = await self.game_world_repo.get_world_config(target_acc_id, world_key)
+                if cloud_world_cfg and isinstance(cloud_world_cfg, dict):
+                    from engine.config.settings import parse_config_dict
+                    curr_d = self.config.to_dict() if self.config else {}
+                    def _deep_merge_w(target: dict, source: dict) -> None:
+                        for k, v in source.items():
+                            if isinstance(v, dict) and isinstance(target.get(k), dict):
+                                _deep_merge_w(target[k], v)
+                            else:
+                                target[k] = v
+                    _deep_merge_w(curr_d, cloud_world_cfg)
+                    curr_d["world"] = world_key
+                    self.config = parse_config_dict(curr_d)
+                    inst.config = self.config
+                    if hasattr(self, "session_manager") and self.session_manager and self.session_manager.orchestrator:
+                        self.session_manager.orchestrator.update_worker_config(world_key, cloud_world_cfg)
+                    logger.info(f"[WorldSwitch] Configuração persistida do mundo '{world_key}' carregada com sucesso.")
+            except Exception as ce:
+                logger.debug(f"Aviso ao consultar config de mundo na cloud: {ce}")
+
+        # Assegura que o mundo ativo fica atualizado
+        self.update_config_and_save({"world": world_key}, world=world_key)
 
         status = self.get_status_dict()
         self.broadcast_sync("WORLD_SWITCHED", {"active_world": world_key, "status": status})
+        self.broadcast_sync("CONFIG_UPDATED", {"world": world_key, "config": self.get_config_dict(world=world_key)})
         return {"status": "success", "message": f"Dashboard focado no mundo '{world_key}'.", "world": inst.to_dict()}
 
     async def discover_player_worlds(self) -> Dict[str, Any]:
@@ -1106,8 +1270,8 @@ class EngineContext:
         except Exception as e:
             try:
                 await world_account.close()
-            except Exception:
-                pass
+            except Exception as close_err:
+                logger.debug(f"Aviso ao fechar world_account: {close_err}")
             logger.error(f"Falha ao conectar ao mundo '{world_key}': {e}")
             return {
                 "status": "error",
@@ -1357,11 +1521,13 @@ class EngineContext:
             )
             self.broadcast_sync("STATS_UPDATED", tracker.get_summary())
 
+            cmd_id = getattr(res, "command_id", "cmd_ok") if res is not True else "cmd_ok"
+            duration = getattr(res, "duration", None)
             return {
                 "status": "success",
                 "message": f"Ataque enviado para ({target_x}|{target_y})!",
-                "command_id": res.command_id,
-                "duration": res.duration,
+                "command_id": cmd_id,
+                "duration": duration,
             }
         except Exception as e:
             logger.error(f"Erro ao enviar ataque rápido para ({target_x}|{target_y}): {e}")
@@ -1664,6 +1830,7 @@ class EngineContext:
             self.config.recruitment.enabled = bool(enabled)
         if interval_minutes is not None:
             update_data["interval_minutes"] = float(interval_minutes)
+            update_data["interval_seconds"] = float(interval_minutes) * 60.0
             self.config.recruitment.interval_minutes = float(interval_minutes)
         if min_free_pop is not None:
             update_data["min_free_pop"] = int(min_free_pop)
@@ -1703,12 +1870,15 @@ class EngineContext:
         v_id = village_id or self.account.current_village_id or 0
         try:
             from engine.config.settings import DEFAULT_ATTACK_MODEL, DEFAULT_DEFENSE_MODEL
+            models_res = self.get_recruitment_models()
+            models = models_res.get("models", {})
+            if not models:
+                models = getattr(self.config.recruitment, "models", {
+                    "attack": DEFAULT_ATTACK_MODEL.copy(),
+                    "defense": DEFAULT_DEFENSE_MODEL.copy(),
+                })
             targets = self.config.get_village_recruitment_targets(village_id=str(v_id))
             batch_sizes = self.config.recruitment.batch_sizes
-            models = getattr(self.config.recruitment, "models", {
-                "attack": DEFAULT_ATTACK_MODEL.copy(),
-                "defense": DEFAULT_DEFENSE_MODEL.copy(),
-            })
             village_cat = "defense"
             if self.village_coordinator:
                 cat_obj = self.village_coordinator.get_village_category(self.account, self.config, v_id)
@@ -1718,6 +1888,13 @@ class EngineContext:
             total_in_queue_all: Dict[str, int] = {}
             available_units_all: Dict[str, int] = {}
             active_orders_list = []
+
+            # Sincroniza o panorama de tropas totais pertencentes à aldeia (screen=place&mode=units)
+            try:
+                if getattr(self, "place_manager", None):
+                    await self.place_manager.get_village_units_overview(self.account, village_id=v_id)
+            except Exception as e:
+                logger.debug(f"Aviso ao consultar tropas da aldeia {v_id} na praça: {e}")
 
             for bld in ("barracks", "stable", "garage"):
                 try:
@@ -1740,6 +1917,8 @@ class EngineContext:
                         "available_units": b_state.available_units,
                         "queue": bld_orders,
                         "total_in_queue": b_state.total_in_queue,
+                        "own_units": getattr(b_state, "own_units", {}),
+                        "in_village_units": getattr(b_state, "in_village_units", {}),
                     }
                     for u, c in b_state.total_in_queue.items():
                         total_in_queue_all[u] = total_in_queue_all.get(u, 0) + c
@@ -1747,13 +1926,32 @@ class EngineContext:
                         available_units_all[u] = c
                 except Exception as e:
                     logger.debug(f"Edifício militar '{bld}' indisponível na aldeia {v_id}: {e}")
-                    buildings_data[bld] = {"available_units": {}, "queue": [], "total_in_queue": {}}
+                    buildings_data[bld] = {
+                        "available_units": {},
+                        "queue": [],
+                        "total_in_queue": {},
+                        "own_units": {},
+                        "in_village_units": {},
+                    }
 
-            village_troops = {}
-            if v_id and v_id in self.account.villages:
-                village_troops = self.account.villages[v_id].troops
-            elif self.account.current_village:
-                village_troops = self.account.current_village.troops
+            village_troops_home = {}
+            village_troops_own = {}
+            target_v = self.account.villages.get(v_id) if v_id else self.account.current_village
+            if target_v:
+                raw_home = getattr(target_v, "troops_in_village", None) or target_v.troops or {}
+                raw_own = getattr(target_v, "own_troops", None) or target_v.troops or {}
+                village_troops_home = raw_home.to_dict() if hasattr(raw_home, "to_dict") else dict(raw_home)
+                village_troops_own = raw_own.to_dict() if hasattr(raw_own, "to_dict") else dict(raw_own)
+
+            for bld_info in buildings_data.values():
+                for u, c in bld_info.get("own_units", {}).items():
+                    village_troops_own[u] = c
+                for u, c in bld_info.get("in_village_units", {}).items():
+                    village_troops_home[u] = c
+
+            if target_v:
+                target_v.own_troops = village_troops_own
+                target_v.troops_in_village = village_troops_home
 
             return {
                 "status": "success",
@@ -1766,7 +1964,8 @@ class EngineContext:
                 "models": models,
                 "targets": targets,
                 "batch_sizes": batch_sizes,
-                "troops_home": village_troops,
+                "troops_home": village_troops_home,
+                "troops_own": village_troops_own,
                 "total_in_queue": total_in_queue_all,
                 "available_units": available_units_all,
                 "buildings": buildings_data,
@@ -1942,33 +2141,48 @@ class EngineContext:
         attack: Optional[Dict[str, int]] = None,
         defense: Optional[Dict[str, int]] = None,
         models: Optional[Dict[str, Dict[str, int]]] = None,
+        batch_sizes: Optional[Dict[str, Dict[str, int]]] = None,
     ) -> Dict[str, Any]:
         """Salva modelos de tropas garantindo persistência no SQLite e retrocompatibilidade."""
         from engine.config.settings import DEFAULT_ATTACK_MODEL, DEFAULT_DEFENSE_MODEL
         if models is not None and isinstance(models, dict):
             for m_name, m_units in models.items():
                 if isinstance(m_units, dict):
-                    self.save_recruitment_model({
-                        "id": str(m_name).lower().strip(),
-                        "name": str(m_name).title(),
+                    m_id = str(m_name).lower().strip()
+                    m_title = "Ataque Full" if m_id == "attack" else ("Defesa Full" if m_id == "defense" else str(m_name).title())
+                    b_size = (batch_sizes.get(m_name) or batch_sizes.get(m_id)) if isinstance(batch_sizes, dict) else None
+                    model_payload = {
+                        "id": m_id,
+                        "name": m_title,
                         "units": {str(k): max(0, int(v)) for k, v in m_units.items()},
-                        "is_default": str(m_name).lower().strip() in ("attack", "defense"),
-                    })
+                        "is_default": m_id in ("attack", "defense"),
+                    }
+                    if b_size and isinstance(b_size, dict):
+                        model_payload["batch_sizes"] = {str(k): max(1, int(v)) for k, v in b_size.items()}
+                    self.save_recruitment_model(model_payload)
         else:
             if attack is not None:
-                self.save_recruitment_model({
+                b_size = batch_sizes.get("attack") if isinstance(batch_sizes, dict) else None
+                payload = {
                     "id": "attack",
                     "name": "Ataque Full",
                     "units": {str(k): max(0, int(v)) for k, v in attack.items()},
                     "is_default": True,
-                })
+                }
+                if b_size:
+                    payload["batch_sizes"] = b_size
+                self.save_recruitment_model(payload)
             if defense is not None:
-                self.save_recruitment_model({
+                b_size = batch_sizes.get("defense") if isinstance(batch_sizes, dict) else None
+                payload = {
                     "id": "defense",
                     "name": "Defesa Full",
                     "units": {str(k): max(0, int(v)) for k, v in defense.items()},
                     "is_default": True,
-                })
+                }
+                if b_size:
+                    payload["batch_sizes"] = b_size
+                self.save_recruitment_model(payload)
 
         current_models = {m["id"]: m["units"] for m in self.list_recruitment_models()}
         self.config.recruitment.models = current_models
@@ -2255,6 +2469,7 @@ class EngineContext:
                                 domain=creds.get("domain", "tribalwars.com.pt"),
                                 world_domain=f"{w_code}.{creds.get('domain', 'tribalwars.com.pt')}",
                                 session_cookie=creds.get("sid", ""),
+                                config_data=creds.get("config") or {},
                                 is_active=True,
                             )
                             self.profile_manager.save_profile(prof)
@@ -2263,6 +2478,24 @@ class EngineContext:
 
             if not prof:
                 return {"status": "error", "message": f"Conta com ID '{account_id}' não encontrada."}
+
+            # Cloud-First: Enriquece com configurações persistidas na Cloud e assegura cache local
+            cloud_cfg = None
+            if self.current_app_user:
+                try:
+                    cloud_cfg = await self.game_account_repo.get_account_config(account_id)
+                except Exception as ce:
+                    logger.debug(f"Aviso ao consultar config da Cloud para ativação: {ce}")
+
+            if cloud_cfg and isinstance(cloud_cfg, dict):
+                def _deep_merge_cfg(target: dict, source: dict) -> None:
+                    for k, v in source.items():
+                        if isinstance(v, dict) and isinstance(target.get(k), dict):
+                            _deep_merge_cfg(target[k], v)
+                        else:
+                            target[k] = v
+                _deep_merge_cfg(prof.config_data, cloud_cfg)
+                self.profile_manager.save_account_config(account_id, prof.config_data)
 
             logger.info(f"🔄 A ativar perfil monousuário: '{prof.name}' ({prof.world})")
 
@@ -3548,8 +3781,8 @@ class EngineContext:
                 self.session_manager.active_game_username = None
                 try:
                     await self.session_manager.stop_current_session()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Aviso ao parar sessão anterior: {e}")
         self.current_app_user = user
         return {
             "status": "success",
@@ -3624,8 +3857,8 @@ class EngineContext:
                     a_dict["world_domain"] = f"{a_dict['world']}.{creds.get('domain')}"
                 if creds.get("world"):
                     a_dict["world"] = creds.get("world")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Aviso ao desencriptar credenciais para conta '{acc.game_username}': {e}")
             result.append(a_dict)
 
         return {
@@ -3668,8 +3901,8 @@ class EngineContext:
         if existing_acc:
             try:
                 existing_creds = self.game_account_repo.decrypt_credentials(existing_acc)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Aviso ao desencriptar credenciais existentes: {e}")
 
         final_password = password.strip() if password else existing_creds.get("password")
         final_sid = sid.strip() if sid else existing_creds.get("sid", "")
@@ -3783,8 +4016,8 @@ class EngineContext:
             await self.account.update_sid(new_sid)
             try:
                 await self.account.refresh_state()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Aviso ao atualizar estado pós-auto-login: {e}")
 
         if hasattr(self, "broadcast_sync"):
             self.broadcast_sync("AUTO_LOGIN_SUCCESS", {
@@ -3818,6 +4051,65 @@ class EngineContext:
         acc_id = target_acc.id if target_acc else account_id
         if acc_id:
             self.active_profile_id = acc_id
+
+            # Cloud-First com Cache Local: Carrega configurações salvas para a conta
+            saved_cfg = None
+            if target_acc:
+                try:
+                    creds = self.game_account_repo.decrypt_credentials(target_acc)
+                    saved_cfg = creds.get("config")
+                except Exception as ce:
+                    logger.debug(f"Aviso ao ler cofre no switch_active_game_account: {ce}")
+
+            if not saved_cfg:
+                saved_cfg = self.profile_manager.get_account_config(acc_id)
+
+            if saved_cfg and isinstance(saved_cfg, dict):
+                # Sincroniza cache local no SQLite se veio da Cloud
+                self.profile_manager.save_account_config(acc_id, saved_cfg)
+
+                # Reconstrói self.config para refletir na UI e no motor
+                from engine.config.settings import parse_config_dict
+                current_raw = self.get_config_dict()
+                def _deep_merge_cfg(target: dict, source: dict) -> None:
+                    for k, v in source.items():
+                        if isinstance(v, dict) and isinstance(target.get(k), dict):
+                            _deep_merge_cfg(target[k], v)
+                        else:
+                            target[k] = v
+                _deep_merge_cfg(current_raw, saved_cfg)
+                self.config = parse_config_dict(current_raw)
+                logger.info(f"[ConfigPersistence] Configurações salvas carregadas e aplicadas para a conta '{acc_id}'.")
+
+            # Cloud-First por Mundo: Carrega configurações específicas do mundo associado se existir
+            if acc_id and hasattr(self, "game_world_repo") and self.game_world_repo:
+                try:
+                    worlds = await self.game_world_repo.list_by_account(acc_id)
+                    if worlds:
+                        first_w = worlds[0]
+                        w_code = first_w.world_code
+                        w_cfg = None
+                        if getattr(first_w, "config_data", None):
+                            try:
+                                import json
+                                w_cfg = json.loads(first_w.config_data)
+                            except Exception:
+                                w_cfg = None
+                        if w_cfg and isinstance(w_cfg, dict):
+                            from engine.config.settings import parse_config_dict
+                            current_raw = self.get_config_dict()
+                            def _deep_merge_w(target: dict, source: dict) -> None:
+                                for k, v in source.items():
+                                    if isinstance(v, dict) and isinstance(target.get(k), dict):
+                                        _deep_merge_w(target[k], v)
+                                    else:
+                                        target[k] = v
+                            _deep_merge_w(current_raw, w_cfg)
+                            current_raw["world"] = w_code
+                            self.config = parse_config_dict(current_raw)
+                            logger.info(f"[ConfigPersistence] Configuração do mundo '{w_code}' aplicada à conta '{acc_id}'.")
+                except Exception as we:
+                    logger.debug(f"Aviso ao carregar configuração de mundo pós switch account: {we}")
 
         final_username = target_acc.game_username if target_acc else game_username
         session_status = await self.session_manager.switch_account(
@@ -3970,8 +4262,8 @@ class EngineContext:
                     if candidate and candidate.app_user_id == self.current_app_user.id:
                         acc = candidate
                         break
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Aviso ao consultar candidato game_account por ID ({cid}): {e}")
 
         # 2. Se não encontrou por ID, tenta por username ativo
         if not acc:
@@ -4123,8 +4415,8 @@ class EngineContext:
                         game_username=target_username,
                         credentials_data=creds,
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Aviso ao atualizar credenciais com novo SID/mundo: {e}")
 
         # Garante a existência do GameWorld
         gw = await self.game_world_repo.get_or_create(

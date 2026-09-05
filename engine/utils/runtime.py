@@ -6,7 +6,6 @@ Garante a ausência de janelas de terminal/CMD e redireciona stdout/stderr de fo
 import io
 import os
 import sys
-from typing import Optional
 
 
 class SafeStreamWriter(io.TextIOBase):
@@ -79,5 +78,6 @@ def suppress_console_and_redirect_streams(logger_func=None) -> None:
             if hwnd != 0:
                 # SW_HIDE = 0
                 ctypes.windll.user32.ShowWindow(hwnd, 0)
-        except Exception:
-            pass
+        except Exception as e:
+            if logger_func:
+                logger_func(f"Aviso ao ocultar janela de consola: {e}")

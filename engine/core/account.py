@@ -460,6 +460,10 @@ class TribalAccount:
             if extra_params:
                 params.update(extra_params)
 
+            # Permite carregar a versão desktop completa omitindo 'page' quando page=None
+            if "page" in params and (params["page"] is None or params["page"] == ""):
+                del params["page"]
+
             # Se a requisição contiver 'action', garante que o token CSRF ('h') está presente
             if "action" in params and ("h" not in params or not params["h"]):
                 if not self.csrf_token:
@@ -498,8 +502,8 @@ class TribalAccount:
                         try:
                             if self._session is not None:
                                 await self._session.close()
-                        except Exception:
-                            pass
+                        except Exception as close_err:
+                            logger.debug(f"Aviso ao fechar sessão durante retry GET: {close_err}")
                         self._session = None
                         await self.init_session()
                         await asyncio.sleep(backoff)
@@ -632,8 +636,8 @@ class TribalAccount:
                         try:
                             if self._session is not None:
                                 await self._session.close()
-                        except Exception:
-                            pass
+                        except Exception as close_err:
+                            logger.debug(f"Aviso ao fechar sessão durante retry POST: {close_err}")
                         self._session = None
                         await self.init_session()
                         await asyncio.sleep(backoff)

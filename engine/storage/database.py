@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 import sqlite3
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 import uuid
 
 logger = logging.getLogger("TribalWarsBot.Database")
@@ -193,8 +193,9 @@ class AccountsDatabase:
         ]
 
         for rec in defaults_rec:
-            cursor.execute("SELECT id FROM recruitment_models WHERE id = ?", (rec["id"],))
-            if not cursor.fetchone():
+            cursor.execute("SELECT id, units, batch_sizes FROM recruitment_models WHERE id = ?", (rec["id"],))
+            row = cursor.fetchone()
+            if not row:
                 conn.execute("""
                     INSERT INTO recruitment_models (
                         id, account_id, name, units, batch_sizes, is_default, created_at
@@ -208,11 +209,25 @@ class AccountsDatabase:
                     now,
                 ))
             else:
+                existing_units = {}
+                existing_batches = {}
+                try:
+                    existing_units = json.loads(row[1]) if row[1] else {}
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Falha ao decodificar JSON de units na BD: {e}")
+                try:
+                    existing_batches = json.loads(row[2]) if row[2] else {}
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Falha ao decodificar JSON de batch_sizes na BD: {e}")
+                updated_units = rec["units"].copy()
+                updated_units.update(existing_units)
+                updated_batches = rec["batch_sizes"].copy()
+                updated_batches.update(existing_batches)
                 conn.execute("""
                     UPDATE recruitment_models
-                    SET is_default = 1
-                    WHERE id = ? AND is_default = 0
-                """, (rec["id"],))
+                    SET is_default = 1, units = ?, batch_sizes = ?
+                    WHERE id = ?
+                """, (json.dumps(updated_units), json.dumps(updated_batches), rec["id"]))
 
         logger.debug("Modelos padrão de tropas (Ataque e Defesa) assegurados na cache em memória para todas as contas.")
 
@@ -273,18 +288,42 @@ class AccountsDatabase:
         return {}
 
     def save_account_config(self, account_id: str, config_dict: Dict[str, Any]) -> bool:
-        """Atualiza e persiste as configurações do bot agregadas a uma conta no SQLite."""
+        """Atualiza e persiste as configurações do bot agregadas a uma conta no SQLite (cache local offline-resilient)."""
         if not account_id:
             return False
         current_cfg = self.get_account_config(account_id)
-        merged_cfg = {**current_cfg, **config_dict}
+
+        # Fusão profunda para preservar parâmetros de módulos distintos
+        def _deep_merge(target: dict, source: dict) -> None:
+            for k, v in source.items():
+                if isinstance(v, dict) and isinstance(target.get(k), dict):
+                    _deep_merge(target[k], v)
+                else:
+                    target[k] = v
+
+        merged_cfg = dict(current_cfg)
+        _deep_merge(merged_cfg, config_dict)
         cfg_json = json.dumps(merged_cfg)
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("UPDATE accounts SET config_data = ? WHERE id = ?", (cfg_json, account_id))
+            if cursor.rowcount == 0:
+                # Registo de cache offline para conta que venha do Cloud SQL e ainda não exista localmente
+                now = time.time()
+                conn.execute("""
+                    INSERT OR REPLACE INTO accounts (
+                        id, name, world_domain, world, domain, session_cookie,
+                        village_id, proxy, build_order_strategy, farm_presets, config_data,
+                        keep_alive, is_active, last_used, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    account_id, "Cloud Account", "pt117.tribalwars.com.pt", "pt117", "tribalwars.com.pt", "",
+                    None, None, "default_plan", "[]", cfg_json,
+                    1, 1, now, now
+                ))
             conn.commit()
-            return cursor.rowcount > 0
+            return True
 
     def save_account(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Cria ou atualiza um perfil de conta na base de dados."""
@@ -703,13 +742,22 @@ class AccountsDatabase:
         account_id = data.get("account_id") or None
         name = data.get("name") or "Novo Modelo de Tropas"
         
-        units = data.get("units", {})
-        batch_sizes = data.get("batch_sizes", {})
+        units = data.get("units") or {}
+        batch_sizes = data.get("batch_sizes") or {}
+
+        existing = self.get_recruitment_model(m_id)
+        if existing:
+            if not batch_sizes and existing.get("batch_sizes"):
+                batch_sizes = existing.get("batch_sizes")
+            if not units and existing.get("units"):
+                units = existing.get("units")
+            if "name" not in data and existing.get("name"):
+                name = existing.get("name")
 
         units_json = json.dumps(units) if isinstance(units, dict) else str(units)
         batch_sizes_json = json.dumps(batch_sizes) if isinstance(batch_sizes, dict) else str(batch_sizes)
-        is_default = 1 if data.get("is_default") else 0
-        created_at = float(data.get("created_at") or time.time())
+        is_default = 1 if (data.get("is_default") or (existing and existing.get("is_default"))) else 0
+        created_at = float(data.get("created_at") or (existing and existing.get("created_at")) or time.time())
 
         with self._get_connection() as conn:
             conn.execute("""

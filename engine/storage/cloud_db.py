@@ -28,14 +28,13 @@ from sqlalchemy import (
     JSON,
     LargeBinary,
     String,
+    Text,
     UniqueConstraint,
     select,
-    update,
     delete,
     text,
 )
 from engine.config.templates import DEFAULT_BUILD_TEMPLATES, DEFAULT_BUILD_TEMPLATE_IDS
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -232,6 +231,7 @@ class GameWorld(Base):
     game_account_id = Column(String(36), ForeignKey("game_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
     world_code = Column(String(20), nullable=False, index=True)
     is_active = Column(Boolean, nullable=False, default=True)
+    config_data = Column(Text, nullable=False, default="{}")
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
@@ -243,11 +243,18 @@ class GameWorld(Base):
     villages = relationship("Village", back_populates="game_world", cascade="all, delete-orphan")
 
     def to_dict(self) -> Dict[str, Any]:
+        cfg = {}
+        if self.config_data:
+            try:
+                cfg = json.loads(self.config_data)
+            except Exception:
+                cfg = {}
         return {
             "id": self.id,
             "game_account_id": self.game_account_id,
             "world_code": self.world_code,
             "is_active": self.is_active,
+            "config": cfg,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -391,18 +398,27 @@ class CloudDatabase:
                 await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
 
-            # Migração automática de colunas comerciais em app_users
+            # Migração automática de colunas comerciais em app_users e config_data em game_worlds
             if "postgresql" in self.raw_url:
                 try:
                     await conn.execute(text("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;"))
                     await conn.execute(text("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;"))
                     await conn.execute(text("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS max_accounts INTEGER NOT NULL DEFAULT 1;"))
                     await conn.execute(text("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS notes VARCHAR(500) NULL;"))
+                    await conn.execute(text("ALTER TABLE game_worlds ADD COLUMN IF NOT EXISTS config_data TEXT NOT NULL DEFAULT '{}';"))
                 except Exception as mig_err:
-                    logger.debug(f"[CloudDB] Aviso na migração de colunas comerciais: {mig_err}")
+                    logger.debug(f"[CloudDB] Aviso na migração de colunas: {mig_err}")
+            elif "sqlite" in self.raw_url:
+                try:
+                    res = await conn.execute(text("PRAGMA table_info(game_worlds);"))
+                    cols = [row[1] for row in res.fetchall()]
+                    if "config_data" not in cols:
+                        await conn.execute(text("ALTER TABLE game_worlds ADD COLUMN config_data TEXT NOT NULL DEFAULT '{}';"))
+                except Exception as mig_err:
+                    logger.debug(f"[CloudDB] Aviso na migração de colunas SQLite: {mig_err}")
 
         await self.build_template_repo.seed_defaults_if_needed()
-        logger.info("[CloudDB] Tabelas verificadas/criadas com sucesso no PostgreSQL.")
+        logger.info("[CloudDB] Tabelas verificadas/criadas com sucesso.")
 
     init_models = init_db
 
@@ -414,13 +430,12 @@ class CloudDatabase:
         except RuntimeError:
             current_loop = None
 
-        if hasattr(self, "_bound_loop") and self._bound_loop is not None and self._bound_loop.is_closed():
+        if "postgresql" in self.raw_url and hasattr(self, "_bound_loop") and self._bound_loop is not None and (
+            self._bound_loop.is_closed() or (current_loop is not None and current_loop is not self._bound_loop)
+        ):
             self.engine = self._build_engine(self.raw_url)
             self.session_factory = async_sessionmaker(bind=self.engine, expire_on_commit=False, class_=AsyncSession)
             self._bound_loop = current_loop
-            if "sqlite" in self.raw_url:
-                async with self.engine.begin() as conn:
-                    await conn.run_sync(Base.metadata.create_all)
         elif current_loop is not None and not getattr(self, "_bound_loop", None):
             self._bound_loop = current_loop
 
@@ -637,6 +652,48 @@ class GameAccountRepository:
         """Desencripta o cofre da conta retornando o dicionário original."""
         return self.vault.decrypt(account.credentials_vault)
 
+    async def save_account_config(self, account_id: str, config_data: Dict[str, Any]) -> bool:
+        """
+        Persiste as configurações agregadas à conta no cofre encriptado AES-256-GCM (Cloud SQL).
+        Efetua fusão profunda (deep merge) com as definições existentes no cofre.
+        """
+        async with self.db.get_session() as session:
+            res = await session.execute(select(GameAccount).where(GameAccount.id == account_id))
+            acc = res.scalar_one_or_none()
+            if not acc:
+                return False
+
+            creds = self.decrypt_credentials(acc)
+            if "config" not in creds or not isinstance(creds["config"], dict):
+                creds["config"] = {}
+
+            def _deep_merge(target: dict, source: dict) -> None:
+                for k, v in source.items():
+                    if isinstance(v, dict) and isinstance(target.get(k), dict):
+                        _deep_merge(target[k], v)
+                    else:
+                        target[k] = v
+
+            _deep_merge(creds["config"], config_data)
+            acc.credentials_vault = self.vault.encrypt(creds)
+            await session.flush()
+            return True
+
+    async def get_account_config(self, account_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Recupera as configurações do bot persistidas no cofre encriptado da conta.
+        Retorna None se a conta não existir ou não tiver configurações gravadas.
+        """
+        async with self.db.get_session() as session:
+            res = await session.execute(select(GameAccount).where(GameAccount.id == account_id))
+            acc = res.scalar_one_or_none()
+            if not acc:
+                return None
+
+            creds = self.decrypt_credentials(acc)
+            return creds.get("config")
+
+
 
 class GameWorldRepository:
     def __init__(self, db: CloudDatabase):
@@ -682,6 +739,76 @@ class GameWorldRepository:
                 await session.flush()
                 await session.refresh(gw)
             return gw
+
+    async def get_by_account_and_world(self, game_account_id: str, world_code: str) -> Optional[GameWorld]:
+        """Obtém o registo de um mundo específico para a conta."""
+        w_code = world_code.strip().lower()
+        async with self.db.get_session() as session:
+            res = await session.execute(
+                select(GameWorld).where(
+                    GameWorld.game_account_id == game_account_id,
+                    GameWorld.world_code == w_code,
+                )
+            )
+            return res.scalar_one_or_none()
+
+    async def save_world_config(self, game_account_id: str, world_code: str, config_data: Dict[str, Any]) -> bool:
+        """
+        Persiste as configurações de automação específicas de um mundo na base de dados Cloud SQL.
+        Aplica fusão profunda (deep merge) preservando definições existentes daquele mundo.
+        """
+        w_code = world_code.strip().lower()
+        async with self.db.get_session() as session:
+            res = await session.execute(
+                select(GameWorld).where(
+                    GameWorld.game_account_id == game_account_id,
+                    GameWorld.world_code == w_code,
+                )
+            )
+            gw = res.scalar_one_or_none()
+            if not gw:
+                gw = GameWorld(game_account_id=game_account_id, world_code=w_code, is_active=True, config_data="{}")
+                session.add(gw)
+                await session.flush()
+
+            current = {}
+            if gw.config_data:
+                try:
+                    current = json.loads(gw.config_data)
+                except Exception:
+                    current = {}
+
+            def _deep_merge(target: dict, source: dict) -> None:
+                for k, v in source.items():
+                    if isinstance(v, dict) and isinstance(target.get(k), dict):
+                        _deep_merge(target[k], v)
+                    else:
+                        target[k] = v
+
+            _deep_merge(current, config_data)
+            gw.config_data = json.dumps(current)
+            await session.flush()
+            return True
+
+    async def get_world_config(self, game_account_id: str, world_code: str) -> Optional[Dict[str, Any]]:
+        """
+        Recupera as configurações de automação persistidas para o mundo específico.
+        """
+        w_code = world_code.strip().lower()
+        async with self.db.get_session() as session:
+            res = await session.execute(
+                select(GameWorld).where(
+                    GameWorld.game_account_id == game_account_id,
+                    GameWorld.world_code == w_code,
+                )
+            )
+            gw = res.scalar_one_or_none()
+            if not gw or not gw.config_data:
+                return None
+            try:
+                return json.loads(gw.config_data)
+            except Exception:
+                return None
 
 
 class VillageRepository:

@@ -24,7 +24,7 @@
       <div class="brand-section">
         <div class="brand-logo">⚔</div>
         <div class="brand-text">
-          <h1>TribalWars Bot <span class="version-tag">v2.0 HUD</span></h1>
+          <h1>TribalWars Bot <span class="version-tag">v1.2 HUD</span></h1>
         </div>
       </div>
 
@@ -213,6 +213,9 @@
           </div>
         </div>
         <div id="cloud-auth-actions" style="display: flex; gap: 10px;">
+          <button class="btn btn-primary btn-sm" id="btn-open-cloud-auth" onclick="openCloudAuthModal('login')" style="display: none; align-items: center; gap: 6px; padding: 6px 14px; font-weight: 600;">
+            <span>☁️</span> Iniciar Sessão / Registar
+          </button>
           <button class="btn btn-danger btn-sm" id="btn-cloud-logout" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; font-weight: 600;">
             <span>🚪</span> Terminar Sessão da App
           </button>
@@ -835,12 +838,12 @@
             </div>
           </div>
 
-          <!-- Card: Comparativo de Tropas na Aldeia vs Meta do Modelo -->
+          <!-- Card: Comparativo de Tropas da Aldeia vs Meta do Modelo -->
           <div class="card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-glass); border-radius: var(--radius-md); padding: 16px 20px;">
             <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span class="icon" style="font-size: 1.2rem;">📊</span>
-                <span style="font-weight: 700; font-size: 0.95rem;">Tropas na Aldeia vs Meta do Modelo Selecionado</span>
+                <span style="font-weight: 700; font-size: 0.95rem;">Tropas da Aldeia (Total) vs Meta a Atingir</span>
               </div>
               <span id="rec-active-village-model-name" class="badge" style="background: rgba(168,85,247,0.2); color: #c084fc; font-weight: 700; border: 1px solid rgba(168,85,247,0.4);">Modelo: Ataque Full</span>
             </div>
@@ -2776,51 +2779,45 @@
       <!-- Panel 5: Configurações Globais -->
       <main class="tab-content" id="tab-settings">
         <div class="glass-card" style="max-width: 900px; margin: 0 auto">
-          <div class="card-header">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
             <div class="card-title">
-              <span class="icon">⚙</span> Configurações do Bot (Definições da Conta)
+              <span class="icon">⚙</span> Configurações do Mundo: <span id="cfg-active-world-title" style="color: var(--neon-cyan); font-family: var(--font-mono); font-weight: 700;">PT117</span>
+            </div>
+            <div id="cfg-account-context-badge" class="badge" style="background: rgba(14, 165, 233, 0.15); border: 1px solid rgba(14, 165, 233, 0.4); color: var(--neon-cyan); padding: 4px 10px; border-radius: 6px; font-size: 0.8rem;">
+              <span>👤 Conta:</span> <strong id="cfg-account-username-text">--</strong>
             </div>
           </div>
 
           <form id="settings-form">
-            <div class="settings-section">
-              <h3>Autenticação & Sessão</h3>
+            <!-- 1. Conexão do Mundo & Sessão -->
+            <div class="settings-section" style="background: rgba(15, 23, 42, 0.35); border: 1px solid var(--border-glass); border-radius: 8px; padding: 14px; margin-bottom: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <h3 style="margin: 0; font-size: 0.95rem; display: flex; align-items: center; gap: 6px; color: var(--text-primary);">
+                  <span>🌐</span> Conexão do Mundo & Sessão
+                </h3>
+                <button type="button" id="cfg-link-manage-accounts" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 4px 10px; border-color: rgba(6,182,212,0.4); color: var(--neon-cyan); cursor: pointer;">
+                  <span>🔑</span> Gestão de Contas (Auto-Login)
+                </button>
+              </div>
+              <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 12px;">
+                As credenciais e auto-login são geridos ao nível da conta na <strong style="color: var(--neon-cyan);">Gestão de Contas</strong>. As definições abaixo aplicam-se única e exclusivamente ao mundo <strong id="cfg-info-world-badge" style="color: var(--neon-cyan);">PT117</strong>.
+              </p>
               <div class="form-grid">
                 <div class="form-group">
-                  <label for="cfg-world">Mundo do Jogo</label>
-                  <input type="text" id="cfg-world" class="form-control" list="common-worlds-list" value="pt117">
-                  <datalist id="common-worlds-list">
-                    <option value="pt114">Mundo 114 (pt114)</option>
-                    <option value="pt115">Mundo 115 (pt115)</option>
-                    <option value="pt116">Mundo 116 (pt116)</option>
-                    <option value="pt117">Mundo 117 (pt117)</option>
-                    <option value="pt118">Mundo 118 (pt118)</option>
-                  </datalist>
+                  <label for="cfg-world">Mundo em Configuração</label>
+                  <input type="text" id="cfg-world" class="form-control" value="pt117" readonly style="opacity: 0.9; cursor: not-allowed; font-weight: 600;">
                 </div>
                 <div class="form-group">
-                  <label for="cfg-sid">Cookie de Sessão (sid)</label>
+                  <label for="cfg-sid">Cookie de Sessão Ativo (sid)</label>
                   <input type="password" id="cfg-sid" class="form-control" placeholder="Cole o cookie sid aqui...">
                 </div>
                 <div class="form-group">
-                  <label for="cfg-username">Utilizador Tribal Wars</label>
-                  <input type="text" id="cfg-username" class="form-control" placeholder="Opcional para auto-login">
-                </div>
-                <div class="form-group">
-                  <label for="cfg-password">Password</label>
-                  <input type="password" id="cfg-password" class="form-control" placeholder="Opcional para auto-login">
-                </div>
-                <div class="form-group">
-                  <label for="cfg-proxy">Proxy Residencial / Dedicado</label>
+                  <label for="cfg-proxy">Proxy Dedicado / Residencial</label>
                   <div style="display: flex; gap: 6px;">
                     <input type="text" id="cfg-proxy" class="form-control" placeholder="http://user:pass@ip:port ou socks5://...">
                     <button type="button" id="btn-test-proxy" class="btn btn-secondary" style="white-space: nowrap; padding: 6px 12px; font-size: 0.8rem;">Testar</button>
                   </div>
                   <span id="proxy-test-result" style="font-size: 0.75rem; margin-top: 4px; display: block;"></span>
-                </div>
-                <div class="form-group" style="display: flex; align-items: center; gap: 8px; margin-top: 15px">
-
-                  <input type="checkbox" id="cfg-auto-login" style="accent-color: var(--neon-cyan)">
-                  <label for="cfg-auto-login" style="margin: 0; cursor: pointer">Ativar Auto-Login ao expirar</label>
                 </div>
                 <div class="form-group" style="display: flex; align-items: center; gap: 8px; margin-top: 15px">
                   <input type="checkbox" id="cfg-keep-alive" checked style="accent-color: var(--neon-emerald)">
@@ -2829,10 +2826,10 @@
               </div>
             </div>
 
-
-            <div class="settings-section">
+            <!-- 2. Ritmo Operacional & Anti-Timeout -->
+            <div class="settings-section" style="background: rgba(15, 23, 42, 0.35); border: 1px solid var(--border-glass); border-radius: 8px; padding: 14px; margin-bottom: 20px;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
-                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 0.95rem;">
                   <span>⏱️</span> Ritmo Operacional & Prevenção de Bloqueios (Anti-Timeout)
                 </h3>
                 <div class="preset-pill-group" style="display: flex; gap: 6px; flex-wrap: wrap;">
@@ -2874,8 +2871,17 @@
               </div>
             </div>
 
-            <div class="settings-section">
-              <h3>Edifício Principal (Auto-Build)</h3>
+            <!-- 3. Edifício Principal (Auto-Build) -->
+            <div class="settings-section" style="background: rgba(15, 23, 42, 0.35); border: 1px solid var(--border-glass); border-radius: 8px; padding: 14px; margin-bottom: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 0.95rem;">
+                  <span>🔨</span> Edifício Principal (Auto-Build)
+                </h3>
+                <label style="display: flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--neon-cyan);">
+                  <input type="checkbox" id="cfg-building-enabled" checked style="accent-color: var(--neon-cyan)">
+                  Ativar Construção Automática
+                </label>
+              </div>
               <div class="form-grid">
                 <div class="form-group">
                   <label for="cfg-building-template">Template de Construção</label>
@@ -2887,6 +2893,7 @@
                 <div class="form-group">
                   <label for="cfg-max-queue">Limite Máximo da Fila</label>
                   <input type="number" id="cfg-max-queue" class="form-control" min="1" max="5" value="2">
+                  <small style="color: var(--neon-amber); display: block; font-size: 0.72rem; margin-top: 4px;">⚠️ Máx. 2 sem Conta Premium (3 a 5 com CP)</small>
                 </div>
                 <div class="form-group">
                   <label for="cfg-build-interval">Intervalo Entre Ciclos (Segundos)</label>
@@ -2895,9 +2902,153 @@
               </div>
             </div>
 
-            <div style="display: flex; justify-content: flex-end; margin-top: 10px">
-              <button type="submit" class="btn btn-primary" id="btn-save-settings" style="padding: 10px 24px">
-                 💾 Gravar Configurações
+            <!-- 4. Assistente de Saque & Micro-Farming -->
+            <div class="settings-section" style="background: rgba(15, 23, 42, 0.35); border: 1px solid var(--border-glass); border-radius: 8px; padding: 14px; margin-bottom: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 0.95rem;">
+                  <span>⚔️</span> Assistente de Saque & Micro-Farming (Farm)
+                </h3>
+                <label style="display: flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--neon-cyan);">
+                  <input type="checkbox" id="cfg-farm-enabled" checked style="accent-color: var(--neon-cyan)">
+                  Ativar Farm Automático
+                </label>
+              </div>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label for="cfg-farm-mode">Modo Operacional de Farm</label>
+                  <select id="cfg-farm-mode" class="form-control">
+                    <option value="am_farm">Assistente de Saque (AM Farm - Recomendado)</option>
+                    <option value="place">Praça de Reunião Direta</option>
+                    <option value="radar">Radar de Bárbaras em Expansão</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="cfg-farm-template">Modelo Predefinido (Template)</label>
+                  <select id="cfg-farm-template" class="form-control">
+                    <option value="A">Modelo A</option>
+                    <option value="B">Modelo B</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="cfg-farm-max-distance">Raio Máximo de Farm (Campos)</label>
+                  <input type="number" id="cfg-farm-max-distance" class="form-control" min="5" max="100" step="0.5" value="25.0">
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 12px; font-size: 0.82rem;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-farm-scan-all" checked style="accent-color: var(--neon-emerald)">
+                  Atacar todas as bárbaras no raio
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-farm-avoid-concurrent" checked style="accent-color: var(--neon-emerald)">
+                  Evitar múltiplos ataques ao mesmo alvo
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-farm-stop-losses" checked style="accent-color: var(--neon-emerald)">
+                  Ignorar bárbaras com perdas (amarelas/vermelhas)
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-farm-skip-wall" checked style="accent-color: var(--neon-emerald)">
+                  Ignorar aldeias com muralha > 0
+                </label>
+              </div>
+            </div>
+
+            <!-- 5. Recrutamento Automático -->
+            <div class="settings-section" style="background: rgba(15, 23, 42, 0.35); border: 1px solid var(--border-glass); border-radius: 8px; padding: 14px; margin-bottom: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 0.95rem;">
+                  <span>🪖</span> Recrutamento Automático de Tropas
+                </h3>
+                <label style="display: flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--neon-cyan);">
+                  <input type="checkbox" id="cfg-recruitment-enabled" checked style="accent-color: var(--neon-cyan)">
+                  Ativar Recrutamento Automático
+                </label>
+              </div>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label for="cfg-rec-interval">Intervalo Entre Ciclos (Segundos)</label>
+                  <input type="number" id="cfg-rec-interval" class="form-control" min="30" max="600" value="120">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-rec-reserve">Reserva Mínima de Recursos (M/A/F)</label>
+                  <input type="number" id="cfg-rec-reserve" class="form-control" min="0" max="50000" value="500">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-rec-max-queue">Limite Máximo da Fila de Treino</label>
+                  <input type="number" id="cfg-rec-max-queue" class="form-control" min="1" max="10" value="3">
+                  <small style="color: var(--text-muted); display: block; font-size: 0.72rem; margin-top: 4px;">Máx. de ordens simultâneas por edifício militar (padrão: 3)</small>
+                </div>
+                <div class="form-group">
+                  <label for="cfg-rec-min-pop">População Livre Mínima</label>
+                  <input type="number" id="cfg-rec-min-pop" class="form-control" min="0" max="500" value="5">
+                  <small style="color: var(--text-muted); display: block; font-size: 0.72rem; margin-top: 4px;">Reserva mínima de vagas na fazenda para outros edifícios</small>
+                </div>
+              </div>
+            </div>
+
+            <!-- 6. Defesa, Alarme & Auto-Dodge -->
+            <div class="settings-section" style="background: rgba(15, 23, 42, 0.35); border: 1px solid var(--border-glass); border-radius: 8px; padding: 14px; margin-bottom: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 0.95rem;">
+                  <span>🛡️</span> Defesa, Alarme & Auto-Dodge
+                </h3>
+                <label style="display: flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--neon-cyan);">
+                  <input type="checkbox" id="cfg-defense-enabled" checked style="accent-color: var(--neon-cyan)">
+                  Ativar Módulo de Defesa
+                </label>
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; font-size: 0.82rem;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-defense-auto-dodge" checked style="accent-color: var(--neon-emerald)">
+                  Auto-Dodge (Desviar tropas em caso de ataque)
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-defense-dodge-cancel" checked style="accent-color: var(--neon-emerald)">
+                  Cancelar desvio para retorno imediato pós-ataque
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-defense-alert-sound" checked style="accent-color: var(--neon-emerald)">
+                  Alarme sonoro ao detetar novo ataque
+                </label>
+              </div>
+            </div>
+
+            <!-- 7. Coleta de Recursos, Moedas & Mercado -->
+            <div class="settings-section" style="background: rgba(15, 23, 42, 0.35); border: 1px solid var(--border-glass); border-radius: 8px; padding: 14px; margin-bottom: 20px;">
+              <h3 style="margin: 0 0 10px 0; display: flex; align-items: center; gap: 8px; font-size: 0.95rem;">
+                <span>🌾</span> Coleta de Recursos (Scavenge), Moedas & Mercado
+              </h3>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; font-size: 0.82rem; margin-bottom: 12px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-scavenge-enabled" checked style="accent-color: var(--neon-emerald)">
+                  Ativar Coleta Automática (Scavenging)
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-scavenge-unlock" checked style="accent-color: var(--neon-emerald)">
+                  Desbloquear categorias de coleta automaticamente
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-snob-mint" style="accent-color: var(--neon-emerald)">
+                  Cunhagem Automática de Moedas (Academia)
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfg-market-enabled" checked style="accent-color: var(--neon-emerald)">
+                  Ativar Mercado & Arbitragem Económica
+                </label>
+              </div>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label for="cfg-snob-reserve">Reserva de Recursos para Moedas (Madeira/Argila/Ferro)</label>
+                  <input type="number" id="cfg-snob-reserve" class="form-control" min="0" max="200000" value="30000">
+                </div>
+              </div>
+            </div>
+
+            <!-- Botão de Gravar -->
+            <div style="display: flex; justify-content: flex-end; margin-top: 15px; padding-bottom: 25px;">
+              <button type="submit" class="btn btn-primary" id="btn-save-settings" style="padding: 12px 30px; font-weight: 700; font-size: 0.95rem; box-shadow: 0 4px 14px rgba(6,182,212,0.35);">
+                 💾 Gravar Configurações do Mundo
               </button>
             </div>
           </form>

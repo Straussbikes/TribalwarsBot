@@ -600,6 +600,85 @@ class TestMainBuildingBugFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(queue[0]["timer_seconds"], 135)
         self.assertIsNotNone(queue[0]["instant_build_url"])
 
+    async def test_build_building_does_not_falsely_confirm_when_queue_full_or_item_not_added(self):
+        """Valida que uma ordem não confirmada na fila retorna False mesmo que existam outros itens na fila."""
+        from engine.core.account import TribalAccount
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.csrf_token = "csrf_token_abc"
+
+        # HTML com 2 ordens existentes: Main lvl 11 e Wood lvl 10
+        queue_existing_html = """
+        <table id="buildqueue">
+            <tr>
+                <td>Edifício Principal (Nível 11)</td>
+                <td><span class="timer">0:45:00</span></td>
+                <td><a href="/game.php?action=cancel&id=1001">cancelar</a></td>
+            </tr>
+            <tr>
+                <td>Bosque (Nível 10)</td>
+                <td><span class="timer">0:30:00</span></td>
+                <td><a href="/game.php?action=cancel&id=1002">cancelar</a></td>
+            </tr>
+        </table>
+        """
+        account.get_screen = AsyncMock(return_value=queue_existing_html)
+        account.post_action = AsyncMock(return_value=queue_existing_html)
+
+        manager = MainBuildingManager()
+        # Tentativa de colocar Edifício Principal Nível 12 (não entrou na fila, queue continuou com tamanho 2)
+        success = await manager.build_building(
+            account=account,
+            building="main",
+            village_id=12345,
+            target_level=12,
+            initial_queue_count=2,
+        )
+
+        self.assertFalse(success)
+
+    async def test_run_auto_build_cycle_stops_when_queue_does_not_grow(self):
+        """Valida que o ciclo de construção encerra e não entra em loop infinito quando a fila não aumenta."""
+        from engine.core.account import TribalAccount
+
+        account = TribalAccount(world="pt117", sid="test_sid")
+        account.csrf_token = "csrf_token_abc"
+        account.resources = Resources(wood=10000, stone=10000, iron=10000, pop=0, pop_max=100)
+
+        # Retorna sempre Edifício Principal com nível 11 e fila cheia (2 itens)
+        screen_html = """
+        <table id="buildqueue">
+            <tr>
+                <td>Edifício Principal (Nível 11)</td>
+                <td><span class="timer">0:45:00</span></td>
+                <td><a href="/game.php?action=cancel&id=1001">cancelar</a></td>
+            </tr>
+            <tr>
+                <td>Bosque (Nível 10)</td>
+                <td><span class="timer">0:30:00</span></td>
+                <td><a href="/game.php?action=cancel&id=1002">cancelar</a></td>
+            </tr>
+        </table>
+        <table id="buildings">
+            <tr id="main_buildrow_main">
+                <td><a href="/game.php?screen=main">Edifício Principal</a></td>
+                <td>11</td>
+            </tr>
+        </table>
+        """
+        account.get_screen = AsyncMock(return_value=screen_html)
+
+        manager = MainBuildingManager()
+        plan = [("main", 12), ("main", 13)]
+        # max_queue=2: como state.queue_count já é 2, o while state.queue_count < limit nem sequer avança
+        built = await manager.run_auto_build_cycle(
+            account=account,
+            plan=plan,
+            max_queue=2,
+            village_id=12345,
+        )
+        self.assertIsNone(built)
+
 
 if __name__ == "__main__":
     unittest.main()

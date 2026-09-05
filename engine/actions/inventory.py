@@ -5,7 +5,7 @@ Módulo responsável por:
 2. Ativação manual e segura de bónus e consumíveis (sob confirmação explícita do utilizador).
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import logging
 import time
 from typing import Any, Dict, List, Optional

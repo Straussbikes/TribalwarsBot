@@ -32,10 +32,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     statusText: document.getElementById("status-text"),
     btnToggleScheduler: document.getElementById("btn-toggle-scheduler"),
     btnLogout: document.getElementById("btn-logout"),
-    btnRenewSession: document.getElementById("btn-renew-session"),
-    btnBuildNow: document.getElementById("btn-build-now"),
-    btnFarmNow: document.getElementById("btn-farm-now"),
-    btnRecruitNow: document.getElementById("btn-recruit-now"),
 
     // Village Card
     villageName: document.getElementById("village-name"),
@@ -76,7 +72,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     mapRadius: document.getElementById("map-radius"),
     btnMapMyVillage: document.getElementById("btn-map-my-village"),
     btnMapScan: document.getElementById("btn-map-scan"),
-    btnMapFarmNearby: document.getElementById("btn-map-farm-nearby"),
     btnRefreshBarbs: document.getElementById("btn-refresh-barbs"),
     tacticalMapCanvas: document.getElementById("tactical-map-canvas"),
     mapTooltip: document.getElementById("map-tooltip"),
@@ -100,7 +95,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     selectedVillageDist: document.getElementById("selected-village-dist"),
     selectedVillagePts: document.getElementById("selected-village-pts"),
     selectedVillagePlayer: document.getElementById("selected-village-player"),
-    btnSelectedAttack: document.getElementById("btn-selected-attack"),
     btnSelectedCenter: document.getElementById("btn-selected-center"),
     btnSelectedCopy: document.getElementById("btn-selected-copy"),
     // Terminal
@@ -207,7 +201,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     bldAutoToggle: document.getElementById("bld-auto-toggle"),
     bldBadgeStatus: document.getElementById("bld-badge-status"),
     bldIntervalSeconds: document.getElementById("bld-interval-seconds"),
-    bldTemplateBadge: document.getElementById("bld-template-badge"),
     bldTemplateSelect: document.getElementById("bld-template-select"),
     btnManageBuildingTemplates: document.getElementById("btn-manage-building-templates"),
     buildingTemplateModal: document.getElementById("building-template-modal"),
@@ -244,7 +237,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     bldVillageLevelsGrid: document.getElementById("bld-village-levels-grid"),
 
     // Recrutamento & Modelos de Tropas
-    btnRefreshRecTab: document.getElementById("btn-refresh-rec-tab"),
     recActiveQueueBadge: document.getElementById("rec-active-queue-badge"),
     recActiveQueueContainer: document.getElementById("rec-active-queue-container"),
     btnCloneRecModel: document.getElementById("btn-clone-rec-model"),
@@ -253,7 +245,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     marketToggleEnabled: document.getElementById("market-toggle-enabled"),
     marketToggleLabel: document.getElementById("market-toggle-label"),
     marketToggleAutobalance: document.getElementById("market-toggle-autobalance"),
-    marketAutobalanceLabel: document.getElementById("market-autobalance-label"),
     marketDisabledAlert: document.getElementById("market-disabled-alert"),
 
     // Painel de Estatísticas & Rendimento
@@ -522,7 +513,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     } else {
       addLogEntry("INFO", "farm", msg);
     }
-    const farmTab = document.getElementById("tab-farm");
+    const farmTab = document.getElementById("tab-farm-assistant") || document.getElementById("tab-farm");
     if (farmTab && farmTab.classList.contains("active")) {
       loadAmFarmView().catch(() => {});
     }
@@ -1475,6 +1466,7 @@ document.addEventListener("DOMContentLoaded", async () => {
               addLogEntry("SUCCESS", "orchestrator", res.message || `Mundo ${targetWorld.toUpperCase()} ativado.`);
               const status = await window.api.getStatus();
               updateDashboard(status);
+              loadSettingsIntoForm(targetWorld);
             } else {
               const errMsg = (res && res.message) ? res.message : `Falha ao mudar para o mundo ${targetWorld}`;
               addLogEntry("ERROR", "orchestrator", errMsg);
@@ -1527,6 +1519,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             }
             const status = await window.api.getStatus();
             updateDashboard(status);
+            loadSettingsIntoForm(targetWorld);
           } catch (err) {
             console.error("Erro ao alternar mundo:", err);
             addLogEntry("ERROR", "orchestrator", `Falha ao mudar para o mundo ${targetWorld}: ${err.message}`);
@@ -2164,6 +2157,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   if (elements.btnSwitchAccount) {
     elements.btnSwitchAccount.addEventListener("click", () => {
+      showAccountHub();
+    });
+  }
+
+  const cfgLinkAccounts = document.getElementById("cfg-link-manage-accounts");
+  if (cfgLinkAccounts) {
+    cfgLinkAccounts.addEventListener("click", (e) => {
+      e.preventDefault();
       showAccountHub();
     });
   }
@@ -4583,22 +4584,53 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   };
 
-  async function loadSettingsIntoForm() {
+  async function loadSettingsIntoForm(worldOverride) {
     try {
-      const config = await window.api.getConfig();
+      const config = await window.api.getConfig(worldOverride);
       if (!config) return;
 
-      document.getElementById("cfg-world").value = config.world || "pt117";
-      document.getElementById("cfg-sid").value = config.sid || "";
-      if (document.getElementById("cfg-proxy")) {
-        document.getElementById("cfg-proxy").value = config.proxy || "";
+      const activeW = (config.world || worldOverride || "pt117").toUpperCase();
+      const elTitle = document.getElementById("cfg-active-world-title");
+      if (elTitle) elTitle.textContent = activeW;
+      const elInfo = document.getElementById("cfg-info-world-badge");
+      if (elInfo) elInfo.textContent = activeW;
+
+      const elUser = document.getElementById("cfg-account-username-text");
+      if (elUser) {
+        elUser.textContent = config.auth?.username || "Conta Ativa";
       }
+
+      const elWorldInput = document.getElementById("cfg-world");
+      if (elWorldInput) elWorldInput.value = (config.world || worldOverride || "pt117").toLowerCase();
+
+      const elSid = document.getElementById("cfg-sid");
+      if (elSid) elSid.value = config.sid || "";
+
+      const elProxy = document.getElementById("cfg-proxy");
+      if (elProxy) elProxy.value = config.proxy || "";
+
       if (config.auth) {
-        document.getElementById("cfg-username").value = config.auth.username || "";
-        document.getElementById("cfg-auto-login").checked = !!config.auth.auto_login;
-        document.getElementById("cfg-keep-alive").checked = config.auth.keep_alive !== false;
+        const elKa = document.getElementById("cfg-keep-alive");
+        if (elKa) elKa.checked = config.auth.keep_alive !== false;
       }
       if (config.farm) {
+        const fEnabled = document.getElementById("cfg-farm-enabled");
+        if (fEnabled) fEnabled.checked = config.farm.enabled !== false;
+        const fMode = document.getElementById("cfg-farm-mode");
+        if (fMode) fMode.value = config.farm.mode || "am_farm";
+        const fTmpl = document.getElementById("cfg-farm-template");
+        if (fTmpl) fTmpl.value = config.farm.template || config.farm.default_template || "A";
+        const fDist = document.getElementById("cfg-farm-max-distance");
+        if (fDist) fDist.value = config.farm.max_distance || 25.0;
+        const fScan = document.getElementById("cfg-farm-scan-all");
+        if (fScan) fScan.checked = config.farm.scan_all_radius_barbarians !== false;
+        const fAvoid = document.getElementById("cfg-farm-avoid-concurrent");
+        if (fAvoid) fAvoid.checked = config.farm.avoid_concurrent_attacks !== false;
+        const fStop = document.getElementById("cfg-farm-stop-losses");
+        if (fStop) fStop.checked = config.farm.stop_on_losses !== false;
+        const fWall = document.getElementById("cfg-farm-skip-wall");
+        if (fWall) fWall.checked = config.farm.skip_wall !== false;
+
         const fMin = document.getElementById("cfg-farm-min-interval");
         if (fMin) fMin.value = config.farm.min_interval_seconds || 120;
         const fMax = document.getElementById("cfg-farm-max-interval");
@@ -4609,13 +4641,57 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (dMax) dMax.value = config.farm.max_delay_per_attack_ms || 1100;
       }
       if (config.defense) {
+        const dEnabled = document.getElementById("cfg-defense-enabled");
+        if (dEnabled) dEnabled.checked = config.defense.enabled !== false;
+        const dDodge = document.getElementById("cfg-defense-auto-dodge");
+        if (dDodge) dDodge.checked = Boolean(config.defense.auto_dodge_enabled);
+        const dCancel = document.getElementById("cfg-defense-dodge-cancel");
+        if (dCancel) dCancel.checked = config.defense.dodge_return_cancel !== false;
+        const dSound = document.getElementById("cfg-defense-alert-sound");
+        if (dSound) dSound.checked = config.defense.alert_sound !== false;
         const dInt = document.getElementById("cfg-defense-interval");
-        if (dInt) dInt.value = config.defense.check_interval_seconds || 45;
+        if (dInt) dInt.value = config.defense.check_interval_seconds || config.defense.incoming_poll_interval || 45;
       }
       if (config.building) {
-        document.getElementById("cfg-building-template").value = config.building.template || "default_plan";
-        document.getElementById("cfg-max-queue").value = config.building.max_queue || 2;
-        document.getElementById("cfg-build-interval").value = config.building.interval_seconds || 75;
+        const bEnabled = document.getElementById("cfg-building-enabled");
+        if (bEnabled) bEnabled.checked = config.building.enabled !== false;
+        const bTmpl = document.getElementById("cfg-building-template");
+        if (bTmpl) bTmpl.value = config.building.template || "default_plan";
+        const bQueue = document.getElementById("cfg-max-queue");
+        if (bQueue) bQueue.value = config.building.max_queue || 2;
+        const bInt = document.getElementById("cfg-build-interval");
+        if (bInt) bInt.value = config.building.interval_seconds || 75;
+      }
+      if (config.recruitment) {
+        const rEnabled = document.getElementById("cfg-recruitment-enabled");
+        if (rEnabled) rEnabled.checked = config.recruitment.enabled !== false;
+        const rInt = document.getElementById("cfg-rec-interval");
+        if (rInt) {
+          const recSec = config.recruitment.interval_seconds ?? (config.recruitment.interval_minutes != null ? Math.round(config.recruitment.interval_minutes * 60) : 120);
+          rInt.value = recSec;
+        }
+        const rRes = document.getElementById("cfg-rec-reserve");
+        if (rRes) rRes.value = config.recruitment.min_reserve_resources ?? 500;
+        const rMaxQ = document.getElementById("cfg-rec-max-queue");
+        if (rMaxQ) rMaxQ.value = config.recruitment.max_queue_elements ?? 3;
+        const rMinPop = document.getElementById("cfg-rec-min-pop");
+        if (rMinPop) rMinPop.value = config.recruitment.min_free_pop ?? 5;
+      }
+      if (config.scavenge) {
+        const scEnabled = document.getElementById("cfg-scavenge-enabled");
+        if (scEnabled) scEnabled.checked = config.scavenge.enabled !== false;
+        const scUnlock = document.getElementById("cfg-scavenge-unlock");
+        if (scUnlock) scUnlock.checked = config.scavenge.unlock_categories_automatically !== false;
+      }
+      if (config.snob) {
+        const snMint = document.getElementById("cfg-snob-mint");
+        if (snMint) snMint.checked = Boolean(config.snob.mint_coins_enabled);
+        const snRes = document.getElementById("cfg-snob-reserve");
+        if (snRes) snRes.value = config.snob.reserve_resources || 30000;
+      }
+      if (config.market) {
+        const mEnabled = document.getElementById("cfg-market-enabled");
+        if (mEnabled) mEnabled.checked = config.market.enabled !== false;
       }
     } catch (e) {
       console.warn("Falha ao carregar configurações:", e);
@@ -4625,42 +4701,92 @@ document.addEventListener("DOMContentLoaded", async () => {
   elements.btnSaveSettings?.addEventListener("click", async (e) => {
     e.preventDefault();
     try {
-      const pwdVal = document.getElementById("cfg-password").value.trim();
+      const targetWorld = (document.getElementById("cfg-world")?.value || "pt117").trim().toLowerCase();
+      const sidVal = document.getElementById("cfg-sid")?.value.trim() || "";
       const proxyVal = document.getElementById("cfg-proxy") ? document.getElementById("cfg-proxy").value.trim() : "";
+      const keepAliveChecked = document.getElementById("cfg-keep-alive") ? document.getElementById("cfg-keep-alive").checked : true;
+
       const farmPayload = {
+        enabled: document.getElementById("cfg-farm-enabled") ? document.getElementById("cfg-farm-enabled").checked : true,
+        mode: document.getElementById("cfg-farm-mode")?.value || "am_farm",
+        template: document.getElementById("cfg-farm-template")?.value || "A",
+        default_template: document.getElementById("cfg-farm-template")?.value || "A",
+        max_distance: parseFloat(document.getElementById("cfg-farm-max-distance")?.value || "25.0"),
+        scan_all_radius_barbarians: document.getElementById("cfg-farm-scan-all") ? document.getElementById("cfg-farm-scan-all").checked : true,
+        avoid_concurrent_attacks: document.getElementById("cfg-farm-avoid-concurrent") ? document.getElementById("cfg-farm-avoid-concurrent").checked : true,
+        stop_on_losses: document.getElementById("cfg-farm-stop-losses") ? document.getElementById("cfg-farm-stop-losses").checked : true,
+        skip_wall: document.getElementById("cfg-farm-skip-wall") ? document.getElementById("cfg-farm-skip-wall").checked : true,
         min_interval_seconds: parseFloat(document.getElementById("cfg-farm-min-interval")?.value || "120"),
         max_interval_seconds: parseFloat(document.getElementById("cfg-farm-max-interval")?.value || "240"),
         min_delay_per_attack_ms: parseInt(document.getElementById("cfg-farm-min-delay")?.value || "500", 10),
         max_delay_per_attack_ms: parseInt(document.getElementById("cfg-farm-max-delay")?.value || "1100", 10),
       };
       const defPayload = {
+        enabled: document.getElementById("cfg-defense-enabled") ? document.getElementById("cfg-defense-enabled").checked : true,
+        auto_dodge_enabled: document.getElementById("cfg-defense-auto-dodge") ? document.getElementById("cfg-defense-auto-dodge").checked : true,
+        dodge_return_cancel: document.getElementById("cfg-defense-dodge-cancel") ? document.getElementById("cfg-defense-dodge-cancel").checked : true,
+        alert_sound: document.getElementById("cfg-defense-alert-sound") ? document.getElementById("cfg-defense-alert-sound").checked : true,
         check_interval_seconds: parseFloat(document.getElementById("cfg-defense-interval")?.value || "45"),
+        incoming_poll_interval: parseFloat(document.getElementById("cfg-defense-interval")?.value || "45"),
       };
+      const buildingPayload = {
+        enabled: document.getElementById("cfg-building-enabled") ? document.getElementById("cfg-building-enabled").checked : true,
+        template: document.getElementById("cfg-building-template")?.value || "default_plan",
+        max_queue: parseInt(document.getElementById("cfg-max-queue")?.value || "2", 10),
+        interval_seconds: parseFloat(document.getElementById("cfg-build-interval")?.value || "75"),
+      };
+      const recIntervalSec = parseFloat(document.getElementById("cfg-rec-interval")?.value || "120");
+      const recPayload = {
+        enabled: document.getElementById("cfg-recruitment-enabled") ? document.getElementById("cfg-recruitment-enabled").checked : true,
+        interval_seconds: recIntervalSec,
+        interval_minutes: recIntervalSec / 60.0,
+        min_reserve_resources: parseInt(document.getElementById("cfg-rec-reserve")?.value || "500", 10),
+      };
+      if (state.recruitmentModels && Object.keys(state.recruitmentModels).length > 0) {
+        recPayload.models = state.recruitmentModels;
+      }
+      if (state.recruitmentBatchSizes && Object.keys(state.recruitmentBatchSizes).length > 0) {
+        recPayload.batch_sizes = state.recruitmentBatchSizes[state.activeRecModelTab || "attack"] || state.recruitmentBatchSizes["attack"] || state.recruitmentBatchSizes;
+      }
+      const recMaxQueueEl = document.getElementById("cfg-rec-max-queue") || document.getElementById("rec-max-queue");
+      if (recMaxQueueEl) {
+        recPayload.max_queue_elements = parseInt(recMaxQueueEl.value, 10);
+      }
+      const recMinPopEl = document.getElementById("cfg-rec-min-pop") || document.getElementById("rec-min-free-pop");
+      if (recMinPopEl) {
+        recPayload.min_free_pop = parseInt(recMinPopEl.value, 10);
+      }
+      const scavPayload = {
+        enabled: document.getElementById("cfg-scavenge-enabled") ? document.getElementById("cfg-scavenge-enabled").checked : true,
+        unlock_categories_automatically: document.getElementById("cfg-scavenge-unlock") ? document.getElementById("cfg-scavenge-unlock").checked : true,
+      };
+      const snobPayload = {
+        mint_coins_enabled: document.getElementById("cfg-snob-mint") ? document.getElementById("cfg-snob-mint").checked : false,
+        reserve_resources: parseInt(document.getElementById("cfg-snob-reserve")?.value || "30000", 10),
+      };
+      const marketPayload = {
+        enabled: document.getElementById("cfg-market-enabled") ? document.getElementById("cfg-market-enabled").checked : true,
+      };
+
       const payload = {
-        world: document.getElementById("cfg-world").value.trim(),
-        sid: document.getElementById("cfg-sid").value.trim(),
+        world: targetWorld,
+        sid: sidVal,
         proxy: proxyVal || null,
         auth: {
-          username: document.getElementById("cfg-username").value.trim(),
-          auto_login: document.getElementById("cfg-auto-login").checked,
-          keep_alive: document.getElementById("cfg-keep-alive").checked,
+          keep_alive: keepAliveChecked,
         },
         farm: farmPayload,
         defense: defPayload,
-        building: {
-          template: document.getElementById("cfg-building-template").value,
-          max_queue: parseInt(document.getElementById("cfg-max-queue").value, 10),
-          interval_seconds: parseFloat(document.getElementById("cfg-build-interval").value),
-        },
+        building: buildingPayload,
+        recruitment: recPayload,
+        scavenge: scavPayload,
+        snob: snobPayload,
+        market: marketPayload,
       };
 
-      if (pwdVal) {
-        payload.auth.password = pwdVal;
-      }
-
-      await window.api.updateConfig(payload);
-      addLogEntry("SUCCESS", "settings", "Configurações gravadas com sucesso no SQLite para a conta ativa.");
-      alert("Configurações atualizadas com sucesso!");
+      await window.api.updateConfig(payload, targetWorld);
+      addLogEntry("SUCCESS", "settings", `Configurações do mundo '${targetWorld.toUpperCase()}' persistidas na Cloud e Cache Local.`);
+      alert(`Configurações do mundo '${targetWorld.toUpperCase()}' atualizadas com sucesso!`);
     } catch (err) {
       alert(`Falha ao gravar configurações: ${err.message}`);
     }
@@ -5042,6 +5168,30 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
     }
 
+    if (data.enabled !== undefined) {
+      const toggle = document.getElementById("rec-auto-toggle");
+      const badge = document.getElementById("rec-badge-status");
+      if (toggle && document.activeElement !== toggle) {
+        toggle.checked = Boolean(data.enabled);
+      }
+      if (badge) {
+        badge.textContent = data.enabled ? "ATIVO" : "PAUSADO";
+        badge.style.background = data.enabled ? "rgba(16,185,129,0.2)" : "rgba(245,158,11,0.2)";
+        badge.style.color = data.enabled ? "var(--neon-emerald)" : "var(--neon-amber)";
+      }
+    }
+    if (data.interval_minutes !== undefined) {
+      const intInput = document.getElementById("rec-interval-minutes");
+      if (intInput && document.activeElement !== intInput) {
+        intInput.value = data.interval_minutes;
+      }
+    }
+    if (data.min_free_pop !== undefined) {
+      const popInput = document.getElementById("rec-min-free-pop");
+      if (popInput && document.activeElement !== popInput) {
+        popInput.value = data.min_free_pop;
+      }
+    }
     if (data.max_queue_elements !== undefined) {
       const qInput = document.getElementById("rec-max-queue");
       if (qInput && document.activeElement !== qInput) {
@@ -5063,17 +5213,27 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     const progressGrid = document.getElementById("rec-village-troops-progress-grid");
     if (progressGrid) {
-      if (data.troops_home && typeof data.troops_home === "object") {
-        state.army = { ...(state.army || {}), ...data.troops_home };
+      const troopsOwnMap = data.troops_own || data.troops_home || {};
+      if (typeof troopsOwnMap === "object") {
+        state.army = { ...(state.army || {}), ...troopsOwnMap };
       }
       progressGrid.innerHTML = REC_UNITS_METADATA.map(u => {
-        const cur = (data.troops_home && data.troops_home[u.id] !== undefined)
-          ? data.troops_home[u.id]
+        const ownTot = (data.troops_own && data.troops_own[u.id] !== undefined)
+          ? data.troops_own[u.id]
           : ((state.army && state.army[u.id]) || 0);
+        const homeCount = (data.troops_home && data.troops_home[u.id] !== undefined)
+          ? data.troops_home[u.id]
+          : ownTot;
+        const inQueue = (data.total_in_queue && data.total_in_queue[u.id]) || 0;
+        const effective = ownTot + inQueue;
         const tgt = activeTargetModel[u.id] || 0;
-        const pct = tgt > 0 ? Math.min(100, Math.round((cur / tgt) * 100)) : (cur > 0 ? 100 : 0);
-        const isDone = tgt > 0 ? cur >= tgt : (tgt === 0);
+        const pct = tgt > 0 ? Math.min(100, Math.round((effective / tgt) * 100)) : (effective > 0 ? 100 : 0);
+        const isDone = tgt > 0 ? effective >= tgt : (tgt === 0);
         const barColor = isDone ? "var(--neon-emerald)" : "var(--neon-cyan)";
+        const outsideCount = Math.max(0, ownTot - homeCount);
+        const subNote = outsideCount > 0 
+          ? ` (${homeCount} na aldeia, ${outsideCount} fora)`
+          : "";
         return `
           <div style="background: rgba(15,23,42,0.6); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -5081,16 +5241,16 @@ document.addEventListener("DOMContentLoaded", async () => {
                 <span style="font-size: 1.1rem;">${u.icon}</span>
                 <span style="font-size: 0.82rem; font-weight: 600; color: #fff;">${u.name}</span>
               </div>
-              <span style="font-size: 0.75rem; font-family: var(--font-mono); font-weight: 700; color: ${isDone ? '#34d399' : '#fff'};">
-                ${cur.toLocaleString()} / ${tgt.toLocaleString()}
+              <span style="font-size: 0.75rem; font-family: var(--font-mono); font-weight: 700; color: ${isDone ? '#34d399' : '#fff'};" title="${ownTot} tropas totais da aldeia${subNote}${inQueue > 0 ? ` + ${inQueue} na fila` : ''}">
+                ${ownTot.toLocaleString()}${inQueue > 0 ? ` (+${inQueue})` : ''} / ${tgt.toLocaleString()}
               </span>
             </div>
             <div style="height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;">
               <div style="width: ${pct}%; height: 100%; background: ${barColor}; transition: width 0.3s ease;"></div>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.7rem; color: var(--text-muted);">
-              <span>${pct}% atingido</span>
-              <span>${isDone && tgt > 0 ? '✓ Completo' : (tgt > 0 ? `Falta ${Math.max(0, tgt - cur)}` : 'Sem meta')}</span>
+              <span>${pct}% da meta${subNote}</span>
+              <span>${isDone && tgt > 0 ? '✓ Completo' : (tgt > 0 ? `Falta ${Math.max(0, tgt - effective)}` : 'Sem meta')}</span>
             </div>
           </div>
         `;
@@ -5115,7 +5275,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       document.querySelectorAll(".model-rec-input").forEach(inp => {
         const model = inp.dataset.model;
         const unit = inp.dataset.unit;
-        const count = parseInt(inp.value, 10) || 0;
+        const count = Math.max(0, parseInt(inp.value, 10) || 0);
         if (!state.recruitmentModels[model]) state.recruitmentModels[model] = {};
         state.recruitmentModels[model][unit] = count;
       });
@@ -5123,9 +5283,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       document.querySelectorAll(".model-batch-input").forEach(inp => {
         const model = inp.dataset.model;
         const unit = inp.dataset.unit;
-        const count = parseInt(inp.value, 10) || 1;
+        const count = Math.max(1, parseInt(inp.value, 10) || 1);
         if (!state.recruitmentBatchSizes[model]) state.recruitmentBatchSizes[model] = {};
         state.recruitmentBatchSizes[model][unit] = count;
+      });
+
+      // Garante que todas as unidades canónicas do modelo ativo existem
+      REC_UNITS_METADATA.forEach(u => {
+        if (state.recruitmentModels[activeKey][u.id] === undefined) {
+          state.recruitmentModels[activeKey][u.id] = 0;
+        }
+        if (state.recruitmentBatchSizes[activeKey][u.id] === undefined) {
+          state.recruitmentBatchSizes[activeKey][u.id] = 5;
+        }
       });
 
       // Grava diretamente no SQLite para cada modelo
@@ -5141,7 +5311,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
       }
 
-      await window.api.saveRecruitmentModels(null, null, state.recruitmentModels);
+      await window.api.saveRecruitmentModels(null, null, state.recruitmentModels, state.recruitmentBatchSizes);
       addLogEntry("SUCCESS", "recruitment", "Todos os modelos de tropas e lotes foram salvos e persistidos no SQLite (`data/accounts.db`).");
       alert("Modelos de tropas guardados e persistidos no SQLite com sucesso!");
       

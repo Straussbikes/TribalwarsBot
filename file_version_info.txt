@@ -5,8 +5,8 @@
 
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 0, 0),
-    prodvers=(1, 0, 0, 0),
+    filevers=(1, 2, 0, 0),
+    prodvers=(1, 2, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -21,12 +21,12 @@ VSVersionInfo(
         '040904B0',
         [StringStruct('CompanyName', 'Tribal Automation'),
         StringStruct('FileDescription', 'Tribal Wars Bot - Desktop Automation Engine'),
-        StringStruct('FileVersion', '1.0.0.0'),
+        StringStruct('FileVersion', '1.2.0.0'),
         StringStruct('InternalName', 'TribalWarsBot'),
         StringStruct('LegalCopyright', '© 2026 Tribal Automation. Todos os direitos reservados.'),
         StringStruct('OriginalFilename', 'TribalWarsBot.exe'),
         StringStruct('ProductName', 'Tribal Wars Bot'),
-        StringStruct('ProductVersion', '1.0.0')])
+        StringStruct('ProductVersion', '1.2.0')])
       ]), 
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]

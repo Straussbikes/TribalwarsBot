@@ -5,7 +5,7 @@ Mede latência de ida e volta (RTT), calcula o desvio temporal (clock offset / d
 e fornece agendamento sub-milissegundo com técnica híbrida asyncio + spin-wait.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import datetime
 import email.utils
 import logging
@@ -157,8 +157,8 @@ class ClockSynchronizer:
                 try:
                     parsed_dt = email.utils.parsedate_to_datetime(str(date_val))
                     return parsed_dt.timestamp()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Falha ao interpretar data de cabeçalho HTTP: {e}")
 
         # 4. Elementos HTML serverTime / serverDate
         if html:
@@ -170,8 +170,8 @@ class ClockSynchronizer:
                     day, month, year = int(m_date.group(1)), int(m_date.group(2)), int(m_date.group(3))
                     dt = datetime.datetime(year, month, day, h, m, s)
                     return dt.timestamp()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Falha ao interpretar elementos HTML serverTime/serverDate: {e}")
 
         return None
 

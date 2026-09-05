@@ -573,7 +573,57 @@ class TestRecruitmentModelsApi(unittest.TestCase):
         parsed = parse_config_dict({"recruitment": {"max_queue_elements": 2}})
         self.assertEqual(parsed.recruitment.max_queue_elements, 2)
 
+    def test_parse_desktop_tw_queue_items(self):
+        """Valida que parse_recruitment_page extrai ordens da fila com layout moderno de divs (.queueItem)."""
+        desktop_html = """
+        <div id="trainqueue_barracks">
+            <div class="queueItem" data-order="2046991">
+                <div style="margin-bottom: 6px">
+                    <div style="max-width: 220px; float: left">
+                        <img src="https://dspt.innogamescdn.com/asset/db281c7a/graphic/unit/unit_spear.webp" /> 10 Lanceiro
+                    </div>
+                    <div style="float: right">
+                        <span class="timer">0:04:24</span>
+                    </div>
+                </div>
+                <div style="clear: both; max-width: 220px; float: left; margin-top: 7px">
+                    hoje às 16:24:42
+                </div>
+                <div style="float: right">
+                    <a class="btn btn-cancel" onclick="return TrainOverview.cancelOrder(2046991)" href="/game.php?village=6662&amp;screen=barracks&amp;action=cancel&amp;id=2035306&amp;h=38e2da63">Cancelar</a>
+                </div>
+            </div>
+            <div class="queueItem" data-order="2048313">
+                <div style="margin-bottom: 6px">
+                    <div style="max-width: 220px; float: left">
+                        <img src="https://dspt.innogamescdn.com/asset/db281c7a/graphic/unit/unit_axe.webp" /> 25 Bárbaro
+                    </div>
+                    <div style="float: right">
+                        0:15:30
+                    </div>
+                </div>
+                <div style="clear: both; max-width: 220px; float: left; margin-top: 7px">
+                    hoje às 16:39:42
+                </div>
+                <div style="float: right">
+                    <a class="btn btn-cancel" onclick="return TrainOverview.cancelOrder(2048313)" href="/game.php?village=6662&amp;screen=barracks&amp;action=cancel&amp;id=2035307&amp;h=38e2da63">Cancelar</a>
+                </div>
+            </div>
+        </div>
+        """
+        data = parse_recruitment_page(desktop_html)
+        self.assertEqual(len(data["queue"]), 2)
+        self.assertEqual(data["queue"][0]["unit"], "spear")
+        self.assertEqual(data["queue"][0]["count"], 10)
+        self.assertEqual(data["queue"][0]["timer_str"], "0:04:24")
+        self.assertIn("action=cancel", data["queue"][0]["cancel_url"])
+        self.assertEqual(data["queue"][1]["unit"], "axe")
+        self.assertEqual(data["queue"][1]["count"], 25)
+        self.assertEqual(data["total_in_queue"]["spear"], 10)
+        self.assertEqual(data["total_in_queue"]["axe"], 25)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

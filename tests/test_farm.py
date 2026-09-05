@@ -161,6 +161,7 @@ class TestFarmActions(unittest.IsolatedAsyncioTestCase):
         account.csrf_token = "csrf123"
         account.current_village_id = 12345
         account.get_screen = AsyncMock(return_value=SAMPLE_AM_FARM_HTML)
+        account.post_action = AsyncMock(return_value='{"success": true}')
 
         farm_manager = FarmManager()
 
@@ -190,6 +191,7 @@ class TestFarmActions(unittest.IsolatedAsyncioTestCase):
         account.csrf_token = "csrf123"
         account.current_village_id = 12345
         account.get_screen = AsyncMock(return_value=SAMPLE_AM_FARM_HTML)
+        account.post_action = AsyncMock(return_value='{"success": true}')
 
         farm_manager = FarmManager()
 

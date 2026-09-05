@@ -10,7 +10,6 @@ import logging
 import sys
 import threading
 import time
-import urllib.request
 from pathlib import Path
 
 import webview
@@ -26,7 +25,6 @@ from engine.core.account import TribalAccount
 from engine.core.scheduler import TaskScheduler
 from engine.api.context import EngineContext
 from engine.api.server import start_sidecar_server
-from engine.utils.paths import resource_path
 from engine.utils.runtime import suppress_console_and_redirect_streams
 from engine.utils.logging_setup import setup_production_logging
 
@@ -423,8 +421,8 @@ class DesktopApp:
                         # Aguarda que a extração do estado do jogador termine
                         try:
                             await self.context.account.refresh_state()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Aviso ao atualizar estado da conta antes de sincronização cloud: {e}")
                         player_name = (
                             getattr(self.context.account, "player_name", "") or
                             getattr(self.context.account, "username", "")

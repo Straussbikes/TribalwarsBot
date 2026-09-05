@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tribalwars-engine"
-version = "0.1.0"
+version = "1.2.0"
 description = "Autonomous, lightweight, fingerprint-evading automation engine for Tribal Wars (mobile version)."
 readme = "README.md"
 requires-python = ">=3.10"

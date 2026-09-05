@@ -965,8 +965,8 @@ def parse_available_units(html: str) -> Dict[str, int]:
                 u_name = u_m.group(1).lower().strip()
                 if u_name in units:
                     units[u_name] = max(units[u_name], int(u_m.group(2)))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Aviso ao analisar Accountmanager.farm.units: {e}")
 
     for js_u_m in re.finditer(r'Accountmanager\.farm\.units\[[\'\"]([a-z_]+)[\'\"]\]\s*=\s*(\d+)', normalized, re.IGNORECASE):
         u_name = js_u_m.group(1).lower().strip()
@@ -977,6 +977,141 @@ def parse_available_units(html: str) -> Dict[str, int]:
                 pass
 
     return units
+
+
+def _parse_row_cells_with_colspan(row_html: str) -> Dict[int, str]:
+    """Extrai células de uma linha de tabela preservando o offset real de colunas indicado por colspan."""
+    matches = re.finditer(r'<(?:th|td)([^>]*)>(.*?)</(?:th|td)>', row_html, re.DOTALL | re.IGNORECASE)
+    res: Dict[int, str] = {}
+    curr_col = 0
+    for m in matches:
+        attrs = m.group(1)
+        content = m.group(2)
+        colspan_m = re.search(r'colspan=["\'](\d+)["\']', attrs, re.IGNORECASE)
+        span = int(colspan_m.group(1)) if colspan_m else 1
+        res[curr_col] = content
+        curr_col += span
+    return res
+
+
+def parse_place_units_screen(html: str) -> Dict[str, Dict[str, int]]:
+    """
+    Analisa o ecrã 'screen=place&mode=units' da Praça de Reunião.
+    Extrai a matriz oficial de tropas da aldeia:
+    - 'in_village': tropas próprias presentes na aldeia (Daqui / Desta aldeia / Nesta aldeia)
+    - 'outside': tropas próprias noutras aldeias (Apoiando fora)
+    - 'in_transit': tropas próprias em movimento (A caminho / Em trânsito / Comandos de ataque e saque)
+    - 'total': tropas totais pertencentes à aldeia (in_village + outside + in_transit)
+    - 'support_in_village': tropas de apoio de terceiros estacionadas nesta aldeia
+    """
+    result: Dict[str, Dict[str, int]] = {
+        "in_village": {u: 0 for u in ALL_UNITS},
+        "outside": {u: 0 for u in ALL_UNITS},
+        "in_transit": {u: 0 for u in ALL_UNITS},
+        "total": {u: 0 for u in ALL_UNITS},
+        "support_in_village": {u: 0 for u in ALL_UNITS},
+    }
+    if not html:
+        return result
+
+    normalized = html.replace("&amp;", "&")
+
+    # Localiza tabelas visíveis
+    tables = re.findall(r'<table[^>]*>.*?</table>', normalized, re.DOTALL | re.IGNORECASE)
+    for table_html in tables:
+        rows = re.findall(r'<tr[^>]*>.*?</tr>', table_html, re.DOTALL | re.IGNORECASE)
+        if not rows:
+            continue
+
+        # Procura a linha de cabeçalho que contenha as colunas das unidades
+        header_row = None
+        col_to_unit: Dict[int, str] = {}
+
+        for r in rows[:4]:
+            cells_map = _parse_row_cells_with_colspan(r)
+            temp_map: Dict[int, str] = {}
+            for col_idx, cell_content in cells_map.items():
+                c_low = cell_content.lower()
+                for u in ALL_UNITS:
+                    if (
+                        re.search(rf'\bunit[-_]{u}\b', c_low)
+                        or re.search(rf'\bunit_sprite\b[^"\']*?\b{u}\b', c_low)
+                        or re.search(rf'\b{u}\b[^"\']*?\bunit_sprite\b', c_low)
+                        or re.search(rf'\b{u}\.(?:png|webp|gif|jpg)\b', c_low)
+                        or re.search(rf'data-unit=["\']{u}["\']', c_low)
+                        or re.search(rf'UnitPopup\.open\(["\']{u}["\']', c_low)
+                    ):
+                        temp_map[col_idx] = u
+                        break
+                if col_idx not in temp_map:
+                    for name_pt, canonic in UNIT_NAME_TO_KEY.items():
+                        if name_pt in c_low:
+                            temp_map[col_idx] = canonic
+                            break
+            if len(temp_map) >= 2:
+                header_row = r
+                col_to_unit = temp_map
+                break
+
+        if not col_to_unit:
+            continue
+
+        # Verifica se esta tabela é uma tabela de comandos em trânsito (ataques/apoios a decorrer)
+        is_commands_table = False
+        t_low = table_html[:400].lower()
+        if any(w in t_low for w in ["aldeia", "cancelar", "comando", "command", "ataque", "saque"]):
+            is_commands_table = True
+
+        # Analisa as linhas de dados da tabela
+        for row in rows:
+            if row == header_row:
+                continue
+            cells_map = _parse_row_cells_with_colspan(row)
+            if not cells_map:
+                continue
+
+            # Concatena os textos das primeiras células para detetar a categoria da linha
+            first_cells_text = " ".join(
+                re.sub(r'<[^>]+>', ' ', cells_map.get(ci, "")).lower().strip()
+                for ci in sorted(cells_map.keys())[:3]
+            )
+
+            category = None
+            if any(term in first_cells_text for term in ["apoio", "defensores", "apoios", "support"]):
+                category = "support_in_village"
+            elif any(term in first_cells_text for term in ["daqui", "desta aldeia", "nesta aldeia", "from this village", "im dorf", "presentes"]):
+                category = "in_village"
+            elif any(term in first_cells_text for term in ["noutras aldeias", "em outras aldeias", "in other villages", "auswärts", "fora"]):
+                category = "outside"
+            elif any(term in first_cells_text for term in ["a caminho", "em trânsito", "em transito", "in transit", "unterwegs"]):
+                category = "in_transit"
+            elif any(term in first_cells_text for term in ["total", "insgesamt", "somatório"]) and not is_commands_table:
+                category = "total"
+            elif is_commands_table:
+                category = "in_transit"
+
+            if category:
+                for c_idx, u_name in col_to_unit.items():
+                    if c_idx in cells_map:
+                        cell_html = cells_map[c_idx]
+                        clean_num = re.sub(r'<[^>]+>', '', cell_html).replace(".", "").strip()
+                        num_m = re.search(r'\b\d+\b', clean_num)
+                        if num_m:
+                            try:
+                                val = int(num_m.group(0))
+                                if category == "in_transit":
+                                    result["in_transit"][u_name] += val
+                                else:
+                                    result[category][u_name] = val
+                            except ValueError:
+                                pass
+
+    # Se a categoria 'total' não foi explicitamente fornecida ou tem 0, soma in_village + outside + in_transit
+    for u in ALL_UNITS:
+        calc_tot = result["in_village"].get(u, 0) + result["outside"].get(u, 0) + result["in_transit"].get(u, 0)
+        result["total"][u] = max(result["total"].get(u, 0), calc_tot)
+
+    return result
 
 
 def parse_place_commands(html: str) -> List[Dict[str, Any]]:
@@ -1659,8 +1794,8 @@ def parse_am_farm_templates(html: str) -> Dict[str, Any]:
                                     templates[tmpl][u_lower] = val
                                     total_cap += val * UNIT_HAUL_CAPACITY.get(u_lower, 0)
                             templates["haul_capacity"][tmpl] = total_cap
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Aviso ao analisar templates de farm Accountmanager: {e}")
 
     # 3. Fallback tradicional: name="a[unit]" ou name="template_a[unit]"
     if sum(templates["a"].values()) == 0 and sum(templates["b"].values()) == 0:
@@ -1753,6 +1888,9 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
         "available_units": {},
         "queue": [],
         "total_in_queue": {u: 0 for u in ALL_UNITS},
+        "own_units": {},
+        "in_village_units": {},
+        "unit_counts": {},
     }
 
     if not html:
@@ -1760,28 +1898,92 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
 
     normalized = html.replace("&amp;", "&")
 
+    # 0. Extração de tropas na aldeia e tropas totais pertencentes à aldeia (padrão 'X/Y' no imageContainer do desktop)
+    for m in re.finditer(
+        r'<div[^>]*class=["\'][^"\']*imageContainer[^"\']*["\'][^>]*>(.*?)</div>',
+        normalized,
+        re.DOTALL | re.IGNORECASE,
+    ):
+        block = m.group(1)
+        u_match = (
+            re.search(r'[?&]unit=([a-z_]+)', block)
+            or re.search(r'/unit_big/([a-z_]+)\.', block)
+            or re.search(r'data-unit=["\']([a-z_]+)["\']', block)
+        )
+        if u_match:
+            u_key = u_match.group(1).lower()
+            clean_block = re.sub(r'<[^>]+>', ' ', block)
+            slash_m = re.search(r'(\d+)\s*[/／]\s*(\d+)', clean_block)
+            if slash_m:
+                try:
+                    in_v = int(slash_m.group(1))
+                    tot = int(slash_m.group(2))
+                    result["unit_counts"][u_key] = {"in_village": in_v, "total": tot}
+                    result["own_units"][u_key] = tot
+                    result["in_village_units"][u_key] = in_v
+                except (ValueError, TypeError):
+                    pass
+
     # 1. Extração de unidades desbloqueadas e quantidade máxima recrutável
     # Padrão 1: <a id="spear_0_a" ...>(15)</a> ou >15<
     # Padrão 2: <input id="spear_0" name="spear" ... data-max="15" ... />
     # Padrão 3: javascript:insertUnit(...) ou set_max(...)
+    all_table_rows = re.findall(r'<tr\b[^>]*>.*?</tr>', normalized, re.DOTALL | re.IGNORECASE)
     for unit_key in ALL_UNITS:
-        # Localiza o bloco/linha correspondente à unidade no edifício militar
-        row_regex = re.compile(
-            rf'<tr[^>]*?(?:id=["\'](?:unit_){unit_key}["\']|data-unit=["\']{unit_key}["\'])[^>]*>(?:(?!</tr>).)*?</tr>',
-            re.DOTALL | re.IGNORECASE,
-        )
-        row_m = row_regex.search(normalized)
-        row_content = row_m.group(0) if row_m else ""
+        row_content = ""
+        for r_cand in all_table_rows:
+            if (
+                re.search(rf'name=["\'](?:units\[)?{unit_key}(?:\])?["\']', r_cand, re.IGNORECASE)
+                or re.search(rf'id=["\']{unit_key}_\d+(?:_a)?["\']', r_cand, re.IGNORECASE)
+                or re.search(rf'id=["\'](?:unit_){unit_key}["\']', r_cand, re.IGNORECASE)
+                or re.search(rf'data-unit=["\']{unit_key}["\']', r_cand, re.IGNORECASE)
+                or re.search(rf'\bunit_sprite\b[^"\']*?\b{unit_key}\b', r_cand, re.IGNORECASE)
+                or re.search(rf'\b{unit_key}\b[^"\']*?\bunit_sprite\b', r_cand, re.IGNORECASE)
+                or re.search(rf'unit_{unit_key}\.(?:png|webp|gif|jpg)', r_cand, re.IGNORECASE)
+                or re.search(rf'UnitPopup\.open\(["\']{unit_key}["\']', r_cand, re.IGNORECASE)
+            ):
+                row_content = r_cand
+                break
 
         if not row_content:
-            # Fallback por imagem ou link da unidade
-            fallback_row_regex = re.compile(
-                rf'<tr[^>]*>(?:(?!</tr>).)*?unit_{unit_key}(?:\.png|\.webp|\.gif|["\'])(?:(?!</tr>).)*?</tr>',
+            # Fallback para divs/lis (mobile)
+            m_div = re.search(
+                rf'<(?:div|li)\b[^>]*class=["\'][^"\']*(?:unit|recruit)[^"\']*["\'][^>]*>(?:(?!<(?:div|li)\b).)*?(?:{unit_key}_\d+|name=["\'](?:units\[)?{unit_key}["\']|\b{unit_key}\b)(?:(?!</(?:div|li)>).)*?</(?:div|li)>',
+                normalized,
                 re.DOTALL | re.IGNORECASE,
             )
-            fb_m = fallback_row_regex.search(normalized)
-            if fb_m:
-                row_content = fb_m.group(0)
+            if m_div:
+                row_content = m_div.group(0)
+
+        # Extração de tropas presentes e tropas totais pertencentes à aldeia (padrão 'X/Y')
+        # No Tribal Wars, a coluna 'Na aldeia / no total' exibe 'X/Y' (ex: 2/15, 0/50, 50/50).
+        if row_content:
+            clean_row = re.sub(r'<[^>]+>', ' ', row_content)
+            slash_match = re.search(r'(\d+)\s*[/／]\s*(\d+)', clean_row)
+            if slash_match:
+                try:
+                    in_vill = int(slash_match.group(1))
+                    tot = int(slash_match.group(2))
+                    result["unit_counts"][unit_key] = {"in_village": in_vill, "total": tot}
+                    result["own_units"][unit_key] = tot
+                    result["in_village_units"][unit_key] = in_vill
+                except (ValueError, TypeError):
+                    pass
+            else:
+                lbl_match = re.search(
+                    rf'(?:total|no total|insgesamt|belonging)[\s:]*\(?(\d+)\)?',
+                    clean_row,
+                    re.IGNORECASE,
+                )
+                if lbl_match:
+                    try:
+                        tot = int(lbl_match.group(1))
+                        result["own_units"][unit_key] = tot
+                        result["unit_counts"][unit_key] = {"in_village": tot, "total": tot}
+                        result["in_village_units"][unit_key] = tot
+                    except (ValueError, TypeError):
+                        pass
+
 
         # Se a linha contiver indicação explícita de bloqueio ou não pesquisada, ignora
         if row_content:
@@ -1861,26 +2063,40 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
 
         result["available_units"][unit_key] = max_val
 
-    # 2. Extração da fila ativa de recrutamento (#trainqueue_... ou .trainqueue ou linhas de treino)
-    # Procura containers específicos de fila de treino (ex: <table id="trainqueue_barracks">)
-    queue_containers = re.findall(
-        r'<table[^>]*id=["\']trainqueue_\w+["\'][^>]*>.*?</table>|<table[^>]*class=["\'][^"\']*trainqueue[^"\']*["\'][^>]*>.*?</table>|<div[^>]*class=["\'][^"\']*trainqueue[^"\']*["\'][^>]*>.*?</div>',
-        normalized,
-        re.DOTALL | re.IGNORECASE,
-    )
-
+    # 2. Extração da fila ativa de recrutamento
     candidate_rows = []
-    if queue_containers:
-        for container in queue_containers:
-            for r_m in re.finditer(r'<tr[^>]*>(?:(?!</tr>).)*?</tr>', container, re.DOTALL | re.IGNORECASE):
-                candidate_rows.append((r_m.group(0), True))
-    else:
-        queue_row_regex = re.compile(
-            r'<tr[^>]*>(?:(?!</tr>).)*?</tr>|<div[^>]*class=["\'][^"\']*trainqueue[^"\']*["\'][^>]*>(?:(?!</div>).)*?</div>',
+
+    # 2.1 Padrão Desktop Moderno: elementos <div class="queueItem" data-order="...">
+    queue_item_matches = list(re.finditer(r'<div[^>]*class=["\'][^"\']*\bqueueItem\b[^"\']*["\'][^>]*>', normalized, re.IGNORECASE))
+    if queue_item_matches:
+        for idx, q_match in enumerate(queue_item_matches):
+            start_pos = q_match.start()
+            if idx + 1 < len(queue_item_matches):
+                end_pos = queue_item_matches[idx + 1].start()
+            else:
+                tail = normalized[start_pos:start_pos + 2000]
+                end_match = re.search(r'</form>|<script|\binit_mobiletrainqueue\b', tail, re.IGNORECASE)
+                end_pos = start_pos + end_match.start() if end_match else start_pos + len(tail)
+            candidate_rows.append((normalized[start_pos:end_pos], True))
+
+    # 2.2 Padrão Clássico / Tabelas de treino (#trainqueue_... ou .trainqueue)
+    if not candidate_rows:
+        queue_containers = re.findall(
+            r'<table[^>]*id=["\']trainqueue_\w+["\'][^>]*>.*?</table>|<table[^>]*class=["\'][^"\']*trainqueue[^"\']*["\'][^>]*>.*?</table>|<div[^>]*id=["\']trainqueue_\w+["\'][^>]*>.*?</div>|<div[^>]*class=["\'][^"\']*trainqueue[^"\']*["\'][^>]*>.*?</div>',
+            normalized,
             re.DOTALL | re.IGNORECASE,
         )
-        for row_m in queue_row_regex.finditer(normalized):
-            candidate_rows.append((row_m.group(0), False))
+        if queue_containers:
+            for container in queue_containers:
+                for r_m in re.finditer(r'<tr[^>]*>(?:(?!</tr>).)*?</tr>', container, re.DOTALL | re.IGNORECASE):
+                    candidate_rows.append((r_m.group(0), True))
+        else:
+            queue_row_regex = re.compile(
+                r'<tr[^>]*>(?:(?!</tr>).)*?</tr>|<div[^>]*class=["\'][^"\']*trainqueue[^"\']*["\'][^>]*>(?:(?!</div>).)*?</div>',
+                re.DOTALL | re.IGNORECASE,
+            )
+            for row_m in queue_row_regex.finditer(normalized):
+                candidate_rows.append((row_m.group(0), False))
 
     for row_content, is_in_trainqueue_table in candidate_rows:
         if not row_content:
@@ -1891,22 +2107,28 @@ def parse_recruitment_page(html: str) -> Dict[str, Any]:
         if "<th" in lower_content:
             continue
 
+        # Linhas do formulário de recrutamento (que contêm inputs para digitar tropas) NUNCA são ordens ativas na fila
+        if re.search(r'<input[^>]+(?:name=["\'](?:units\[)?[a-z_]+|type=["\']text["\']|class=["\'][^"\']*recruit_unit)', row_content, re.IGNORECASE):
+            continue
+
         # Timer (ex.: <span class="timer">0:45:10</span> ou 12:45)
         timer_match = re.search(r'<span[^>]*class=["\'][^"\']*timer[^"\']*["\'][^>]*>([^<]+)</span>', row_content, re.IGNORECASE)
-        if not timer_match:
-            timer_match = re.search(r'\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b', row_content)
-        timer_str = timer_match.group(1).strip() if timer_match else ""
+        if timer_match:
+            timer_str = timer_match.group(1).strip()
+        else:
+            timer_fb = re.search(r'\b(?:\d{1,2}:)?\d{1,2}:\d{2}\b', row_content)
+            timer_str = timer_fb.group(0).strip() if timer_fb else ""
 
         # Conclusão / hora (ex.: hoje às 18:30:15)
         finish_match = re.search(r'(?:hoje|amanhã|today|tomorrow|[0-9]{1,2}\.[0-9]{1,2}\.)\s*(?:às\s*)?[\d:]+', row_content, re.IGNORECASE)
         finish_time = finish_match.group(0).strip() if finish_match else ""
 
         # Link de cancelamento se existir (action=cancel ou cancel_order)
-        cancel_match = re.search(r'href=["\']([^"\']*[?&]action=cancel[^"\']*)["\']', row_content, re.IGNORECASE)
+        cancel_match = re.search(r'href=["\']([^"\']*[?&]action=cancel[^"\']*)["\']', row_content.replace("&amp;", "&"), re.IGNORECASE)
         cancel_url = cancel_match.group(1) if cancel_match else None
 
         # Se não estiver explicitamente na tabela de treino e não tiver timer/cancel_url, ignora
-        if not is_in_trainqueue_table and not (timer_str or cancel_url or "trainqueue" in lower_content):
+        if not is_in_trainqueue_table and not (timer_str or cancel_url or "trainqueue" in lower_content or "queueitem" in lower_content):
             continue
 
         unit_found = None
@@ -2494,7 +2716,8 @@ def parse_map_response(data: Any) -> List[Dict[str, Any]]:
         if (raw_str.startswith("{") and raw_str.endswith("}")) or (raw_str.startswith("[") and raw_str.endswith("]")):
             try:
                 json_obj = json.loads(raw_str)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Aviso ao decodificar JSON direto de mapa: {e}")
                 json_obj = None
 
         # 3. Procura variáveis JS no HTML do jogo

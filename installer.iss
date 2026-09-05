@@ -1,8 +1,8 @@
-; Script de Instalador Inno Setup para Tribal Wars Bot v2.0.0
+; Script de Instalador Inno Setup para Tribal Wars Bot v1.2.0
 ; Gera um instalador nativo profissional Windows (.exe)
 
 #define MyAppName "Tribal Wars Bot"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "Tribal Automation Team"
 #define MyAppURL "https://github.com/straussbikes/TribalwarsBot"
 #define MyAppExeName "TribalWarsBot.exe"

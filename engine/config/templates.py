@@ -4,7 +4,7 @@ Constantes imutáveis em memória contendo os 5 modelos padrão oficiais do sist
 Proíbe qualquer dependência de ficheiros JSON soltos na raiz ou em disco.
 """
 
-from typing import Dict, List, Any, Tuple
+from typing import Any, Dict, List
 
 # 1. AI - Build Model (ee02gd68de)
 TEMPLATE_AI_BUILD_MODEL: Dict[str, Any] = {

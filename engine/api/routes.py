@@ -140,6 +140,7 @@ class RecruitmentModelsRequest(BaseModel):
     attack: Optional[Dict[str, int]] = None
     defense: Optional[Dict[str, int]] = None
     models: Optional[Dict[str, Dict[str, int]]] = None
+    batch_sizes: Optional[Dict[str, Dict[str, int]]] = None
 
 
 class ArbitrageToggleRequest(BaseModel):
@@ -321,15 +322,27 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
         return context.get_status_dict()
 
     @router.get("/config")
-    async def get_config():
-        """Retorna as configurações atualmente carregadas."""
-        return context.get_config_dict()
+    async def get_config(world: Optional[str] = None):
+        """Retorna as configurações atualmente carregadas para o mundo ativo ou especificado."""
+        return context.get_config_dict(world=world)
 
     @router.post("/config", response_model=ActionResponse)
-    async def update_config(payload: ConfigUpdateRequest):
-        """Atualiza dinamicamente as opções do bot e persiste no config.json."""
+    async def update_config(payload: ConfigUpdateRequest, world: Optional[str] = None):
+        """Atualiza dinamicamente as opções do bot e persiste no Cloud SQL e cache local para o mundo especificado."""
         update_data = payload.model_dump(exclude_unset=True)
-        res = context.update_config_and_save(update_data)
+        res = context.update_config_and_save(update_data, world=world)
+        return ActionResponse(status=res["status"], message=res.get("message"))
+
+    @router.get("/worlds/{world_code}/config")
+    async def get_world_config(world_code: str):
+        """Retorna as configurações específicas do mundo solicitado."""
+        return context.get_config_dict(world=world_code)
+
+    @router.post("/worlds/{world_code}/config", response_model=ActionResponse)
+    async def update_world_config(world_code: str, payload: ConfigUpdateRequest):
+        """Atualiza e persiste as configurações do mundo solicitado."""
+        update_data = payload.model_dump(exclude_unset=True)
+        res = context.update_config_and_save(update_data, world=world_code)
         return ActionResponse(status=res["status"], message=res.get("message"))
 
     @router.post("/scheduler/pause", response_model=ActionResponse)
@@ -658,8 +671,8 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
                     d["auto_login_enabled"] = bool(creds.get("auto_login_enabled", False))
                     d["last_auto_login"] = creds.get("last_auto_login")
                     return d
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Aviso ao carregar detalhes da conta {account_id} do Cloud SQL: {e}")
 
         acc = context.get_account(account_id)
         if not acc:
@@ -892,39 +905,6 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
             "message": f"Alvo {coords} adicionado à lista de farming.",
             "custom_targets": custom_targets,
         }
-
-    @router.post("/map/quick-attack")
-    async def send_quick_attack(payload: QuickAttackRequest):
-        """Envia um ataque rápido manual para as coordenadas indicadas."""
-        if not context.account:
-            return {"status": "error", "message": "Conta não inicializada."}
-        try:
-            from engine.actions.place import UnitsCount
-            troops = UnitsCount(
-                spear=payload.spear,
-                sword=payload.sword,
-                axe=payload.axe,
-                spy=payload.spy,
-                light=payload.light,
-            )
-            v_id = context.account.current_village_id
-            target_coords = f"{payload.target_x}|{payload.target_y}"
-            res = await context.place_manager.send_attack(
-                account=context.account,
-                target_coords=target_coords,
-                units=troops,
-                village_id=v_id,
-            )
-            if res:
-                cmd_id = getattr(res, "command_id", "cmd_ok")
-                return {
-                    "status": "success",
-                    "message": f"Ataque enviado para {target_coords}!",
-                    "command_id": cmd_id,
-                }
-            return {"status": "error", "message": f"Não foi possível enviar ataque para {target_coords}."}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
 
     # --- Rotas Multi-Mundo Simultâneo ---
 
@@ -1237,6 +1217,7 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
             attack=payload.attack,
             defense=payload.defense,
             models=payload.models,
+            batch_sizes=payload.batch_sizes,
         )
         return ActionResponse(status=res["status"], message=res.get("message"))
 
@@ -1720,8 +1701,8 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
                     user = await context.user_repo.get_by_id(saved_token)
                     if user:
                         context.current_app_user = user
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Aviso ao recuperar utilizador pelo token guardado: {e}")
         res = await context.get_current_app_user()
         if res.get("status") == "error":
             return {"status": "unauthenticated", "user": None, "message": res.get("message")}

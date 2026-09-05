@@ -11,14 +11,13 @@ import re
 import time
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
 
-from engine.actions.place import PlaceManager, UnitsCount
+from engine.actions.place import PlaceManager
 from engine.core.account import TribalAccount
 from engine.core.models import Task, TaskPriority
 from engine.core.scheduler import TaskScheduler
 from engine.utils.parsers import (
     parse_incomings_count,
     parse_incomings_overview,
-    parse_timer_to_seconds,
 )
 
 logger = logging.getLogger(__name__)

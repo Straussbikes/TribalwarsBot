@@ -4,6 +4,7 @@ Valida que todas as definições (construção, farm, recrutamento, missões, me
 são persistidas individualmente na base de dados SQLite (data/accounts.db) e isoladas por conta.
 """
 
+import asyncio
 from pathlib import Path
 import tempfile
 import unittest
@@ -168,3 +169,97 @@ class TestAccountConfigPersistence(unittest.IsolatedAsyncioTestCase):
         save_config_sid("new_sid_beta_999", account_id="acc_beta", db=self.db)
         acc_beta_db = self.db.get_account("acc_beta")
         self.assertEqual(acc_beta_db["session_cookie"], "new_sid_beta_999")
+
+    def test_offline_resilience_sqlite_auto_cache(self):
+        """Testa a criação automática de cache local no SQLite para contas originadas na Cloud."""
+        cloud_acc_id = "cloud-acc-uuid-999"
+        # A conta não existe previamente no SQLite local
+        self.assertIsNone(self.db.get_account(cloud_acc_id))
+
+        # Guarda configurações (ex.: vindas da Cloud ou gravadas pela UI)
+        saved = self.db.save_account_config(cloud_acc_id, {
+            "farm": {"enabled": True, "max_distance": 35.0},
+            "building": {"max_queue": 5}
+        })
+        self.assertTrue(saved)
+
+        # Verifica que a linha foi inserida no SQLite local e os dados foram preservados
+        acc = self.db.get_account(cloud_acc_id)
+        self.assertIsNotNone(acc)
+        cfg = self.db.get_account_config(cloud_acc_id)
+        self.assertTrue(cfg["farm"]["enabled"])
+        self.assertEqual(cfg["farm"]["max_distance"], 35.0)
+        self.assertEqual(cfg["building"]["max_queue"], 5)
+
+    async def test_cloud_first_persistence_and_sync(self):
+        """Testa o armazenamento e encriptação AES-256-GCM no Cloud SQL e sincronização com o EngineContext."""
+        from engine.storage.cloud_db import CloudDatabase, AppUserRepository, GameAccountRepository
+        from engine.core.account_session_manager import AccountSessionManager
+
+        AccountSessionManager.reset_instance_for_testing()
+        cloud_db = CloudDatabase(database_url="sqlite+aiosqlite:///:memory:")
+        await cloud_db.init_db()
+
+        user_repo = AppUserRepository(cloud_db)
+        acc_repo = GameAccountRepository(cloud_db)
+
+        user = await user_repo.create_user(email="commander@cloud.com", password="SecurePassword123!")
+        game_acc = await acc_repo.create_or_update(
+            app_user_id=user.id,
+            game_username="CloudWarrior",
+            credentials_data={"sid": "test_cloud_sid", "world": "pt117", "domain": "tribalwars.com.pt"},
+        )
+
+        # 1. Grava configurações diretamente no repositório Cloud
+        ok = await acc_repo.save_account_config(game_acc.id, {
+            "farm": {"enabled": True, "max_distance": 40.0},
+            "defense": {"auto_dodge_enabled": True},
+        })
+        self.assertTrue(ok)
+
+        # 2. Recupera e verifica cofre encriptado
+        loaded_cfg = await acc_repo.get_account_config(game_acc.id)
+        self.assertIsNotNone(loaded_cfg)
+        self.assertTrue(loaded_cfg["farm"]["enabled"])
+        self.assertEqual(loaded_cfg["farm"]["max_distance"], 40.0)
+        self.assertTrue(loaded_cfg["defense"]["auto_dodge_enabled"])
+
+        # 3. Testa sincronização bidirecional via EngineContext
+        from engine.storage.cloud_db import GameWorldRepository
+        ctx = EngineContext(db=self.db)
+        ctx.cloud_db = cloud_db
+        ctx.user_repo = user_repo
+        ctx.game_account_repo = acc_repo
+        ctx.game_world_repo = GameWorldRepository(cloud_db)
+        ctx.current_app_user = user
+
+        # Troca para a conta da Cloud
+        switch_res = await ctx.switch_active_game_account(
+            game_username="CloudWarrior",
+            account_id=game_acc.id,
+        )
+        self.assertEqual(switch_res["status"], "success")
+        self.assertEqual(ctx.active_profile_id, game_acc.id)
+        self.assertEqual(ctx.config.farm.max_distance, 40.0)
+        self.assertTrue(ctx.config.defense.auto_dodge_enabled)
+
+        # Altera configuração na UI / EngineContext e verifica persistência na Cloud e no SQLite
+        update_res = ctx.update_config_and_save({"farm": {"max_distance": 50.0}})
+        self.assertEqual(update_res["status"], "success")
+        self.assertEqual(ctx.config.farm.max_distance, 50.0)
+
+        # Espera task assíncrona se necessário
+        await asyncio.sleep(0.2)
+
+        # Valida no cofre Cloud
+        cloud_cfg_updated = await acc_repo.get_account_config(game_acc.id)
+        self.assertEqual(cloud_cfg_updated["farm"]["max_distance"], 50.0)
+
+        # Valida no cache local SQLite
+        local_cfg = self.db.get_account_config(game_acc.id)
+        self.assertEqual(local_cfg["farm"]["max_distance"], 50.0)
+
+        await ctx.session_manager.stop_current_session()
+        await cloud_db.close()
+        AccountSessionManager.reset_instance_for_testing()
+

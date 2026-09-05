@@ -2,7 +2,6 @@
 Tribal Wars Mobile Automation Engine - Core
 """
 
-from engine.core.account import TribalAccount
 from engine.core.exceptions import (
     ActionFailedError,
     BotProtectionError,
@@ -19,6 +18,11 @@ from engine.core.models import (
     TaskPriority,
     VillageData,
 )
+def __getattr__(name: str):
+    if name == "TribalAccount":
+        from engine.core.account import TribalAccount
+        return TribalAccount
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 from engine.core.profile_manager import (
     AccountProfile,
     ProfileManager,

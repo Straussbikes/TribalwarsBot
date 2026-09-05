@@ -30,7 +30,7 @@ def create_app(
     """
     app = FastAPI(
         title="Tribal Wars Automation Engine API",
-        version="2.0.0",
+        version="1.2.0",
         description="Sidecar IPC local para automação e integração com interface gráfica nativa Tauri v2.",
         docs_url="/docs",
         redoc_url=None,

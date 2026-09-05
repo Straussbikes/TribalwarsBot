@@ -387,13 +387,9 @@ class FarmManager:
         Prioriza o POST nativo ajaxaction=farm do Tribal Wars e efetua fallback para GET.
         """
         v_id = village_id or account.current_village_id or 0
-        from unittest.mock import AsyncMock
-        is_get_mock = isinstance(getattr(account, "get_screen", None), AsyncMock)
-        is_post_mock = isinstance(getattr(account, "post_action", None), AsyncMock)
-
         try:
-            # 1. Envio nativo oficial via POST ajaxaction=farm quando em runtime real ou post_action mockado
-            if hasattr(account, "post_action") and (is_post_mock or not is_get_mock):
+            # 1. Envio nativo oficial via POST ajaxaction=farm quando suportado
+            if hasattr(account, "post_action"):
                 try:
                     post_payload = {
                         "target": str(target_id),
@@ -1347,8 +1343,8 @@ class FarmManager:
                     broadcast_fn = getattr(account, "_broadcast_sync", None)
                     if broadcast_fn and tracker:
                         broadcast_fn("STATS_UPDATED", tracker.get_summary())
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Aviso ao atualizar estatísticas pós-farm: {e}")
 
                 # Reagenda para o próximo ciclo de farm com delay estocástico gaussiano dinâmico
                 if scheduler.is_running and not scheduler.is_paused:

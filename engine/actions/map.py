@@ -379,8 +379,8 @@ def _extract_from_json_obj(
                     is_barbarian=is_barbarian,
                     is_own=is_own,
                 )
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                logger.debug(f"Aviso ao extrair aldeia do mapa: {e}")
 
         for val in obj.values():
             _extract_from_json_obj(val, villages, center_x, center_y, own_village_id, own_player_id)

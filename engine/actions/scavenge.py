@@ -131,9 +131,6 @@ class ScavengeManager:
     Controlador de automação da Coleta de Recursos (Scavenging).
     """
 
-    def __init__(self):
-        pass
-
     async def get_scavenge_state(
         self,
         account: TribalAccount,

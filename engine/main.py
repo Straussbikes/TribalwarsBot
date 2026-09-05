@@ -33,7 +33,6 @@ from engine.core.account import TribalAccount
 from engine.core.exceptions import BotProtectionError, SessionExpiredError
 from engine.core.models import TaskPriority
 from engine.core.scheduler import TaskScheduler
-from engine.utils.paths import resource_path
 from engine.utils.runtime import suppress_console_and_redirect_streams
 from engine.utils.logging_setup import setup_production_logging
 

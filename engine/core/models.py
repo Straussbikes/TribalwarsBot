@@ -105,6 +105,8 @@ class VillageData:
     category: VillageCategory = VillageCategory.ATTACK
     resources: Resources = field(default_factory=Resources)
     troops: Dict[str, int] = field(default_factory=dict)
+    troops_in_village: Dict[str, int] = field(default_factory=dict)
+    own_troops: Dict[str, int] = field(default_factory=dict)
     buildings: Dict[str, int] = field(default_factory=dict)
 
     @property
@@ -135,6 +137,8 @@ class VillageData:
                 "free_pop": self.resources.free_pop,
             },
             "troops": self.troops,
+            "troops_in_village": self.troops_in_village or self.troops,
+            "own_troops": self.own_troops or self.troops,
             "buildings": self.buildings,
         }
 

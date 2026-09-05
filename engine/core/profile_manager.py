@@ -282,8 +282,8 @@ class ProfileManager:
                     prof = AccountProfile.from_dict(data)
                     self.profiles[prof.id] = prof
                     self.db.save_account(prof.to_dict())
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Aviso ao carregar perfil de fallback '{f.name}': {e}")
             db_accounts = self.db.list_accounts()
 
         for acc in db_accounts:

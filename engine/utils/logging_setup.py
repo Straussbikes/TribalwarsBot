@@ -80,6 +80,6 @@ def setup_production_logging(
             root_logger.addHandler(file_handler)
         except Exception as e:
             # Fallback caso haja restrição de escrita
-            pass
+            sys.stderr.write(f"Aviso: Não foi possível inicializar RotatingFileHandler ({log_file}): {e}\n")
 
     return log_file

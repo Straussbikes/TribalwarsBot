@@ -8,10 +8,9 @@ isolado de rate limits e execução contínua para as aldeias da tabela 'village
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 import logging
 import time
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from engine.actions.farm import FarmManager
 from engine.actions.main_building import MainBuildingManager
@@ -237,14 +236,15 @@ class WorldWorker:
                 return
 
             try:
-                if cfg.recruitment.enabled and acc.current_village_id:
-                    targets = cfg.get_village_recruitment_targets(village_id=str(acc.current_village_id))
+                if self.config.recruitment.enabled and acc.current_village_id:
+                    targets = self.config.get_village_recruitment_targets(village_id=str(acc.current_village_id))
                     await self.recruitment_manager.run_recruitment_cycle(
                         account=acc,
                         targets=targets,
-                        batch_sizes=cfg.recruitment.batch_sizes,
-                        min_free_pop=cfg.recruitment.min_free_pop,
+                        batch_sizes=self.config.recruitment.batch_sizes,
+                        min_free_pop=self.config.recruitment.min_free_pop,
                         village_id=acc.current_village_id,
+                        max_queue_elements=getattr(self.config.recruitment, "max_queue_elements", 3),
                     )
             except RateLimitError as rle:
                 self.handle_rate_limit(rle.retry_after)
@@ -252,7 +252,7 @@ class WorldWorker:
                 logger.debug(f"[{world}] Aviso no ciclo de recrutamento: {e}")
             finally:
                 if sched.is_running and not self.cancellation_token.is_set() and self.is_active:
-                    interval_sec = cfg.recruitment.interval_minutes * 60.0
+                    interval_sec = self.config.recruitment.interval_minutes * 60.0
                     sched.schedule_human_like(
                         name=f"AutoRecruit [{world}]",
                         priority=TaskPriority.RECRUIT,
@@ -263,13 +263,17 @@ class WorldWorker:
                         max_seconds=interval_sec * 2.0,
                     )
 
+        self._recruit_task = recruit_cycle_task
+        self._build_task = building_cycle_task
+        self._farm_task = farm_cycle_task
+
         # Agenda as tarefas iniciais com ligeiro stagger para evitar concorrência no arranque
         sched.schedule(name=f"PollRecursos [{world}]", priority=TaskPriority.REFRESH, action=poll_resources_task, delay_seconds=2.0)
-        if cfg.building.enabled:
+        if self.config.building.enabled:
             sched.schedule(name=f"AutoBuild [{world}]", priority=TaskPriority.BUILD, action=building_cycle_task, delay_seconds=6.0)
-        if cfg.farm.enabled:
+        if self.config.farm.enabled:
             sched.schedule(name=f"AutoFarm [{world}]", priority=TaskPriority.FARM, action=farm_cycle_task, delay_seconds=10.0)
-        if cfg.recruitment.enabled:
+        if self.config.recruitment.enabled:
             sched.schedule(name=f"AutoRecruit [{world}]", priority=TaskPriority.RECRUIT, action=recruit_cycle_task, delay_seconds=16.0)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -344,9 +348,17 @@ class WorldWorkerOrchestrator:
         sid = creds.get("sid", "")
         domain = creds.get("domain", "tribalwars.com.pt")
         proxy = creds.get("proxy")
+        account_config = creds.get("config")
 
         worlds = await gw_repo.list_by_account(account_id)
         for w in worlds:
+            world_cfg = None
+            if getattr(w, "config_data", None):
+                try:
+                    import json
+                    world_cfg = json.loads(w.config_data)
+                except Exception:
+                    world_cfg = None
             await self.register_and_start_worker(
                 world_code=w.world_code,
                 sid=sid,
@@ -354,6 +366,8 @@ class WorldWorkerOrchestrator:
                 proxy=proxy,
                 is_active=w.is_active,
                 account_id=account_id,
+                account_config=account_config,
+                world_config=world_cfg,
             )
 
     async def register_and_start_worker(
@@ -364,6 +378,8 @@ class WorldWorkerOrchestrator:
         proxy: Optional[str] = None,
         is_active: bool = True,
         account_id: Optional[str] = None,
+        account_config: Optional[Dict[str, Any]] = None,
+        world_config: Optional[Dict[str, Any]] = None,
     ) -> WorldWorker:
         w_code = world_code.strip().lower()
 
@@ -376,6 +392,19 @@ class WorldWorkerOrchestrator:
             return worker
 
         cfg = load_config()
+        effective_cfg = world_config if (world_config and isinstance(world_config, dict)) else account_config
+        if effective_cfg and isinstance(effective_cfg, dict):
+            from engine.config.settings import parse_config_dict
+            raw_cfg = cfg.to_dict()
+            def _deep_merge_cfg(target: dict, source: dict) -> None:
+                for k, v in source.items():
+                    if isinstance(v, dict) and isinstance(target.get(k), dict):
+                        _deep_merge_cfg(target[k], v)
+                    else:
+                        target[k] = v
+            _deep_merge_cfg(raw_cfg, effective_cfg)
+            cfg = parse_config_dict(raw_cfg)
+
         cfg.world = w_code
         cfg.domain = domain
         cfg.sid = sid
@@ -466,6 +495,58 @@ class WorldWorkerOrchestrator:
         if self.workers:
             return next(iter(self.workers.values()))
         return None
+
+    def update_worker_config(self, world_code: str, new_data: Dict[str, Any]) -> bool:
+        """Atualiza dinamicamente as configurações em memória do worker de um mundo específico."""
+        w_code = world_code.strip().lower()
+        worker = self.workers.get(w_code)
+        if not worker:
+            return False
+        from engine.config.settings import parse_config_dict
+        raw_cfg = worker.config.to_dict()
+        def _deep_merge_cfg(target: dict, source: dict) -> None:
+            for k, v in source.items():
+                if isinstance(v, dict) and isinstance(target.get(k), dict):
+                    _deep_merge_cfg(target[k], v)
+                else:
+                    target[k] = v
+        _deep_merge_cfg(raw_cfg, new_data)
+        worker.config = parse_config_dict(raw_cfg)
+
+        # Se recrutamento foi ativado e a rotina não está agendada, agenda no scheduler do worker
+        if worker.config.recruitment.enabled and worker.scheduler.is_running and hasattr(worker, "_recruit_task") and worker._recruit_task:
+            task_name = f"AutoRecruit [{worker.world_code}]"
+            is_scheduled = any(getattr(t, "name", "") == task_name for t in getattr(worker.scheduler, "_tasks", []))
+            if not is_scheduled:
+                worker.scheduler.schedule(
+                    name=task_name,
+                    priority=TaskPriority.RECRUIT,
+                    action=worker._recruit_task,
+                    delay_seconds=2.0,
+                )
+
+        if worker.config.building.enabled and worker.scheduler.is_running and hasattr(worker, "_build_task") and worker._build_task:
+            task_name = f"AutoBuild [{worker.world_code}]"
+            is_scheduled = any(getattr(t, "name", "") == task_name for t in getattr(worker.scheduler, "_tasks", []))
+            if not is_scheduled:
+                worker.scheduler.schedule(
+                    name=task_name,
+                    priority=TaskPriority.BUILD,
+                    action=worker._build_task,
+                    delay_seconds=2.0,
+                )
+
+        if worker.config.farm.enabled and worker.scheduler.is_running and hasattr(worker, "_farm_task") and worker._farm_task:
+            task_name = f"AutoFarm [{worker.world_code}]"
+            is_scheduled = any(getattr(t, "name", "") == task_name for t in getattr(worker.scheduler, "_tasks", []))
+            if not is_scheduled:
+                worker.scheduler.schedule(
+                    name=task_name,
+                    priority=TaskPriority.FARM,
+                    action=worker._farm_task,
+                    delay_seconds=2.0,
+                )
+        return True
 
     def get_status(self) -> Dict[str, Any]:
         return {

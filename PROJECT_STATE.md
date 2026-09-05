@@ -2,8 +2,8 @@
 
 > **Propósito deste ficheiro:** Manter o histórico de progresso, decisões arquiteturais, mapa de ficheiros e diretrizes de desenvolvimento para que qualquer sessão de IA recupere o contexto instantaneamente com consumo mínimo de tokens e sem perda de continuidade.
 
-**Última Atualização:** 2026-09-03  
-**Estado Geral:** 100% Cloud-Native Concluído | Cloud SQL (PostgreSQL 18.6) via Neon Tech | Eliminação de I/O em disco local | Cofre Criptográfico AES-256-GCM (`TokenStorage` para `auth.dat`) | 5 Modelos Oficiais Imutáveis de Construção (Modelo *Construcao* com 256 passos sincronizado) | Auto-Login com cifra AES-256-GCM e tolerância a quedas de sessão | Gestor Monousuário (`AccountSessionManager`) & Orquestrador Concorrente Multi-Mundo (`WorldWorkerOrchestrator`) | Gestão Comercial de Licenças e Subscrições (`manage_clients.py`) | Pipeline de Build Standalone Comercial (GUI Pura, noconsole, Inno Setup 6, ~66 MB EXE / 182 MB Setup) | 332 Testes Unitários e de Integração Automatizados (100% OK)  
+**Última Atualização:** 2026-09-05  
+**Estado Geral:** 100% Cloud-Native Concluído | Cloud SQL (PostgreSQL 18.6) via Neon Tech | Eliminação de I/O em disco local | Cofre Criptográfico AES-256-GCM (`TokenStorage` para `auth.dat`) | 5 Modelos Oficiais Imutáveis de Construção (Modelo *Construcao* com 256 passos sincronizado) | Auto-Login com cifra AES-256-GCM e tolerância a quedas de sessão | Gestor Monousuário (`AccountSessionManager`) & Orquestrador Concorrente Multi-Mundo (`WorldWorkerOrchestrator`) | Gestão Comercial de Licenças e Subscrições (`manage_clients.py`) | Pipeline de Build Standalone Comercial (GUI Pura, noconsole, Inno Setup 6, ~66 MB EXE / 182 MB Setup) | Distinção Estrita de Tropas da Aldeia (`own_troops`) vs Tropas na Aldeia (`troops_in_village`) no Recrutamento | 350 Testes Unitários e de Integração Automatizados (100% OK)  
 **Ambiente Validado:** Windows 11 / macOS 12+ / Python 3.11-3.14 / `curl_cffi` 0.16.2 / `fastapi` 0.141.1 / `uvicorn` 0.52.4 / `pywebview` 6.2 (Edge WebView2) / PostgreSQL 18.6 Cloud SQL / Inno Setup 6 / Git Branch: `main`
 
 ---
@@ -68,6 +68,8 @@
 | **Fase 11** | **Atualização e Sincronização do Modelo "Construcao"** | ✅ Concluída | Atualização integral da sequência de 256 passos em `templates.py`, SQLite e Cloud SQL; carregamento dinâmico de modelos reais no dropdown da Dashboard. |
 | **Fase 12** | **Hardening do Executável & Instalador Inno Setup** | ✅ Concluída | Compilação com supressão de consola, sanitização de streams, logging rotativo em `%APPDATA%`, ícone Windows multi-resolução, gerador `TribalWarsBot_Setup_v2.0.0.exe` (182 MB) e pacote portátil (268 MB). |
 | **Fase 13** | **Gestão Comercial de Licenças & Onboarding de Clientes** | ✅ Concluída | Campos comerciais em `app_users`, CLI administrativa `scripts/manage_clients.py` (criar, renovar, suspender, info), validação em runtime de expiração/suspensão e guia de distribuição [`GUIA_CLIENTE.md`]. |
+| **Fase 14** | **Distinção Estrita de Tropas da Aldeia vs. Tropas na Aldeia** | ✅ Concluída | Extração oficial de contagens `own_units` (padrão `X/Y` no Quartel/Estábulo/Oficina e `screen=place&mode=units`), cálculo de metas militares baseado no exército total pertencente à aldeia (`own_troops`), blindagem contra sobre-recrutamento com tropas fora em ataque/farm/apoio e atualização do Cockpit. |
+| **Fase 15** | **Auditoria de Código, Limpeza & Lançamento da Versão 1.2** | ✅ Concluída | Auditoria estrita e eliminação de código morto/stubs, alinhamento total Frontend-Backend (117 endpoints), tratamento explícito de exceções, 353 testes aprovados, compilação de produção e empacotamento com Inno Setup (`TribalWarsBot_Setup_v1.2.0.exe` e pacote portátil `TribalWarsBot_v1.2.0_Portable.zip`). |
 
 ---
 
@@ -138,7 +140,8 @@ TribalwarsBot/
 │       ├── api.js                       # Comunicação assíncrona com os endpoints do motor
 │       └── websocket.js                 # Eventos em tempo real e telemetria
 │
-└── tests/                               # 332 testes unitários e de integração (100% OK)
+└── tests/                               # 350 testes unitários e de integração (100% OK)
+    ├── test_recruitment_own_troops.py   # Testes de tropas próprias da aldeia vs tropas na aldeia
     ├── test_auto_login.py               # Testes de cofre, autenticação web e auto-login
     ├── test_packaging_utils.py          # Testes de caminhos, streams e logging de produção
     ├── test_commercial_licensing.py     # Testes de licenças, expiração e limites de conta
@@ -151,7 +154,7 @@ TribalwarsBot/
 
 * **Resultado da Suite Completa:**
   ```text
-  ============================== 332 passed, 21 warnings in 46.86s ==============================
+  ============================== 350 passed, 21 warnings in 60.73s ==============================
   ```
 * **Cobertura Chave:**
   * Modelos relacionais, migrações automáticas e integridade de FKs no Cloud SQL.
@@ -163,3 +166,4 @@ TribalwarsBot/
   * Auto-seeding e persistência dos 5 modelos oficiais de construção (incluindo o modelo `Construcao` de 256 passos).
   * Hardening de packaging: `resource_path()`, `SafeStreamWriter` e logging de produção.
   * Gestão de licenças: suspensão manual, data de expiração, bloqueio em runtime e limites de contas.
+  * Distinção rigorosa de tropas pertencentes à aldeia (`own_troops`) vs tropas presentes (`troops_in_village`), blindando o recrutamento contra ataques em curso ou apoios externos.

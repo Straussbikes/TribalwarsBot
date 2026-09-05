@@ -8,13 +8,9 @@ import asyncio
 import logging
 import re
 from typing import Any, Dict, List, Optional
-from urllib.parse import urljoin, urlparse
-
-from curl_cffi.requests import AsyncSession, Response
+from curl_cffi.requests import AsyncSession
 
 from engine.core.exceptions import (
-    BotProtectionError,
-    SessionExpiredError,
     TribalWarsException,
 )
 from engine.utils.parsers import is_bot_protection_present
@@ -296,8 +292,8 @@ class TribalWarsAuthHandler:
         finally:
             try:
                 await session.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Aviso ao fechar sessão temporária de login: {e}")
 
     def _is_invalid_credentials(self, html: str) -> bool:
         """Verifica se o HTML de resposta indica erro de autenticação / password errada."""

@@ -79,8 +79,8 @@ def create_websocket_router(context: EngineContext, token_verifier: TokenVerifie
                         })
                     else:
                         logger.debug(f"Ação WebSocket não reconhecida: {action}")
-                except json.JSONDecodeError:
-                    pass
+                except json.JSONDecodeError as err:
+                    logger.debug(f"Payload JSON inválido recebido no WebSocket: {err}")
         except WebSocketDisconnect:
             context.unregister_websocket(websocket)
         except Exception as e:

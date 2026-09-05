@@ -3,7 +3,7 @@ Tribal Wars Mobile Automation Engine - Config & Settings Loader
 Carrega definições a partir de 'config.json' e variáveis de ambiente com validações.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 import json
 import logging
 import os
@@ -117,6 +117,7 @@ class RecruitmentConfig:
     min_free_pop: int = 10
     interval_minutes: float = 5.0
     max_queue_elements: int = 3
+    min_reserve_resources: int = 500
 
 
 @dataclass
@@ -319,25 +320,52 @@ class BotConfig:
         elif not model_name and isinstance(village_id, str) and not village_id.isdigit():
             cat = village_id.lower().strip()
 
-        # 1. Verifica se existe o modelo no dicionário de modelos em memória
-        if hasattr(self.recruitment, "models") and cat in self.recruitment.models:
-            return self.recruitment.models[cat]
+        # 1. Se db for fornecido explicitamente, consulta db primeiro
+        if db is not None:
+            try:
+                db_model = db.get_recruitment_model(cat)
+                if db_model and db_model.get("units"):
+                    units = {str(k): int(v) for k, v in db_model["units"].items()}
+                    if any(v > 0 for v in units.values()):
+                        return units
+            except Exception as e:
+                logger.debug(f"Aviso ao consultar modelo no db fornecido para categoria '{cat}': {e}")
 
-        # 2. Tenta consultar modelo correspondente no SQLite
-        try:
-            if db is None:
+        # 2. Verifica se existe o modelo no dicionário de modelos em memória do BotConfig
+        if hasattr(self.recruitment, "models") and cat in self.recruitment.models:
+            mem_units = self.recruitment.models[cat]
+            if isinstance(mem_units, dict) and any(v > 0 for v in mem_units.values()):
+                return mem_units
+
+        # 3. Fallback: consulta SQLite para modelos customizados ou persistidos
+        if db is None:
+            try:
                 from engine.storage.database import AccountsDatabase
                 db = AccountsDatabase()
-            db_model = db.get_recruitment_model(cat)
-            if db_model and db_model.get("units"):
-                return {str(k): int(v) for k, v in db_model["units"].items()}
-        except Exception as e:
-            logger.debug(f"Aviso ao consultar modelo de recrutamento no SQLite para categoria '{cat}': {e}")
+                db_model = db.get_recruitment_model(cat)
+                if db_model and db_model.get("units"):
+                    units = {str(k): int(v) for k, v in db_model["units"].items()}
+                    if any(v > 0 for v in units.values()):
+                        return units
+            except Exception as e:
+                logger.debug(f"Aviso ao consultar modelo de recrutamento no SQLite para categoria '{cat}': {e}")
 
-        # 3. Normalização estrita para 'defense' ou 'attack'
+        # 4. Normalização estrita para 'defense' ou 'attack'
         norm_cat = "defense" if "def" in cat else "attack"
         if hasattr(self.recruitment, "models") and norm_cat in self.recruitment.models:
-            return self.recruitment.models[norm_cat]
+            norm_units = self.recruitment.models[norm_cat]
+            if isinstance(norm_units, dict) and any(v > 0 for v in norm_units.values()):
+                return norm_units
+
+        try:
+            if db:
+                db_model = db.get_recruitment_model(norm_cat)
+                if db_model and db_model.get("units"):
+                    units = {str(k): int(v) for k, v in db_model["units"].items()}
+                    if any(v > 0 for v in units.values()):
+                        return units
+        except Exception as e:
+            logger.debug(f"Aviso ao carregar modelo de recrutamento do DB: {e}")
 
         # 4. Fallback para arquétipos padrão de categoria
         v_cat = VillageCategory.DEFENSE if norm_cat == "defense" else VillageCategory.ATTACK
@@ -478,24 +506,47 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
     # 4. Carrega configurações de Recrutamento
     r_data = data.get("recruitment", {})
     r_enabled = bool(r_data.get("enabled", False))
-    r_interval = float(r_data.get("interval_minutes", 5.0))
+    r_interval = float(r_data.get("interval_minutes") or (float(r_data.get("interval_seconds", 300)) / 60.0))
     r_min_pop = int(r_data.get("min_free_pop", 10))
     r_max_queue = int(r_data.get("max_queue_elements", 3))
+    r_min_reserve = int(r_data.get("min_reserve_resources", 500))
 
     models_data = r_data.get("models", {})
     parsed_models = {}
     if isinstance(models_data, dict):
         for m_name, m_targets in models_data.items():
             if isinstance(m_targets, dict):
-                parsed_models[str(m_name)] = {str(k): int(v) for k, v in m_targets.items()}
+                parsed_models[str(m_name)] = {}
+                for k, v in m_targets.items():
+                    try:
+                        parsed_models[str(m_name)][str(k)] = int(v)
+                    except (ValueError, TypeError):
+                        pass
 
     batch_data = r_data.get("batch_sizes", {})
     parsed_batches = {}
     if isinstance(batch_data, dict):
-        parsed_batches = {str(k): int(v) for k, v in batch_data.items()}
+        for k, v in batch_data.items():
+            if isinstance(v, dict):
+                for sub_k, sub_v in v.items():
+                    try:
+                        parsed_batches[str(sub_k)] = int(sub_v)
+                    except (ValueError, TypeError):
+                        pass
+            else:
+                try:
+                    parsed_batches[str(k)] = int(v)
+                except (ValueError, TypeError):
+                    pass
 
     targets_data = r_data.get("targets", {})
-    parsed_targets = {str(k): int(v) for k, v in targets_data.items()} if isinstance(targets_data, dict) else {}
+    parsed_targets = {}
+    if isinstance(targets_data, dict):
+        for k, v in targets_data.items():
+            try:
+                parsed_targets[str(k)] = int(v)
+            except (ValueError, TypeError):
+                pass
 
     recruitment_config = RecruitmentConfig(
         enabled=r_enabled,
@@ -508,6 +559,7 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
         min_free_pop=r_min_pop,
         interval_minutes=r_interval,
         max_queue_elements=r_max_queue,
+        min_reserve_resources=r_min_reserve,
     )
 
     # 5. Carrega configurações de Arbitragem Económica

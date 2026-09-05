@@ -8,14 +8,13 @@ Motor tático de combate de precisão milimétrica:
 - Fake Trains coordenados.
 """
 
-import asyncio
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
 import math
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from engine.actions.combat_sync import ClockSynchronizer
 from engine.actions.place import (
@@ -25,7 +24,6 @@ from engine.actions.place import (
     UnitsCount,
 )
 from engine.core.account import TribalAccount
-from engine.core.models import Task, TaskPriority
 from engine.utils.parsers import parse_command_confirmation
 
 logger = logging.getLogger(__name__)

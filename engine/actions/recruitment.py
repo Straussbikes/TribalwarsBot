@@ -100,6 +100,8 @@ class RecruitmentState:
     available_units: Dict[str, int] = field(default_factory=dict)
     queue: List[TrainingOrder] = field(default_factory=list)
     total_in_queue: Dict[str, int] = field(default_factory=dict)
+    own_units: Dict[str, int] = field(default_factory=dict)
+    in_village_units: Dict[str, int] = field(default_factory=dict)
 
     @property
     def is_training(self) -> bool:
@@ -130,9 +132,9 @@ class RecruitmentManager:
     ) -> RecruitmentState:
         """
         Consulta o ecrã do edifício militar ('barracks', 'stable' ou 'garage')
-        e extrai as tropas disponíveis e ordens ativas na fila.
+        e extrai as tropas disponíveis, contagem própria/total e ordens ativas na fila.
         """
-        html = await account.get_screen(building, village_id=village_id)
+        html = await account.get_screen(building, village_id=village_id, extra_params={"page": None})
         raw_data = parse_recruitment_page(html)
 
         orders: List[TrainingOrder] = [
@@ -146,12 +148,30 @@ class RecruitmentManager:
             for q in raw_data.get("queue", [])
         ]
 
+        own_units = raw_data.get("own_units", {})
+        in_village_units = raw_data.get("in_village_units", {})
+
         state = RecruitmentState(
             building=building,
             available_units=raw_data.get("available_units", {}),
             queue=orders,
             total_in_queue=raw_data.get("total_in_queue", {}),
+            own_units=own_units,
+            in_village_units=in_village_units,
         )
+
+        v_id = village_id or account.current_village_id
+        if v_id:
+            target_v = account.villages.get(v_id) or account.current_village
+            if target_v:
+                if own_units:
+                    if not target_v.own_troops:
+                        target_v.own_troops = {}
+                    target_v.own_troops.update(own_units)
+                if in_village_units:
+                    if not target_v.troops_in_village:
+                        target_v.troops_in_village = {}
+                    target_v.troops_in_village.update(in_village_units)
 
         logger.info(
             f"[{account.world}] {building.capitalize()}: {len(orders)} ordens na fila "
@@ -276,14 +296,22 @@ class RecruitmentManager:
         # Orçamento de população disponível para este ciclo
         pop_budget = max(0, free_pop - min_free_pop) if min_free_pop > 0 else free_pop
 
-        # Recursos disponíveis na aldeia (acompanhados e deduzidos dinamicamente)
-        avail_wood = village.resources.wood if village else 0
-        avail_stone = village.resources.stone if village else 0
-        avail_iron = village.resources.iron if village else 0
+        # Recursos disponíveis na aldeia (acompanhados e deduzidos dinamicamente, respeitando reserva para edifícios)
+        min_reserve = 0
+        if hasattr(account, "config") and hasattr(account.config, "recruitment"):
+            min_reserve = getattr(account.config.recruitment, "min_reserve_resources", 0)
+
+        raw_wood = village.resources.wood if village else 0
+        raw_stone = village.resources.stone if village else 0
+        raw_iron = village.resources.iron if village else 0
+
+        avail_wood = max(0, raw_wood - min_reserve) if min_reserve > 0 else raw_wood
+        avail_stone = max(0, raw_stone - min_reserve) if min_reserve > 0 else raw_stone
+        avail_iron = max(0, raw_iron - min_reserve) if min_reserve > 0 else raw_iron
 
         logger.info(
             f"[{account.world}] 🛡️⚔️ Ciclo de Recrutamento (Aldeia {v_id}): "
-            f"Recursos: {avail_wood}M, {avail_stone}A, {avail_iron}F | Pop Livre: {free_pop} (Orçamento: {pop_budget}) | "
+            f"Recursos Úteis: {avail_wood}M, {avail_stone}A, {avail_iron}F (Reserva: {min_reserve}) | Pop Livre: {free_pop} (Orçamento: {pop_budget}) | "
             f"Metas: {', '.join(f'{k}:{v}' for k, v in targets.items() if v > 0) or 'Nenhuma'}"
         )
 
@@ -291,6 +319,8 @@ class RecruitmentManager:
         try:
             place_state = await self.place_manager.get_state(account, village_id=v_id)
             troops_home = place_state.units.to_dict()
+            if hasattr(self.place_manager, "get_village_units_overview"):
+                await self.place_manager.get_village_units_overview(account, village_id=v_id)
         except Exception as e:
             logger.warning(f"Falha ao ler tropas na aldeia para cálculo de metas: {e}")
             troops_home = {}
@@ -324,7 +354,7 @@ class RecruitmentManager:
             if building not in buildings_to_check:
                 continue
 
-            # Verificação 1: Se os edifícios da aldeia são conhecidos e o edifício principal de treino não existe (nível 0)
+            # Verificação 1: Se os edifícios da aldeia são conhecidos e o edifício está nível 0
             if village_buildings and village_buildings.get(building, 0) < 1:
                 logger.info(
                     f"[{account.world}] Edifício '{building}' ainda não construído na aldeia {v_id} (nível 0). "
@@ -362,9 +392,9 @@ class RecruitmentManager:
                 if target_count <= 0:
                     continue
 
-                # Verificação 2: Pré-requisitos de edifícios da unidade (ex: Bárbaro requer Quartel 2 e Ferreiro 2)
+                # Verificação 2: Pré-requisitos de edifícios da unidade (apenas se a unidade NÃO estiver já disponível no ecrã)
                 reqs = UNIT_BUILDING_REQUIREMENTS.get(unit, {})
-                if village_buildings and reqs:
+                if village_buildings and reqs and unit not in b_state.available_units:
                     unmet = [
                         f"{req_b} nv{req_lvl} (atual: {village_buildings.get(req_b, 0)})"
                         for req_b, req_lvl in reqs.items()
@@ -407,12 +437,28 @@ class RecruitmentManager:
                         )
                     continue
 
-                home_count = troops_home.get(unit, 0)
+                # Tropas que PERTENCEM à aldeia (na aldeia + fora em apoio + a caminho/farm)
+                # Prioridade 1: Extraído diretamente da linha da unidade no edifício militar (padrão X/Y do servidor)
+                own_count = b_state.own_units.get(unit) if getattr(b_state, "own_units", None) else None
+
+                # Prioridade 2: Consulta tropas próprias já catalogadas da aldeia
+                if own_count is None:
+                    target_v = account.villages.get(v_id) or account.current_village
+                    if target_v and getattr(target_v, "own_troops", None) and unit in target_v.own_troops:
+                        own_count = target_v.own_troops.get(unit)
+
+                # Prioridade 3: Fallback defensivo (ex: mocks em testes que só informam troops_home)
+                if own_count is None:
+                    own_count = troops_home.get(unit, 0)
+
                 in_queue_count = b_state.total_in_queue.get(unit, 0)
-                needed = target_count - (home_count + in_queue_count)
+                needed = target_count - (own_count + in_queue_count)
 
                 if needed <= 0:
-                    logger.debug(f"Meta de {unit} atingida ({home_count} na aldeia + {in_queue_count} na fila >= {target_count}).")
+                    logger.debug(
+                        f"[{account.world}] Meta de {unit} atingida na aldeia {v_id} "
+                        f"({own_count} pertencentes à aldeia + {in_queue_count} na fila >= {target_count})."
+                    )
                     continue
 
                 # Verificação prévia de recursos disponíveis na aldeia
@@ -453,7 +499,8 @@ class RecruitmentManager:
                     avail_iron -= to_recruit * cost["iron"]
                     logger.info(
                         f"[{account.world}] 🏹 Lote dinâmico planeado: {to_recruit}x {unit.capitalize()} "
-                        f"(Custo: {to_recruit * cost['wood']}M, {to_recruit * cost['stone']}A, {to_recruit * cost['iron']}F | "
+                        f"(Meta: {target_count} | Aldeia possui: {own_count} | Na fila: {in_queue_count} | Faltam: {needed} | "
+                        f"Custo: {to_recruit * cost['wood']}M, {to_recruit * cost['stone']}A, {to_recruit * cost['iron']}F | "
                         f"Recursos restantes: {avail_wood}M, {avail_stone}A, {avail_iron}F)."
                     )
 

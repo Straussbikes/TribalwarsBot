@@ -707,6 +707,8 @@ class MainBuildingManager:
         village_id: Optional[int] = None,
         force: bool = True,
         build_url: Optional[str] = None,
+        target_level: Optional[int] = None,
+        initial_queue_count: Optional[int] = None,
     ) -> bool:
         """
         Executa a ordem de construção de um edifício no Edifício Principal.
@@ -718,6 +720,22 @@ class MainBuildingManager:
         logger.info(
             f"[{account.world}] 🔨 A enviar ordem de construção para: '{b_name}' ({b_canon})"
         )
+
+        def _check_in_queue(q_list: List[Dict[str, Any]]) -> bool:
+            for q in q_list:
+                match_b = (
+                    q.get("building") == b_canon
+                    or self.normalize_building_id(q.get("building_raw", "")) == b_canon
+                    or q.get("building_raw") == b_name
+                )
+                if match_b:
+                    if target_level is not None:
+                        q_lvl = int(q.get("target_level", 0))
+                        if q_lvl >= target_level:
+                            return True
+                    else:
+                        return True
+            return False
 
         try:
             # 1. Parâmetros padrão de melhoria (action=build é o padrão nativo do Tribal Wars)
@@ -752,12 +770,7 @@ class MainBuildingManager:
 
             # Verifica se o edifício entrou na fila
             queue = parse_build_queue(html)
-            in_queue = any(
-                q.get("building") == b_canon
-                or self.normalize_building_id(q.get("building_raw", "")) == b_canon
-                or q.get("building_raw") == b_name
-                for q in queue
-            )
+            in_queue = _check_in_queue(queue)
 
             if not in_queue:
                 # 2. Fallback resiliente: alguns mundos/versões utilizam action=upgrade_building
@@ -774,12 +787,7 @@ class MainBuildingManager:
                     apply_jitter=True,
                 )
                 queue = parse_build_queue(html)
-                in_queue = any(
-                    q.get("building") == b_canon
-                    or self.normalize_building_id(q.get("building_raw", "")) == b_canon
-                    or q.get("building_raw") == b_name
-                    for q in queue
-                )
+                in_queue = _check_in_queue(queue)
 
             if not in_queue:
                 # 3. Fallback POST: mundos com proteção CSRF estrita via requisição POST
@@ -801,16 +809,12 @@ class MainBuildingManager:
                         village_id=village_id,
                     )
                     queue = parse_build_queue(html)
-                    in_queue = any(
-                        q.get("building") == b_canon
-                        or self.normalize_building_id(q.get("building_raw", "")) == b_canon
-                        or q.get("building_raw") == b_name
-                        for q in queue
-                    )
+                    in_queue = _check_in_queue(queue)
                 except Exception as post_err:
                     logger.debug(f"[{account.world}] Fallback POST falhou: {post_err}")
 
-            if in_queue or len(queue) > 0:
+            order_confirmed = in_queue or (initial_queue_count is not None and len(queue) > initial_queue_count)
+            if order_confirmed:
                 logger.info(
                     f"[{account.world}] ✅ Ordem para '{b_name}' ({b_canon}) confirmada na fila! "
                     f"Itens em fila: {len(queue)}"
@@ -1279,11 +1283,14 @@ class MainBuildingManager:
             if not candidate:
                 break
 
+            prev_queue_count = state.queue_count
             success = await self.build_building(
                 account=account,
                 building=candidate.building,
                 village_id=v_id,
                 build_url=getattr(candidate, "build_url", None),
+                target_level=candidate.target_level,
+                initial_queue_count=prev_queue_count,
             )
 
             if success:
@@ -1302,7 +1309,15 @@ class MainBuildingManager:
 
                 # Se ainda houver vagas, re-lê o estado para avançar com o próximo do plano
                 if state.queue_count + 1 < limit:
-                    state = await self.get_state(account, village_id=v_id)
+                    new_state = await self.get_state(account, village_id=v_id)
+                    # Prevenção rigorosa de loop infinito: se a fila não aumentou no servidor, encerra o ciclo
+                    if new_state.queue_count <= prev_queue_count:
+                        logger.warning(
+                            f"[{account.world}] Fila no jogo não aumentou após ordem de '{b_name}' Nível {candidate.target_level} "
+                            f"(Fila: {new_state.queue_count}/{limit}). A encerrar ciclo para evitar requisições repetidas."
+                        )
+                        break
+                    state = new_state
                 else:
                     break
             else:

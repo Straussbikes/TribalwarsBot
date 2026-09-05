@@ -11,7 +11,7 @@ import subprocess
 import sys
 import zipfile
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "1.2.0"
 
 def find_iscc() -> Path | None:
     """Procura pelo compilador Inno Setup (ISCC.exe) no PATH e nos diretórios habituais."""
@@ -107,7 +107,7 @@ def main():
     iscc = find_iscc()
     if iscc:
         print(f"\n[Instalador] Compilador Inno Setup detetado: {iscc}")
-        print("[Instalador] A compilar TribalWarsBot_Setup_v2.0.0.exe...")
+        print(f"[Instalador] A compilar TribalWarsBot_Setup_v{APP_VERSION}.exe...")
         res = subprocess.run([str(iscc), str(iss_file)], cwd=str(root_dir))
         if res.returncode == 0:
             setup_exe = dist_dir / f"TribalWarsBot_Setup_v{APP_VERSION}.exe"
