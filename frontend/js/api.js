@@ -333,11 +333,13 @@ class SidecarApi {
     return await this.request(url, { method: "POST" });
   }
 
-  async toggleBuilding(enabled = null, intervalSeconds = null, maxQueue = null) {
+  async toggleBuilding(enabled = null, intervalSeconds = null, maxQueue = null, autoFarmPriority = null, farmThresholdPop = null) {
     const payload = {};
     if (enabled !== null) payload.enabled = enabled;
     if (intervalSeconds !== null) payload.interval_seconds = parseFloat(intervalSeconds);
     if (maxQueue !== null) payload.max_queue = parseInt(maxQueue, 10);
+    if (autoFarmPriority !== null) payload.auto_farm_priority = autoFarmPriority;
+    if (farmThresholdPop !== null) payload.farm_threshold_pop = parseInt(farmThresholdPop, 10);
     return await this.request("/api/building/toggle", {
       method: "POST",
       body: JSON.stringify(payload),

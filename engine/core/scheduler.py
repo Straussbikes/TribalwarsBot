@@ -38,6 +38,7 @@ class TaskScheduler:
         self._wake_event = asyncio.Event()
 
         self._worker_task: Optional[asyncio.Task] = None
+        self.current_task: Optional[Task] = None
         self._bot_protect_handlers: List[Callable[[BotProtectionError], Coroutine]] = []
         self._session_expired_handlers: List[Callable[[SessionExpiredError], Coroutine]] = []
         self._task_complete_handlers: List[Callable[[Task, Any], Coroutine]] = []
@@ -57,6 +58,19 @@ class TaskScheduler:
     @property
     def queue_size(self) -> int:
         return self.queue.qsize()
+
+    @property
+    def pending_task_names(self) -> Set[str]:
+        """Retorna os nomes das tarefas atualmente agendadas ou na fila."""
+        # asyncio.PriorityQueue utiliza uma lista interna _queue
+        internal_queue = getattr(self.queue, "_queue", [])
+        return {getattr(t, "name", "") for t in internal_queue if getattr(t, "name", "")}
+
+    def has_task(self, name: str) -> bool:
+        """Verifica se já existe uma tarefa com este nome agendada ou em execução."""
+        if self.current_task and self.current_task.name == name:
+            return True
+        return name in self.pending_task_names
 
     def clear(self) -> None:
         """Esvazia todas as tarefas pendentes na fila do agendador."""
@@ -248,6 +262,7 @@ class TaskScheduler:
             return
 
         try:
+            self.current_task = task
             result = await task.action(*task.args, **task.kwargs)
             for handler in self._task_complete_handlers:
                 asyncio.create_task(handler(task, result))
@@ -292,3 +307,5 @@ class TaskScheduler:
                     f"[{self.name}] Tarefa '{task.name}' falhou permanentemente após "
                     f"{task.max_retries} tentativas: {exc}"
                 )
+        finally:
+            self.current_task = None

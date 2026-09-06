@@ -170,11 +170,12 @@ class WorldWorker:
                     # Obtém modelo atribuído à aldeia
                     v_id = acc.current_village_id
                     plan = cfg.get_active_build_plan(village_id=str(v_id))
-                    await self.main_building_manager.run_building_cycle(
+                    await self.main_building_manager.run_auto_build_cycle(
                         account=acc,
                         plan=plan,
                         max_queue=cfg.building.max_queue,
                         village_id=v_id,
+                        building_config=cfg.building,
                     )
             except RateLimitError as rle:
                 self.handle_rate_limit(rle.retry_after)
@@ -203,10 +204,7 @@ class WorldWorker:
                 if cfg.farm.enabled and acc.current_village_id:
                     await self.farm_manager.run_comprehensive_radius_farm_cycle(
                         account=acc,
-                        radius=cfg.farm.max_distance,
-                        default_template=cfg.farm.default_template,
-                        custom_targets=cfg.farm.custom_targets,
-                        custom_troops=cfg.farm.custom_troops,
+                        config=cfg.farm,
                         village_id=acc.current_village_id,
                     )
             except RateLimitError as rle:
@@ -413,7 +411,7 @@ class WorldWorkerOrchestrator:
         # Garante que só há uma instância de TribalAccount para o mesmo mundo
         account = None
         if self.context:
-            existing = getattr(self.context, "_account", None)
+            existing = getattr(self.context, "account", None) or getattr(self.context, "_account", None)
             if existing and existing.world.strip().lower() == w_code:
                 account = existing
                 if sid:
@@ -441,7 +439,10 @@ class WorldWorkerOrchestrator:
 
         self.workers[w_code] = worker
         if self.context:
+            self.context.account = account
             self.context._account = account
+            if getattr(self.context, "active_profile_id", None) == account_id:
+                self.context.scheduler = worker.scheduler
         if not self.active_focus_world:
             self.active_focus_world = w_code
 
@@ -513,38 +514,35 @@ class WorldWorkerOrchestrator:
         _deep_merge_cfg(raw_cfg, new_data)
         worker.config = parse_config_dict(raw_cfg)
 
-        # Se recrutamento foi ativado e a rotina não está agendada, agenda no scheduler do worker
+        # Se módulos foram ativados e não há tarefa pendente, agenda com intervalos desfasados para evitar concorrência simultânea
         if worker.config.recruitment.enabled and worker.scheduler.is_running and hasattr(worker, "_recruit_task") and worker._recruit_task:
             task_name = f"AutoRecruit [{worker.world_code}]"
-            is_scheduled = any(getattr(t, "name", "") == task_name for t in getattr(worker.scheduler, "_tasks", []))
-            if not is_scheduled:
+            if not worker.scheduler.has_task(task_name):
                 worker.scheduler.schedule(
                     name=task_name,
                     priority=TaskPriority.RECRUIT,
                     action=worker._recruit_task,
-                    delay_seconds=2.0,
+                    delay_seconds=18.0,
                 )
 
         if worker.config.building.enabled and worker.scheduler.is_running and hasattr(worker, "_build_task") and worker._build_task:
             task_name = f"AutoBuild [{worker.world_code}]"
-            is_scheduled = any(getattr(t, "name", "") == task_name for t in getattr(worker.scheduler, "_tasks", []))
-            if not is_scheduled:
+            if not worker.scheduler.has_task(task_name):
                 worker.scheduler.schedule(
                     name=task_name,
                     priority=TaskPriority.BUILD,
                     action=worker._build_task,
-                    delay_seconds=2.0,
+                    delay_seconds=6.0,
                 )
 
         if worker.config.farm.enabled and worker.scheduler.is_running and hasattr(worker, "_farm_task") and worker._farm_task:
             task_name = f"AutoFarm [{worker.world_code}]"
-            is_scheduled = any(getattr(t, "name", "") == task_name for t in getattr(worker.scheduler, "_tasks", []))
-            if not is_scheduled:
+            if not worker.scheduler.has_task(task_name):
                 worker.scheduler.schedule(
                     name=task_name,
                     priority=TaskPriority.FARM,
                     action=worker._farm_task,
-                    delay_seconds=2.0,
+                    delay_seconds=12.0,
                 )
         return True
 

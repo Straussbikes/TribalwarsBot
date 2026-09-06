@@ -925,6 +925,106 @@ class MainBuildingManager:
 
         return rush_steps
 
+    def check_emergency_farm_upgrade(
+        self,
+        state: MainBuildingState,
+        resources: Resources,
+        building_config: Optional[Any] = None,
+    ) -> Tuple[Optional[BuildingUpgrade], bool]:
+        """
+        Avalia se a população livre da aldeia atingiu o limiar crítico
+        e prioriza de emergência a evolução da Fazenda (farm) antes de qualquer outro edifício.
+
+        Retorna:
+            (candidate, is_emergency_active):
+            - candidate: Instância de BuildingUpgrade se a Fazenda puder ser colocada na fila agora.
+            - is_emergency_active: True se a situação de emergência de Fazenda estiver ativa
+              (bloqueando o avanço de outros edifícios do plano para poupar recursos).
+        """
+        auto_farm = True
+        farm_threshold = 50
+        farm_max_lvl = 30
+
+        if building_config:
+            auto_farm = getattr(building_config, "auto_farm_priority", True)
+            farm_threshold = getattr(building_config, "farm_threshold_pop", 50)
+            farm_max_lvl = getattr(building_config, "farm_max_level_limit", 30)
+
+        if not auto_farm:
+            return None, False
+
+        free_pop = getattr(resources, "free_pop", 999)
+        if free_pop > farm_threshold:
+            return None, False
+
+        farm_id = BuildingType.FARM
+        virt_levels = state.virtual_levels
+        current_virt = virt_levels.get(farm_id, 0)
+        max_possible = min(farm_max_lvl, MAX_BUILDING_LEVELS.get(farm_id, 30))
+        if current_virt >= max_possible:
+            return None, False
+
+        # Se a Fazenda já estiver em construção na fila ativa, aguarda a conclusão da ordem em andamento
+        if any(q.building == farm_id for q in state.queue):
+            return None, False
+
+        curr_real = state.buildings.get(farm_id, 0)
+        target_lvl = current_virt + 1
+        if current_virt > curr_real or farm_id not in state.upgrades:
+            e_wood, e_stone, e_iron, _ = estimate_building_cost(farm_id, target_lvl)
+            upgrade_info = BuildingUpgrade(
+                building=farm_id,
+                current_level=current_virt,
+                target_level=target_lvl,
+                wood=e_wood,
+                stone=e_stone,
+                iron=e_iron,
+                pop=0,
+                can_build=True,
+                is_rush=True,
+            )
+        else:
+            upgrade_info = state.upgrades[farm_id]
+            upgrade_info.is_rush = True
+            upgrade_info.pop = 0
+
+        farm_name = BUILDING_NAMES.get(farm_id, "Fazenda")
+
+        # Verifica se o armazém comporta o custo da Fazenda
+        if (
+            resources.storage_max > 0
+            and (
+                upgrade_info.wood > resources.storage_max
+                or upgrade_info.stone > resources.storage_max
+                or upgrade_info.iron > resources.storage_max
+            )
+        ):
+            logger.warning(
+                f"[{state.village_id}] ⚠️ Armazém ({resources.storage_max}) insuficiente para "
+                f"evoluir '{farm_name}' para Nível {target_lvl}."
+            )
+            return None, False
+
+        if resources.can_afford(
+            wood=upgrade_info.wood,
+            stone=upgrade_info.stone,
+            iron=upgrade_info.iron,
+            pop=0,
+        ):
+            logger.info(
+                f"[{state.village_id}] 🚨 [FAZENDA DE EMERGÊNCIA] População livre crítica "
+                f"({free_pop}/{farm_threshold}). Priorizando '{farm_name}' para Nível {target_lvl}!"
+            )
+            return upgrade_info, True
+        else:
+            logger.info(
+                f"[{state.village_id}] 🚨 [FAZENDA DE EMERGÊNCIA EM ESPERA] População livre crítica "
+                f"({free_pop}/{farm_threshold}). A aguardar recursos para '{farm_name}' Nível {target_lvl} "
+                f"({resources.wood}/{upgrade_info.wood} M, {resources.stone}/{upgrade_info.stone} A, {resources.iron}/{upgrade_info.iron} F). "
+                f"Construção de outros edifícios suspensa temporariamente para poupar recursos."
+            )
+            return None, True
+
     def get_next_build_candidate(
         self,
         state: MainBuildingState,
@@ -932,12 +1032,13 @@ class MainBuildingManager:
         resources: Resources,
         max_queue: Optional[int] = None,
         recruitment_targets: Optional[Dict[str, int]] = None,
+        building_config: Optional[Any] = None,
     ) -> Optional[BuildingUpgrade]:
         """
         Avalia o plano de construção e o estado atual da aldeia para encontrar
         o próximo edifício elegível para evolução.
-        Prioriza com prioridade máxima o Rush de Pré-Requisitos Militares se houver
-        tropas configuradas (ex: Vikings e CL) com requisitos em falta.
+        Prioriza com prioridade máxima (Prioridade 0) a Fazenda se a população livre for crítica,
+        seguido do Rush de Pré-Requisitos Militares e do Plano Regular.
         """
         limit = max_queue if max_queue is not None else state.max_queue_size
         if state.queue_count >= limit:
@@ -946,6 +1047,18 @@ class MainBuildingManager:
                 f"A aguardar conclusão da ordem em andamento."
             )
             return None
+
+        # 0. EMERGÊNCIA DE FAZENDA (Prioridade 0 - População Crítica)
+        farm_candidate, is_emergency = self.check_emergency_farm_upgrade(
+            state=state,
+            resources=resources,
+            building_config=building_config,
+        )
+        if is_emergency:
+            if farm_candidate:
+                return farm_candidate
+            else:
+                return None
 
         virt_levels = state.virtual_levels
 
@@ -1231,6 +1344,7 @@ class MainBuildingManager:
         max_queue: Optional[int] = None,
         village_id: Optional[int] = None,
         recruitment_targets: Optional[Dict[str, int]] = None,
+        building_config: Optional[Any] = None,
     ) -> Optional[str]:
         """
         Executa um ciclo completo de verificação e evolução automática:
@@ -1258,6 +1372,18 @@ class MainBuildingManager:
                 except Exception as e:
                     logger.debug(f"Aviso ao carregar config para rush militar: {e}")
 
+        # Se não foi fornecida configuração de construção explícita, tenta obter da conta ou arquivo
+        if building_config is None:
+            if hasattr(account, "config") and account.config:
+                building_config = getattr(account.config, "building", None)
+            if building_config is None:
+                try:
+                    from engine.config.settings import load_config
+                    cfg = load_config()
+                    building_config = getattr(cfg, "building", None)
+                except Exception as e:
+                    logger.debug(f"Aviso ao carregar building_config para auto-build: {e}")
+
         # 1. Verifica e conclui ordens gratuitas (< 3 min)
         await self.check_and_complete_instant_builds(account, village_id=v_id)
 
@@ -1278,6 +1404,7 @@ class MainBuildingManager:
                 resources=resources,
                 max_queue=limit,
                 recruitment_targets=recruitment_targets,
+                building_config=building_config,
             )
 
             if not candidate:
@@ -1367,10 +1494,16 @@ class MainBuildingManager:
                 await account.refresh_state(village_id=village_id)
                 v_id = village_id or account.current_village_id or 0
                 rec_targets = None
-                if bot_config and hasattr(bot_config, "get_village_recruitment_targets"):
-                    rec_targets = bot_config.get_village_recruitment_targets(v_id)
-                elif hasattr(account, "config") and account.config:
+                bld_config = None
+                if bot_config:
+                    if hasattr(bot_config, "get_village_recruitment_targets"):
+                        rec_targets = bot_config.get_village_recruitment_targets(v_id)
+                    if hasattr(bot_config, "building"):
+                        bld_config = bot_config.building
+                if rec_targets is None and hasattr(account, "config") and account.config:
                     rec_targets = account.config.get_village_recruitment_targets(v_id)
+                if bld_config is None and hasattr(account, "config") and account.config:
+                    bld_config = getattr(account.config, "building", None)
 
                 await self.run_auto_build_cycle(
                     account=account,
@@ -1378,6 +1511,7 @@ class MainBuildingManager:
                     max_queue=max_queue,
                     village_id=village_id,
                     recruitment_targets=rec_targets,
+                    building_config=bld_config,
                 )
             except (BotProtectionError, SessionExpiredError):
                 raise

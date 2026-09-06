@@ -21,6 +21,9 @@ class BuildingConfig:
     max_queue: int = 2                 # Máximo de construções sem custos adicionais
     interval_seconds: float = 75.0     # Intervalo médio entre verificações
     custom_plan: List[Tuple[str, int]] = field(default_factory=list)
+    auto_farm_priority: bool = True    # Priorização automática da Fazenda em população crítica
+    farm_threshold_pop: int = 50       # Limiar de população livre para ativar prioridade de Fazenda
+    farm_max_level_limit: int = 30     # Nível máximo de Fazenda para priorização automática
 
 
 @dataclass
@@ -43,6 +46,7 @@ class FarmConfig:
     min_delay_per_attack_ms: int = 500 # Atraso mínimo entre ataques individuais (aliviado anti-timeout)
     max_delay_per_attack_ms: int = 1100 # Atraso máximo entre ataques individuais (aliviado anti-timeout)
     interval_minutes: float = 10.0     # Frequência de envio de ondas em minutos (compatibilidade)
+    target_cooldown_minutes: float = 10.0 # Intervalo mínimo para reenviar ataques à mesma bárbara
     custom_targets: List[Any] = field(default_factory=list)
     custom_troops: Dict[str, int] = field(default_factory=lambda: {"spear": 5, "spy": 1})
     template_a_troops: Dict[str, int] = field(default_factory=lambda: {"spear": 0, "sword": 0, "axe": 0, "archer": 0, "spy": 0, "light": 5, "marcher": 0, "heavy": 0, "ram": 0, "catapult": 0, "knight": 0, "snob": 0})
@@ -58,8 +62,12 @@ class FarmConfig:
             self.template = self.default_template
         if not self.skip_losses:
             self.stop_on_losses = False
+        if not self.stop_on_losses:
+            self.skip_losses = False
         if not self.skip_active_targets:
             self.avoid_concurrent_attacks = False
+        if not self.avoid_concurrent_attacks:
+            self.skip_active_targets = False
 
 
 DEFAULT_ATTACK_MODEL: Dict[str, int] = {
@@ -445,12 +453,19 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
                 except (ValueError, TypeError):
                     continue
 
+    auto_farm_priority = bool(b_data.get("auto_farm_priority", True))
+    farm_threshold_pop = int(b_data.get("farm_threshold_pop", 50))
+    farm_max_level_limit = int(b_data.get("farm_max_level_limit", 30))
+
     building_config = BuildingConfig(
         enabled=enabled,
         template=template,
         max_queue=max_queue,
         interval_seconds=interval_seconds,
         custom_plan=custom_plan,
+        auto_farm_priority=auto_farm_priority,
+        farm_threshold_pop=farm_threshold_pop,
+        farm_max_level_limit=farm_max_level_limit,
     )
 
     # 3. Carrega configurações do Farm
@@ -458,10 +473,14 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
     f_enabled = bool(f_data.get("enabled", True))
     f_mode = str(f_data.get("mode", "am_farm")).lower().strip()
     f_template = str(f_data.get("template", "A")).upper().strip()
-    f_max_dist = float(f_data.get("max_distance", 15.0))
-    f_skip_losses = bool(f_data.get("skip_losses", True))
+    f_max_dist = float(f_data.get("max_distance", 25.0))
+    f_scan_all = bool(f_data.get("scan_all_radius_barbarians", True))
+    f_bootstrap = bool(f_data.get("bootstrap_unlisted_barbarians", True))
+    f_avoid_concurrent = bool(f_data.get("avoid_concurrent_attacks", f_data.get("skip_active_targets", True)))
+    f_stop_losses = bool(f_data.get("stop_on_losses", f_data.get("skip_losses", True)))
     f_skip_wall = bool(f_data.get("skip_wall", True))
     f_interval = float(f_data.get("interval_minutes", 10.0))
+    f_target_cooldown = float(f_data.get("target_cooldown_minutes", f_data.get("repeat_attack_cooldown_minutes", 10.0)))
     f_min_interval = int(f_data.get("min_interval_seconds", 120))
     f_max_interval = int(f_data.get("max_interval_seconds", 240))
     f_min_delay = int(f_data.get("min_delay_per_attack_ms", 500))
@@ -481,7 +500,7 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
     raw_troops = f_data.get("custom_troops", {"spear": 5, "spy": 1})
     custom_troops = {str(k): int(v) for k, v in raw_troops.items()} if isinstance(raw_troops, dict) else {}
     use_map_scanner = bool(f_data.get("use_map_scanner", True))
-    map_scan_radius = float(f_data.get("map_scan_radius", 15.0))
+    map_scan_radius = float(f_data.get("map_scan_radius", 25.0))
     map_cache_ttl_hours = float(f_data.get("map_cache_ttl_hours", 12.0))
 
     farm_config = FarmConfig(
@@ -489,13 +508,18 @@ def parse_config_dict(data: Dict[str, Any]) -> BotConfig:
         mode=f_mode,
         template=f_template,
         max_distance=f_max_dist,
-        skip_losses=f_skip_losses,
+        scan_all_radius_barbarians=f_scan_all,
+        bootstrap_unlisted_barbarians=f_bootstrap,
+        avoid_concurrent_attacks=f_avoid_concurrent,
+        skip_active_targets=f_avoid_concurrent,
+        stop_on_losses=f_stop_losses,
+        skip_losses=f_stop_losses,
         skip_wall=f_skip_wall,
         min_interval_seconds=f_min_interval,
         max_interval_seconds=f_max_interval,
         min_delay_per_attack_ms=f_min_delay,
         max_delay_per_attack_ms=f_max_delay,
-        interval_minutes=f_interval,
+        target_cooldown_minutes=f_target_cooldown,
         custom_targets=custom_targets,
         custom_troops=custom_troops,
         use_map_scanner=use_map_scanner,

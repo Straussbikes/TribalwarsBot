@@ -459,16 +459,31 @@ class FarmManager:
             f"[{account.world}] A iniciar onda de Farm (Modelo {tmpl_key}) para até {max_attacks} alvos..."
         )
 
+        cycle_sent: Set[str] = set()
+        now_ts = time.time()
+        farm_cfg = getattr(self.config, "farm", None)
+        cooldown_secs = getattr(farm_cfg, "target_cooldown_minutes", 10.0) * 60.0
+        avoid_concurrent = getattr(farm_cfg, "avoid_concurrent_attacks", True)
+
         for target in state.targets:
             if sent_count >= max_attacks:
                 break
+
+            coords = target.target_coords or f"{target.x}|{target.y}"
+            if coords in cycle_sent:
+                continue
 
             # 1. Filtro de distância máxima
             if target.distance > max_distance:
                 continue
 
-            # 2. Prevenção de colisões / ataques em trânsito
-            if target.has_attack_in_transit or target.target_coords in self._recent_farm_targets:
+            # 2. Prevenção de colisões / validação de cooldown
+            last_farmed = self._target_last_farmed.get(coords, 0.0)
+            time_since = now_ts - last_farmed
+            if last_farmed > 0 and time_since < cooldown_secs:
+                continue
+
+            if avoid_concurrent and (target.has_attack_in_transit or coords in self._recent_farm_targets):
                 continue
 
             # 3. Filtro de segurança: ignorar aldeias com perdas
@@ -506,8 +521,10 @@ class FarmManager:
             )
             if success:
                 sent_count += 1
-                if target.target_coords:
-                    self._recent_farm_targets.add(target.target_coords)
+                if coords:
+                    cycle_sent.add(coords)
+                    self._recent_farm_targets.add(coords)
+                    self._target_last_farmed[coords] = time.time()
                 target.has_attack_in_transit = True
 
                 logger.info(
@@ -820,12 +837,26 @@ class FarmManager:
 
         total_sent = 0
         consecutive_no_troops = 0
+        cycle_farmed_coords: Set[str] = set()
+        cooldown_secs = getattr(cfg, "target_cooldown_minutes", 10.0) * 60.0
+
         for target in all_targets:
             if total_sent >= max_attacks:
                 break
 
-            # 1. Prevenção de colisões / ataques em trânsito
-            if cfg.avoid_concurrent_attacks and (target.has_attack_in_transit or target.target_coords in self._recent_farm_targets):
+            coords = target.target_coords or f"{target.x}|{target.y}"
+            if coords in cycle_farmed_coords:
+                continue
+
+            last_farmed_time = self._target_last_farmed.get(coords, 0.0)
+            time_since_last = now_ts - last_farmed_time
+
+            # 1. Prevenção de colisões / ataques em trânsito ou validação de cooldown
+            if last_farmed_time > 0 and time_since_last < cooldown_secs:
+                results["skipped_in_transit"] += 1
+                continue
+
+            if cfg.avoid_concurrent_attacks and (target.has_attack_in_transit or coords in self._recent_farm_targets):
                 results["skipped_in_transit"] += 1
                 continue
 
@@ -866,9 +897,10 @@ class FarmManager:
                 if success:
                     results["am_farm_attacks_sent"] += 1
                     total_sent += 1
-                    if target.target_coords:
-                        self._recent_farm_targets.add(target.target_coords)
-                        self._target_last_farmed[target.target_coords] = time.time()
+                    if coords:
+                        cycle_farmed_coords.add(coords)
+                        self._recent_farm_targets.add(coords)
+                        self._target_last_farmed[coords] = time.time()
                     target.has_attack_in_transit = True
 
                     try:
@@ -911,9 +943,10 @@ class FarmManager:
                 if success:
                     results["bootstrap_attacks_sent"] += 1
                     total_sent += 1
-                    if target.target_coords:
-                        self._recent_farm_targets.add(target.target_coords)
-                        self._target_last_farmed[target.target_coords] = time.time()
+                    if coords:
+                        cycle_farmed_coords.add(coords)
+                        self._recent_farm_targets.add(coords)
+                        self._target_last_farmed[coords] = time.time()
                     delay = get_human_delay(1.5, 0.4, 0.8, 2.5)
                     await asyncio.sleep(delay)
                 else:
@@ -932,6 +965,11 @@ class FarmManager:
         results["total_attacks"] = total_attacks
         results["world"] = account.world
         results["village_id"] = v_id
+
+        # Limpa da memória alvos cujo cooldown já expirou para permitir reenvio
+        cutoff = now_ts - max(cooldown_secs, 3600.0)
+        self._target_last_farmed = {k: v for k, v in self._target_last_farmed.items() if v > cutoff}
+        self._recent_farm_targets = set(self._target_last_farmed.keys())
         if total_attacks > 0:
             results["message"] = (
                 f"🌾 Auto-Farm: {total_attacks} saques despachados "

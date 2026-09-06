@@ -200,6 +200,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     btnTriggerBuildTab: document.getElementById("btn-trigger-build-tab"),
     bldAutoToggle: document.getElementById("bld-auto-toggle"),
     bldBadgeStatus: document.getElementById("bld-badge-status"),
+    bldAutoFarmToggle: document.getElementById("bld-auto-farm-toggle"),
+    bldFarmThresholdPop: document.getElementById("bld-farm-threshold-pop"),
     bldIntervalSeconds: document.getElementById("bld-interval-seconds"),
     bldTemplateSelect: document.getElementById("bld-template-select"),
     btnManageBuildingTemplates: document.getElementById("btn-manage-building-templates"),
@@ -2895,6 +2897,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       elements.bldAutoToggle.checked = !!data.enabled;
     }
     updateBuildingStatusBadge(data.enabled);
+    if (elements.bldAutoFarmToggle && data.auto_farm_priority !== undefined) {
+      elements.bldAutoFarmToggle.checked = !!data.auto_farm_priority;
+    }
+    if (elements.bldFarmThresholdPop && data.farm_threshold_pop !== undefined && document.activeElement !== elements.bldFarmThresholdPop) {
+      elements.bldFarmThresholdPop.value = data.farm_threshold_pop;
+    }
     if (elements.bldIntervalSeconds && data.interval_seconds !== undefined && document.activeElement !== elements.bldIntervalSeconds) {
       elements.bldIntervalSeconds.value = data.interval_seconds;
     }
@@ -3162,6 +3170,32 @@ document.addEventListener("DOMContentLoaded", async () => {
       try {
         await window.api.toggleBuilding(isEnabled, intervalSec);
         addLogEntry("INFO", "building", `Intervalo de auto-construção atualizado para ${intervalSec}s.`);
+      } catch (err) {
+        console.error(err);
+      }
+    });
+  }
+
+  if (elements.bldAutoFarmToggle) {
+    elements.bldAutoFarmToggle.addEventListener("change", async () => {
+      const isAutoFarm = elements.bldAutoFarmToggle.checked;
+      try {
+        const threshold = parseInt(elements.bldFarmThresholdPop?.value, 10) || 50;
+        await window.api.toggleBuilding(null, null, null, isAutoFarm, threshold);
+        addLogEntry("INFO", "building", `Priorização de Fazenda ${isAutoFarm ? 'ATIVADA' : 'DESATIVADA'} (Limiar: ${threshold} pop).`);
+      } catch (err) {
+        addLogEntry("ERROR", "building", `Erro ao alternar priorização de fazenda: ${err.message}`);
+      }
+    });
+  }
+
+  if (elements.bldFarmThresholdPop) {
+    elements.bldFarmThresholdPop.addEventListener("change", async () => {
+      const threshold = parseInt(elements.bldFarmThresholdPop.value, 10) || 50;
+      const isAutoFarm = elements.bldAutoFarmToggle ? elements.bldAutoFarmToggle.checked : true;
+      try {
+        await window.api.toggleBuilding(null, null, null, isAutoFarm, threshold);
+        addLogEntry("INFO", "building", `Limiar de população crítica para Fazenda atualizado para ${threshold}.`);
       } catch (err) {
         console.error(err);
       }
@@ -4626,6 +4660,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (fScan) fScan.checked = config.farm.scan_all_radius_barbarians !== false;
         const fAvoid = document.getElementById("cfg-farm-avoid-concurrent");
         if (fAvoid) fAvoid.checked = config.farm.avoid_concurrent_attacks !== false;
+        const fCooldown = document.getElementById("farm-cfg-target-cooldown");
+        if (fCooldown && config.farm.target_cooldown_minutes != null) fCooldown.value = config.farm.target_cooldown_minutes;
         const fStop = document.getElementById("cfg-farm-stop-losses");
         if (fStop) fStop.checked = config.farm.stop_on_losses !== false;
         const fWall = document.getElementById("cfg-farm-skip-wall");
@@ -4714,6 +4750,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         max_distance: parseFloat(document.getElementById("cfg-farm-max-distance")?.value || "25.0"),
         scan_all_radius_barbarians: document.getElementById("cfg-farm-scan-all") ? document.getElementById("cfg-farm-scan-all").checked : true,
         avoid_concurrent_attacks: document.getElementById("cfg-farm-avoid-concurrent") ? document.getElementById("cfg-farm-avoid-concurrent").checked : true,
+        target_cooldown_minutes: parseFloat(document.getElementById("farm-cfg-target-cooldown")?.value || "10.0"),
         stop_on_losses: document.getElementById("cfg-farm-stop-losses") ? document.getElementById("cfg-farm-stop-losses").checked : true,
         skip_wall: document.getElementById("cfg-farm-skip-wall") ? document.getElementById("cfg-farm-skip-wall").checked : true,
         min_interval_seconds: parseFloat(document.getElementById("cfg-farm-min-interval")?.value || "120"),
@@ -5260,9 +5297,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   async function saveRecruitmentModelsHandler() {
     const btnTop = document.getElementById("btn-save-troop-models");
-    const btnBottom = document.getElementById("btn-save-troop-models-bottom");
     if (btnTop) { btnTop.disabled = true; btnTop.textContent = "A gravar no SQLite..."; }
-    if (btnBottom) { btnBottom.disabled = true; btnBottom.textContent = "A gravar no SQLite..."; }
     state._isSavingRecruitment = true;
 
     try {
@@ -5327,13 +5362,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     } finally {
       state._isSavingRecruitment = false;
       if (btnTop) { btnTop.disabled = false; btnTop.innerHTML = "<span>💾</span> Guardar Alterações na BD"; }
-      if (btnBottom) { btnBottom.disabled = false; btnBottom.innerHTML = "<span>💾</span> Guardar Alterações na BD"; }
     }
   }
 
   // Listeners de Gravação de Modelos de Tropas
   document.getElementById("btn-save-troop-models")?.addEventListener("click", saveRecruitmentModelsHandler);
-  document.getElementById("btn-save-troop-models-bottom")?.addEventListener("click", saveRecruitmentModelsHandler);
 
   // Botão Atualizar Modelos de Tropas
   document.getElementById("btn-refresh-troop-models-tab")?.addEventListener("click", async () => {
@@ -6039,6 +6072,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (maxDelay) maxDelay.value = statusRes.max_delay_per_attack_ms || 1100;
         const avoidConc = document.getElementById("farm-cfg-avoid-concurrent");
         if (avoidConc) avoidConc.checked = statusRes.avoid_concurrent_attacks !== false;
+        const targetCd = document.getElementById("farm-cfg-target-cooldown");
+        if (targetCd) targetCd.value = statusRes.target_cooldown_minutes || 10.0;
         const bootUnl = document.getElementById("farm-cfg-bootstrap-unlisted");
         if (bootUnl) bootUnl.checked = statusRes.bootstrap_unlisted_barbarians !== false;
         const stopLoss = document.getElementById("farm-cfg-stop-on-losses");
@@ -6268,6 +6303,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         min_delay_per_attack_ms: parseInt(document.getElementById("farm-cfg-min-delay")?.value || "500", 10),
         max_delay_per_attack_ms: parseInt(document.getElementById("farm-cfg-max-delay")?.value || "1100", 10),
         avoid_concurrent_attacks: !!document.getElementById("farm-cfg-avoid-concurrent")?.checked,
+        target_cooldown_minutes: parseFloat(document.getElementById("farm-cfg-target-cooldown")?.value || "10.0"),
         bootstrap_unlisted_barbarians: !!document.getElementById("farm-cfg-bootstrap-unlisted")?.checked,
         stop_on_losses: !!document.getElementById("farm-cfg-stop-on-losses")?.checked,
       };

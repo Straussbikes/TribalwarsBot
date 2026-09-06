@@ -1320,22 +1320,23 @@ class EngineContext:
             }
             self.profile_manager.save_profile(prof)
 
-        # 5. Registo no MultiWorldManager
+        # 5. Registo no MultiWorldManager (auto_start=False para evitar loops concorrentes duplicados)
         inst = await self.world_manager.register_world(
             world=world_key,
             sid=target_sid,
             domain=target_domain,
             proxy=target_proxy,
             config=None,
-            auto_start=True,
+            auto_start=False,
         )
         inst.account = world_account
 
         # 6. Registo no WorldWorkerOrchestrator se ativo
         orch = self.session_manager.orchestrator
+        worker = None
         if orch and acc_id:
             try:
-                await orch.register_and_start_worker(
+                worker = await orch.register_and_start_worker(
                     world_code=world_key,
                     is_active=True,
                     account_id=acc_id,
@@ -1343,11 +1344,19 @@ class EngineContext:
             except Exception as e:
                 logger.debug(f"Aviso ao orquestrar worker para {world_key}: {e}")
 
-        # 7. Alterna foco ativo para o novo mundo
+        # 7. Alterna foco ativo para o novo mundo garantindo única instância de account e scheduler
         self.world_manager.set_active_world(world_key)
-        self.account = inst.account
-        self.scheduler = inst.scheduler
-        self.config = inst.config
+        if worker:
+            self.account = worker.account
+            self.scheduler = worker.scheduler
+            self.config = worker.config
+            inst.account = worker.account
+            inst.scheduler = worker.scheduler
+            inst.config = worker.config
+        else:
+            self.account = inst.account
+            self.scheduler = inst.scheduler
+            self.config = inst.config
         self.update_config_and_save({"world": world_key, "sid": target_sid})
 
         # 8. Transmissão de eventos em tempo real
@@ -1687,7 +1696,9 @@ class EngineContext:
             curr_v = self.account.villages.get(v_id)
             resources = curr_v.resources if curr_v else None
             upcoming = self.main_building_manager.get_upcoming_plan(state, plan, resources=resources)
-            candidate = self.main_building_manager.get_next_build_candidate(state, plan, resources=resources)
+            candidate = self.main_building_manager.get_next_build_candidate(
+                state, plan, resources=resources, building_config=self.config.building
+            )
 
             # Calcula contagem de concluídos e total do plano
             completed_count = sum(1 for item in upcoming if item.get("status") == "completed")
@@ -1733,6 +1744,9 @@ class EngineContext:
                 "enabled": getattr(self.config.building, "enabled", True),
                 "interval_seconds": getattr(self.config.building, "interval_seconds", 75.0),
                 "max_queue": getattr(self.config.building, "max_queue", 2),
+                "auto_farm_priority": getattr(self.config.building, "auto_farm_priority", True),
+                "farm_threshold_pop": getattr(self.config.building, "farm_threshold_pop", 50),
+                "farm_max_level_limit": getattr(self.config.building, "farm_max_level_limit", 30),
                 "queue": [
                     {
                         "order_id": q.order_id,
@@ -1774,6 +1788,9 @@ class EngineContext:
         enabled: Optional[bool] = None,
         interval_seconds: Optional[float] = None,
         max_queue: Optional[int] = None,
+        auto_farm_priority: Optional[bool] = None,
+        farm_threshold_pop: Optional[int] = None,
+        farm_max_level_limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Ativa/desativa ou ajusta a rotina de auto-construção contínua."""
         update_data = {}
@@ -1786,6 +1803,15 @@ class EngineContext:
         if max_queue is not None:
             update_data["max_queue"] = int(max_queue)
             self.config.building.max_queue = int(max_queue)
+        if auto_farm_priority is not None:
+            update_data["auto_farm_priority"] = bool(auto_farm_priority)
+            self.config.building.auto_farm_priority = bool(auto_farm_priority)
+        if farm_threshold_pop is not None:
+            update_data["farm_threshold_pop"] = int(farm_threshold_pop)
+            self.config.building.farm_threshold_pop = int(farm_threshold_pop)
+        if farm_max_level_limit is not None:
+            update_data["farm_max_level_limit"] = int(farm_max_level_limit)
+            self.config.building.farm_max_level_limit = int(farm_max_level_limit)
 
         self.update_config_and_save({"building": update_data})
         w_code = (self.config.world or "").strip().lower()
@@ -2544,8 +2570,14 @@ class EngineContext:
                 except Exception as e:
                     logger.warning(f"Aviso na inicialização da conta ativada '{prof.name}': {e}")
 
-            # 5. Configura e agenda as rotinas no Scheduler
-            if self.scheduler and self.config.sid:
+            # 5. Configura e agenda as rotinas no Scheduler (evita duplicados caso o WorldWorkerOrchestrator já esteja ativo)
+            orch = getattr(self.session_manager, "orchestrator", None) if hasattr(self, "session_manager") else None
+            worker = orch.workers.get(prof.world.strip().lower()) if orch else None
+            if worker:
+                self.account = worker.account
+                self.scheduler = worker.scheduler
+                self.config = worker.config
+            elif self.scheduler and self.config.sid:
                 self.scheduler.clear()
                 # Main building
                 if self.config.building.enabled:
@@ -2664,6 +2696,7 @@ class EngineContext:
             "max_delay_per_attack_ms": getattr(cfg.farm, "max_delay_per_attack_ms", 1100),
             "avoid_concurrent_attacks": getattr(cfg.farm, "avoid_concurrent_attacks", True),
             "stop_on_losses": getattr(cfg.farm, "stop_on_losses", True),
+            "target_cooldown_minutes": getattr(cfg.farm, "target_cooldown_minutes", 10.0),
             "custom_targets": getattr(cfg.farm, "custom_targets", []),
             "available_troops": troops,
             "template_a": tmpl_a,
@@ -2753,7 +2786,11 @@ class EngineContext:
                 farm_dict[k] = v
 
         self.update_config_and_save({"farm": farm_dict})
-        if cfg.farm.enabled and acc and sch:
+        orch = getattr(self.session_manager, "orchestrator", None) if hasattr(self, "session_manager") else None
+        target_world_key = (world or cfg.world).strip().lower()
+        has_orch_worker = bool(orch and target_world_key in orch.workers)
+
+        if not has_orch_worker and cfg.farm.enabled and acc and sch:
             self.farm_manager.schedule_auto_farm(
                 scheduler=sch,
                 account=acc,

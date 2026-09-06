@@ -83,6 +83,9 @@ class BuildingToggleRequest(BaseModel):
     enabled: Optional[bool] = None
     interval_seconds: Optional[float] = None
     max_queue: Optional[int] = None
+    auto_farm_priority: Optional[bool] = None
+    farm_threshold_pop: Optional[int] = None
+    farm_max_level_limit: Optional[int] = None
 
 
 class RecruitmentToggleRequest(BaseModel):
@@ -173,6 +176,7 @@ class FarmConfigRequest(BaseModel):
     max_delay_per_attack_ms: Optional[int] = None
     avoid_concurrent_attacks: Optional[bool] = None
     stop_on_losses: Optional[bool] = None
+    target_cooldown_minutes: Optional[float] = None
     custom_targets: Optional[List[Any]] = None
 
 
@@ -1084,6 +1088,9 @@ def create_api_router(context: EngineContext, token_verifier: TokenVerifier) -> 
             enabled=payload.enabled,
             interval_seconds=payload.interval_seconds,
             max_queue=payload.max_queue,
+            auto_farm_priority=payload.auto_farm_priority,
+            farm_threshold_pop=payload.farm_threshold_pop,
+            farm_max_level_limit=payload.farm_max_level_limit,
         )
         return ActionResponse(status=res["status"], message=res.get("message"))
 
