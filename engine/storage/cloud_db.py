@@ -47,7 +47,7 @@ logger = logging.getLogger("TribalWarsBot.CloudDB")
 
 # URL de Conexão Padrão (Cloud SQL PostgreSQL / Neon)
 DEFAULT_POSTGRES_URL = (
-    "postgresql://neondb_owner:npg_2xBFH8GqKVby@ep-lingering-wind-b1c8raew-pooler.c-5.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+
 )
 
 
